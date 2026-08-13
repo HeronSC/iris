@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "examples": [
+    {
+      "utterance": "hello, can you stop indexing D:\\HenryZuraw\\Documents",
+      "intent": "config_remove_document_root",
+      "arguments": {
+        "root": "D:\\HenryZuraw\\Documents"
+      },
+      "source": "successful:llm",
+      "corrected_from": null,
+      "updated_at": "2026-07-29T01:52:39+00:00"
+    },
+    {
+      "utterance": "Iris: Thanks for confirming the action! Could you provide more details about what you were confirming? That way, I can assist you with the next steps or any related tasks. You: hello, can you stop indexing D:\\HenryZuraw\\Documents",
+      "intent": "config_remove_document_root",
+      "arguments": {
+        "root": "D:\\HenryZuraw\\Documents"
+      },
+      "source": "successful:llm",
+      "corrected_from": null,
+      "updated_at": "2026-07-29T01:55:16+00:00"
+    },
+    {
+      "utterance": "can you stop indexing D:\\HenryZuraw\\Documents",
+      "intent": "config_remove_document_root",
+      "arguments": {
+        "root": "D:\\HenryZuraw\\Documents"
+      },
+      "source": "successful:llm",
+      "corrected_from": null,
+      "updated_at": "2026-07-29T01:56:33+00:00"
+    },
+    {
+      "utterance": "please stop indexing this folder D:\\HenryZuraw\\Documents",
+      "intent": "config_remove_document_root",
+      "arguments": {
+        "root": "D:\\HenryZuraw\\Documents"
+      },
+      "source": "successful:llm",
+      "corrected_from": null,
+      "updated_at": "2026-07-29T02:10:14+00:00"
+    },
+    {
+      "utterance": "can you start indexing D:\\HenryZuraw\\Documents",
+      "intent": "scan_document_root",
+      "arguments": {
+        "root": "D:\\HenryZuraw\\Documents"
+      },
+      "source": "successful:heuristic",
+      "corrected_from": null,
+      "updated_at": "2026-07-29T02:18:31+00:00"
+    },
+    {
+      "utterance": "can you remove the surface laptops from this recommendation?",
+      "intent": "config_remove_web_shortcut",
+      "arguments": {
+        "name": "Surface laptops"
+      },
+      "source": "successful:llm",
+      "corrected_from": null,
+      "updated_at": "2026-08-03T15:04:02+00:00"
+    },
+    {
+      "utterance": "I see you are index scanning some folders that do not need to be scanned.  for example /index scan is running... E:\\VS\\DirtClassifieds\\Mobile\\android\\.gradle-user-home-fresh\\caches\\8.14.3\\transforms\\0297c5520057fc6dd5aa214c6ca8b35e\\transformed\\appcompat-1.7.0\\res\\values-lt\n\nI don't think this .gradle or any folder that starts with . needs to be scanned.  can we put an ignore in there so you skip these?",
+      "intent": "scan_document_root",
+      "arguments": {
+        "root": "E:\\VS\\DirtClassifieds\\Mobile\\android\\.gradle-user-home-fresh\\caches\\8.14.3\\transforms\\0297c5520057fc6dd5aa214c6ca8b35e\\transformed\\appcompat-1.7.0\\res\\values-lt"
+      },
+      "source": "successful:heuristic",
+      "corrected_from": null,
+      "updated_at": "2026-08-05T17:38:41+00:00"
+    }
+  ]
+}

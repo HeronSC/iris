@@ -1,0 +1,182 @@
+{
+  "assistant_name": "Iris",
+  "memory_path": "E:\\AI\\Iris\\Data\\Memory",
+  "session_path": "E:\\AI\\Iris\\Data\\Sessions",
+  "proposal_path": "E:\\AI\\Iris\\Data\\Proposals",
+  "audit_path": "E:\\AI\\Iris\\Data\\Audit",
+  "model": "qwen3:8b",
+  "image_server": "http://localhost:8188",
+  "llm_server": "http://localhost:11434",
+  "llm_timeout_seconds": 180,
+  "conversation": {
+    "recent_message_limit": 16,
+    "summary_trigger_message_count": 24,
+    "auto_save": true,
+    "resume_last_session": false
+  },
+  "memory_updates": {
+    "require_approval": true,
+    "scan_on_session_close": true
+  },
+  "general_knowledge": {
+    "timeout_seconds": 8.0,
+    "user_agent": "Iris/1.0",
+    "enabled": {
+      "weather": true,
+      "news": true,
+      "stocks": true,
+      "calculator": true,
+      "conversion": true,
+      "time": true,
+      "lookup": true
+    }
+  },
+  "applications": {
+    "vscode": {
+      "display_name": "Visual Studio Code",
+      "executable": "C:\\Users\\hzura.PLUTO\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+      "aliases": [
+        "vs code",
+        "code",
+        "vscode"
+      ]
+    },
+    "rdp": {
+      "display_name": "Remote Desktop",
+      "executable": "C:\\Windows\\System32\\mstsc.exe",
+      "aliases": [
+        "remote desktop",
+        "rdp"
+      ]
+    }
+  },
+  "web_shortcuts": {
+    "azure-portal": "https://portal.azure.com"
+  },
+  "action_audit_path": "E:\\AI\\Iris\\Data\\Audit",
+  "document_search": {
+    "directory_groups": {
+      "coding": [
+        ".git",
+        ".venv",
+        "node_modules",
+        "__pycache__",
+        "obj",
+        "build",
+        "intermediates",
+        "cxx",
+        "site-packages",
+        "bin",
+        "venv",
+        "env",
+        "symphony",
+        "backup",
+        "laravel",
+        "vendor"
+      ],
+      "backups": [
+        "Backup",
+        "Plex Backup"
+      ]
+    },
+    "roots": [
+      {
+        "path": "E:\\AI\\Iris",
+        "excluded_directory_groups": [
+          "coding"
+        ],
+        "excluded_directories": [],
+        "excluded_directory_prefixes": [
+          "__"
+        ],
+        "excluded_relative_paths": []
+      },
+      {
+        "path": "E:\\Reallusion\\My Files",
+        "excluded_directory_groups": [
+          "coding"
+        ],
+        "excluded_directories": [],
+        "excluded_directory_prefixes": [
+          "__"
+        ],
+        "excluded_relative_paths": []
+      },
+      {
+        "path": "E:\\VS",
+        "excluded_directory_groups": [
+          "coding"
+        ],
+        "excluded_directories": [],
+        "excluded_directory_prefixes": [
+          "__"
+        ],
+        "excluded_relative_paths": []
+      },
+      {
+        "path": "D:\\HenryZuraw\\Documents",
+        "excluded_directory_groups": [
+          "backups",
+          "coding"
+        ],
+        "excluded_directories": [
+          "Visual Studio Code",
+          "Visual Studio",
+          "GIGABYTE"
+        ],
+        "excluded_directory_prefixes": [],
+        "excluded_relative_paths": []
+      }
+    ],
+    "excluded_directories": [
+      ".git",
+      ".venv",
+      "node_modules",
+      "__pycache__"
+    ],
+    "excluded_directory_prefixes": [
+      ".",
+      "__",
+      "values-"
+    ],
+    "supported_extensions": [
+      ".docx",
+      ".xlsx",
+      ".xls",
+      ".pdf",
+      ".txt",
+      ".md",
+      ".csv",
+      ".py",
+      ".cs",
+      ".al",
+      ".js",
+      ".ts",
+      ".tsx",
+      ".jsx",
+      ".json",
+      ".yml",
+      ".yaml",
+      ".xml",
+      ".html",
+      ".htm",
+      ".css",
+      ".scss",
+      ".sql",
+      ".ps1",
+      ".psm1",
+      ".psd1",
+      ".bat",
+      ".cmd",
+      ".sh",
+      ".ini",
+      ".cfg",
+      ".conf",
+      ".toml",
+      ".csproj",
+      ".sln"
+    ],
+    "max_file_size_mb": 100,
+    "catalog_path": "E:\\AI\\Iris\\Data\\Index\\documents.db"
+  }
+}
