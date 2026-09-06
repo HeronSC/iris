@@ -5,6 +5,7 @@ import logging
 import os
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,23 @@ def _platform_start_file(path: str) -> None:
     raise OSError("open operation is not supported on this platform")
 
 
+@dataclass(frozen=True)
+class CoordinatorTurn:
+    """Everything one conversational turn produces.
+
+    Callers previously had to read the coordinator's private attributes to get
+    at anything other than the response text; this is that contract, made
+    explicit.
+    """
+
+    text: str
+    general_knowledge: dict[str, Any] | None = None
+    file_operations: dict[str, Any] | None = None
+    recalled_context: dict[str, Any] | None = None
+    topic_id: str | None = None
+    topic_title: str | None = None
+
+
 class AssistantCoordinator:
     def __init__(
         self,
@@ -57,6 +75,8 @@ class AssistantCoordinator:
         self._last_recalled_public_context: dict[str, Any] | None = None
         self._last_general_knowledge_result: dict[str, Any] | None = None
         self._last_file_operations_payload: dict[str, Any] | None = None
+        self._active_topic_id: str | None = None
+        self._active_topic_title: str | None = None
         knowledge_config = self.config.get("general_knowledge", {}) if isinstance(self.config, dict) else {}
         self.general_knowledge_router = GeneralKnowledgeRouter(knowledge_config)
         max_iterations = 2
@@ -78,6 +98,21 @@ class AssistantCoordinator:
         self.trace_logger = RequestTraceLogger(audit_path / "request_trace.jsonl" if isinstance(audit_path, Path) else None)
 
     def respond(self, user_message: str, project_id: str | None = None) -> str:
+        """Answer as plain text. Use respond_detailed for the full turn."""
+        return self.respond_detailed(user_message, project_id=project_id).text
+
+    def respond_detailed(self, user_message: str, project_id: str | None = None) -> CoordinatorTurn:
+        text = self._generate_response(user_message, project_id=project_id)
+        return CoordinatorTurn(
+            text=text,
+            general_knowledge=self._last_general_knowledge_result,
+            file_operations=self._last_file_operations_payload,
+            recalled_context=self._last_recalled_public_context,
+            topic_id=self._active_topic_id,
+            topic_title=self._active_topic_title,
+        )
+
+    def _generate_response(self, user_message: str, project_id: str | None = None) -> str:
         session = self._resolve_session()
         self._last_recalled_public_context = None
         self._last_general_knowledge_result = None

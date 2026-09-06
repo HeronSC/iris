@@ -34,7 +34,7 @@ from core.application.contracts import (
     TopicContext,
 )
 from core.assistant.action_commands import ActionCommandHandler
-from core.assistant.coordinator import AssistantCoordinator
+from core.assistant.coordinator import AssistantCoordinator, CoordinatorTurn
 from core.assistant.command_handler import CommandHandler
 from core.assistant.conversation_synonyms import ConversationSynonymStore
 from core.assistant.index_commands import IndexCommandHandler
@@ -118,6 +118,7 @@ class IrisApplication:
         self.initialized = False
         self.startup_messages: list[IrisMessage] = []
         self.topic_memory_service: TopicMemoryService | None = None
+        self._last_coordinator_turn: CoordinatorTurn | None = None
 
         # Safe defaults for partial test harnesses that bypass initialize().
         self.topic_handler: CommandHandler = _NoopCommandHandler()
@@ -610,12 +611,14 @@ class IrisApplication:
         return intent in {"find_files", "read_file", "count_files", "select_pending_result"}
 
     def _respond_with_coordinator(self, stripped: str, cancel_event: threading.Event | None) -> IrisResponse:
-        response_text = self.coordinator.respond(stripped, project_id=self.state.get("active_project_id"))
+        turn = self.coordinator.respond_detailed(stripped, project_id=self.state.get("active_project_id"))
+        self._last_coordinator_turn = turn
+        response_text = turn.text
         self._detail_type_override = "markdown"
         self._detail_content_override = response_text
         self._detail_title_override = self._derive_detail_title(stripped)
         self._detail_metadata_override = {"render_operation": "replace_section"}
-        general_knowledge = getattr(self.coordinator, "_last_general_knowledge_result", None)
+        general_knowledge = turn.general_knowledge
         if isinstance(general_knowledge, dict) and general_knowledge:
             detail_type = str(general_knowledge.get("detail_type", "")).strip()
             detail_title = str(general_knowledge.get("detail_title", "")).strip()
@@ -631,7 +634,7 @@ class IrisApplication:
             facts_detail = self._render_capability_details_from_facts(self._detail_metadata_override)
             if facts_detail:
                 self._detail_content_override = facts_detail
-        file_operations_payload = getattr(self.coordinator, "_last_file_operations_payload", None)
+        file_operations_payload = turn.file_operations
         if isinstance(file_operations_payload, dict) and file_operations_payload:
             self._detail_metadata_override["file_operations"] = file_operations_payload
             if self._detail_type_override in {None, "text", "markdown"}:
@@ -1117,7 +1120,8 @@ class IrisApplication:
     def _details_canonical_topic_state(self, *, status: IrisStatus, response_type: str) -> DetailContent | None:
         if status != IrisStatus.COMPLETE or response_type not in {"text", "markdown"}:
             return None
-        recalled = getattr(self.coordinator, "_last_recalled_public_context", None)
+        turn = self._last_coordinator_turn
+        recalled = turn.recalled_context if turn is not None else None
         if not isinstance(recalled, dict):
             return None
         current = recalled.get("current_topic")
@@ -1157,8 +1161,9 @@ class IrisApplication:
 
     def _build_topic_context(self, *, status: IrisStatus, response_type: str) -> TopicContext:
         message = self._last_user_message
-        active_topic_id = getattr(self.coordinator, "_active_topic_id", None)
-        active_topic_title = getattr(self.coordinator, "_active_topic_title", None)
+        turn = self._last_coordinator_turn
+        active_topic_id = turn.topic_id if turn is not None else None
+        active_topic_title = turn.topic_title if turn is not None else None
         if (
             status == IrisStatus.COMPLETE
             and response_type in {"text", "markdown"}

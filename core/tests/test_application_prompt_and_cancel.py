@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import tempfile
 import threading
@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from core.application.contracts import ActionSuggestion, IrisMessage, IrisStatus, MessageRole
 from core.application.service import IrisApplication
-from core.assistant.coordinator import AssistantCoordinator
+from core.assistant.coordinator import AssistantCoordinator, CoordinatorTurn
 from core.assistant.prompting import PromptRequest, PromptType
 from core.conversation.session import ConversationSession
 from core.llm.ollama_client import OllamaClientError
@@ -58,9 +58,9 @@ class _CoordinatorStub:
     def __init__(self) -> None:
         self.respond_calls = 0
 
-    def respond(self, *_args, **_kwargs) -> str:
+    def respond_detailed(self, *_args, **_kwargs) -> CoordinatorTurn:
         self.respond_calls = self.respond_calls + 1
-        return "ok"
+        return CoordinatorTurn(text="ok")
 
     def summarize_for_chat(self, **_kwargs) -> str:
         return "short conversational summary"
@@ -95,8 +95,11 @@ class _CoordinatorFactsStub:
             },
         }
 
-    def respond(self, *_args, **_kwargs) -> str:
-        return "NVDA: $102.00 (+2.00, +2.00%)"
+    def respond_detailed(self, *_args, **_kwargs) -> CoordinatorTurn:
+        return CoordinatorTurn(
+            text="NVDA: $102.00 (+2.00, +2.00%)",
+            general_knowledge=self._last_general_knowledge_result,
+        )
 
     def summarize_for_chat(self, **_kwargs) -> str:
         return "NVDA is at $102.00, +2.00 (+2.00%) for this session."
@@ -200,9 +203,9 @@ class _CoordinatorCancelBeforeSummaryStub:
         self.cancel_event = cancel_event
         self.summary_calls = 0
 
-    def respond(self, *_args, **_kwargs) -> str:
+    def respond_detailed(self, *_args, **_kwargs) -> CoordinatorTurn:
         self.cancel_event.set()
-        return "ok"
+        return CoordinatorTurn(text="ok")
 
     def summarize_for_chat(self, **_kwargs) -> str:
         self.summary_calls += 1
