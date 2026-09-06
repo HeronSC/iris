@@ -89,7 +89,6 @@ class AssistantCoordinator:
             self.ollama_client,
             self.general_knowledge_router,
             max_iterations=max_iterations,
-            default_weather_location_resolver=self._default_weather_location,
             orchestration_context_provider=self._tracked_orchestration_context,
         )
         audit_path = self.config.get("audit_path") if isinstance(self.config, dict) else None
@@ -172,6 +171,7 @@ class AssistantCoordinator:
             )
 
         self.orchestrator.router = self.general_knowledge_router
+        self._apply_router_defaults()
         try:
             orchestration_outcome = self.orchestrator.orchestrate(
                 user_message,
@@ -1310,6 +1310,21 @@ class AssistantCoordinator:
         logger.info("memory_diagnostics=%s", json.dumps(payload, ensure_ascii=True))
         if diagnostics_enabled:
             logger.info("memory_diagnostics_text=%s", diagnostics_to_text(payload))
+
+    def _apply_router_defaults(self) -> None:
+        """Seed provider-specific defaults on the router before a turn is planned.
+
+        This lives here rather than in AssistantOrchestrator: the orchestrator
+        is capability-agnostic, and the profile that supplies the location is
+        the coordinator's to read.
+        """
+        setter = getattr(self.general_knowledge_router, "set_weather_default_location", None)
+        if not callable(setter):
+            return
+        try:
+            setter(self._default_weather_location())
+        except Exception as error:
+            logger.warning("Could not apply router defaults: %s", error)
 
     def _default_weather_location(self) -> str:
         profile_source = None

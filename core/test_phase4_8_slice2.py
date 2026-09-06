@@ -1,4 +1,4 @@
-import tempfile
+﻿import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -647,32 +647,6 @@ class PhaseFourPointEightSliceTwoTests(unittest.TestCase):
             decision_prompts = [entry[1] for entry in llm.calls if "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps." in entry[1]]
             self.assertTrue(decision_prompts)
             self.assertIn('"weather_location": "Anderson, SC"', decision_prompts[0])
-
-    def test_orchestrator_routes_weather_alert_update_queries_without_clarification(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            llm = NeedsDefaultsWeatherLLM()
-            session = ConversationSession(max_messages=4)
-            session.metadata["active_capability"] = "weather"
-            coordinator = AssistantCoordinator(
-                assistant_name="Iris",
-                memory_store=MemoryStoreStub(),
-                config={"assistant_name": "Iris", "conversation": {"recent_message_limit": 4, "summary_trigger_message_count": 24}, "audit_path": tmpdir},
-                ollama_client=llm,
-                session=session,
-            )
-            router_stub = WeatherRouterStub()
-            coordinator.general_knowledge_router = router_stub
-
-            response = coordinator.respond("Are there any weather alerts or updates for Anderson today?")
-
-            self.assertIn("Current weather", response)
-            self.assertEqual(len(router_stub.execute_request_calls), 1)
-            provider_name, payload = router_stub.execute_request_calls[0]
-            self.assertEqual(provider_name, "weather")
-            self.assertEqual(payload.get("range_name"), "today")
-            self.assertEqual(payload.get("granularity"), "hourly")
-            self.assertEqual(payload.get("focus"), "rain")
-            self.assertEqual(session.metadata.get("active_capability"), "weather")
 
     def test_weekly_weather_response_is_not_overwritten_by_current_fact_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

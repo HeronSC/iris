@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -59,13 +60,11 @@ class AssistantOrchestrator:
         router: Any,
         *,
         max_iterations: int = 2,
-        default_weather_location_resolver: callable | None = None,
-        orchestration_context_provider: callable | None = None,
+        orchestration_context_provider: Callable[[ConversationSession], dict[str, Any]] | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.router = router
         self.max_iterations = max(1, int(max_iterations))
-        self.default_weather_location_resolver = default_weather_location_resolver
         self.orchestration_context_provider = orchestration_context_provider
 
     def orchestrate(
@@ -74,8 +73,6 @@ class AssistantOrchestrator:
         *,
         session: ConversationSession,
     ) -> OrchestrationOutcome:
-        self._apply_defaults()
-
         decision = self._decide(user_message=user_message, session=session)
         if decision is None:
             return self._clarification_outcome()
@@ -150,18 +147,6 @@ class AssistantOrchestrator:
             confidence=decision.confidence,
         )
 
-    def _apply_defaults(self) -> None:
-        set_weather_default_location = getattr(self.router, "set_weather_default_location", None)
-        if not callable(set_weather_default_location):
-            return
-        if self.default_weather_location_resolver is None:
-            return
-        try:
-            location = self.default_weather_location_resolver()
-        except Exception:
-            return
-        set_weather_default_location(location)
-
     def _capability_definitions(self) -> dict[str, dict[str, Any]]:
         method = getattr(self.router, "capability_definitions", None)
         if not callable(method):
@@ -211,18 +196,6 @@ class AssistantOrchestrator:
         pending = session.pending_interaction if hasattr(session, "pending_interaction") else None
         known_defaults = tracked_context.get("known_defaults", {}) if isinstance(tracked_context.get("known_defaults", {}), dict) else {}
         known_entities = tracked_context.get("known_entities", {}) if isinstance(tracked_context.get("known_entities", {}), dict) else {}
-
-        forced_weather_args = self._forced_weather_alert_arguments(
-            user_message=user_message,
-            active_capability=active_capability,
-            known_defaults=known_defaults,
-        )
-        if forced_weather_args is not None and "weather" in capabilities:
-            return OrchestratorDecision(
-                decision_type="tool_plan",
-                planned_steps=[CapabilityCallPlanStep(capability_name="weather", arguments=forced_weather_args)],
-                confidence=1.0,
-            )
 
         capability_lines: list[str] = []
         for name, payload in capabilities.items():
@@ -298,74 +271,12 @@ class AssistantOrchestrator:
 
         return OrchestratorDecision(decision_type="tool_plan", planned_steps=steps, confidence=confidence)
 
-    def _forced_weather_alert_arguments(
-        self,
-        *,
-        user_message: str,
-        active_capability: str,
-        known_defaults: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        lowered = (user_message or "").strip().lower()
-        if not lowered:
-            return None
-
-        alert_tokens = ("alert", "alerts", "warning", "warnings", "watch", "advisory", "update", "updates")
-        weather_tokens = ("weather", "forecast", "outside", "rain", "storm", "temperature")
-        has_alert_signal = any(token in lowered for token in alert_tokens)
-        has_weather_signal = any(token in lowered for token in weather_tokens)
-
-        if not has_alert_signal:
-            return None
-        if not has_weather_signal and active_capability != "weather":
-            return None
-
-        range_name = "current"
-        start = "today"
-        granularity = "current"
-        if any(token in lowered for token in ("today", "tonight", "this afternoon", "this evening", "later today")):
-            range_name = "today"
-            start = "today"
-            granularity = "hourly"
-        elif "tomorrow" in lowered:
-            range_name = "tomorrow"
-            start = "tomorrow"
-            granularity = "daily"
-
-        location = self._extract_location_hint(user_message)
-        if not location:
-            default_location = str(known_defaults.get("weather_location", "")).strip() if isinstance(known_defaults, dict) else ""
-            location = default_location
-
-        args: dict[str, Any] = {
-            "range_name": range_name,
-            "start": start,
-            "granularity": granularity,
-            "focus": "rain",
-        }
-        if location:
-            args["location"] = location
-        return args
-
-    def _extract_location_hint(self, user_message: str) -> str:
-        text = (user_message or "").strip()
-        if not text:
-            return ""
-        match = re.search(
-            r"\b(?:in|for|at)\s+([A-Za-z][A-Za-z\s,-]{1,60}?)(?:\s+(?:today|tonight|tomorrow|this\s+afternoon|this\s+evening|now))?(?:[?.!]|$)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if match is None:
-            return ""
-        return match.group(1).strip(" .,")
-
     def _decision_system_prompt(self) -> str:
         return (
             "You are an orchestration planner for an assistant.\n"
             "Select whether the assistant should respond directly, ask a clarification, or call a capability with structured arguments.\n"
             "Do not use confidence as the primary decision rule; clarify when required arguments are missing, permissions are needed, or ambiguity is material.\n"
-            "When weather is requested and known_defaults contains weather_location, use it if the user did not specify location.\n"
-            "When weather is requested and no range is specified, default to current conditions.\n"
+            "When a required argument is missing and known_defaults holds a matching value, use it rather than asking.\n"
             "Return only JSON."
         )
 
