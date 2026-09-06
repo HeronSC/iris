@@ -619,7 +619,7 @@ class IrisApplication:
         self._detail_title_override = self._derive_detail_title(stripped)
         self._detail_metadata_override = {"render_operation": "replace_section"}
         general_knowledge = turn.general_knowledge
-        if isinstance(general_knowledge, dict) and general_knowledge:
+        if general_knowledge:
             detail_type = str(general_knowledge.get("detail_type", "")).strip()
             detail_title = str(general_knowledge.get("detail_title", "")).strip()
             detail_content = general_knowledge.get("detail_content")
@@ -635,7 +635,7 @@ class IrisApplication:
             if facts_detail:
                 self._detail_content_override = facts_detail
         file_operations_payload = turn.file_operations
-        if isinstance(file_operations_payload, dict) and file_operations_payload:
+        if file_operations_payload:
             self._detail_metadata_override["file_operations"] = file_operations_payload
             if self._detail_type_override in {None, "text", "markdown"}:
                 self._detail_type_override = "search_results"
@@ -836,7 +836,6 @@ class IrisApplication:
             status == IrisStatus.COMPLETE
             and response_type in {"text", "markdown"}
             and topic.relationship == "new_topic"
-            and isinstance(details.metadata, dict)
         ):
             details.metadata["render_operation"] = "replace_workspace"
         conversation = self._build_conversation_content_from_details(details, all_messages, response_type=response_type)
@@ -934,7 +933,7 @@ class IrisApplication:
         if self._conversation_override_message:
             return ConversationContent(message=self._conversation_override_message, suggested_actions=[])
 
-        if isinstance(details, DetailContent) and details.summary:
+        if details.summary:
             return ConversationContent(
                 message=self._summarize_conversation_message(details.summary, response_type=response_type),
                 suggested_actions=[],

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -99,8 +99,8 @@ class IrisResponse:
     response_type: str = "text"
     requires_confirmation: bool = False
     conversation: ConversationContent = field(default_factory=ConversationContent)
-    topic: TopicContext | dict[str, Any] | None = None
-    details: DetailContent | dict[str, Any] | None = None
-    confirmation: ConfirmationContent | dict[str, Any] | None = None
-    error: ErrorContent | dict[str, Any] | None = None
+    topic: TopicContext | None = None
+    details: DetailContent | None = None
+    confirmation: ConfirmationContent | None = None
+    error: ErrorContent | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

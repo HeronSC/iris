@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib.util
 import os
@@ -509,7 +509,7 @@ class UiPhase1BehaviorTests(unittest.TestCase):
                 messages=[],
                 status=IrisStatus.COMPLETE,
                 response_type="session",
-                details={"close_application": True},
+                details=DetailContent(metadata={"close_application": True}),
             )
             window._on_worker_finished(response)
             self.assertIs(window.worker, worker)

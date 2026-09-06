@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import os
@@ -611,7 +611,7 @@ class IrisWindow(QMainWindow):
     def _render_response(self, response) -> None:
         assistant_name = self.app_service.config.get("assistant_name", "Iris") if isinstance(self.app_service.config, dict) else "Iris"
         conversation = self._response_conversation(response)
-        if isinstance(conversation, ConversationContent) and conversation.message.strip():
+        if conversation is not None and conversation.message.strip():
             self._append_message(MessageRole.ASSISTANT, conversation.message.strip(), label=assistant_name)
         else:
             for message in response.messages:
@@ -874,13 +874,7 @@ class IrisWindow(QMainWindow):
         if not isinstance(actions_list, list) or not isinstance(seen, set):
             return
 
-        action_candidates: list[ActionSuggestion] = []
-        if isinstance(details, DetailContent):
-            action_candidates.extend(details.actions)
-        elif isinstance(details, dict):
-            raw_actions = details.get("actions", [])
-            if isinstance(raw_actions, list):
-                action_candidates.extend(raw_actions)
+        action_candidates: list[ActionSuggestion] = list(details.actions) if details is not None else []
 
         for action in action_candidates:
             if not isinstance(action, ActionSuggestion):
@@ -923,18 +917,13 @@ class IrisWindow(QMainWindow):
 
         self.details_actions_row.setVisible(bool(self.details_action_buttons))
 
-    def _response_topic(self, response) -> TopicContext | dict[str, object] | None:
+    def _response_topic(self, response) -> TopicContext | None:
         return getattr(response, "topic", None)
 
-    def _unpack_topic(self, topic) -> tuple[str, str, str]:
-        if isinstance(topic, TopicContext):
-            return topic.id, topic.title, topic.relationship
-        if isinstance(topic, dict):
-            topic_id = str(topic.get("id", "")).strip()
-            topic_title = str(topic.get("title", "")).strip()
-            relationship = str(topic.get("relationship", "continue")).strip() or "continue"
-            return topic_id, topic_title, relationship
-        return "", "Details", "continue"
+    def _unpack_topic(self, topic: TopicContext | None) -> tuple[str, str, str]:
+        if topic is None:
+            return "", "Details", "continue"
+        return topic.id, topic.title, topic.relationship
 
     def _render_result_cards(self, items) -> str:
         if not items:
@@ -1068,10 +1057,10 @@ class IrisWindow(QMainWindow):
         self.input_box.setPlainText(command_text)
         self.send_message()
 
-    def _response_conversation(self, response) -> ConversationContent | dict[str, object] | None:
+    def _response_conversation(self, response) -> ConversationContent | None:
         return getattr(response, "conversation", None)
 
-    def _response_details(self, response):
+    def _response_details(self, response) -> DetailContent | None:
         return getattr(response, "details", None)
 
     def _response_metadata(self, response) -> dict[str, object]:
@@ -1079,30 +1068,12 @@ class IrisWindow(QMainWindow):
         if isinstance(metadata, dict) and metadata:
             return metadata
         details = self._response_details(response)
-        if isinstance(details, DetailContent):
-            return details.metadata
-        if isinstance(details, dict):
-            meta = details.get("metadata")
-            if isinstance(meta, dict):
-                return meta
-            return dict(details)
-        return {}
+        return details.metadata if details is not None else {}
 
-    def _unpack_detail(self, detail):
-        if isinstance(detail, DetailContent):
-            return detail.type, detail.section_id, detail.title, detail.content, detail.summary, detail.items, detail.actions, detail.metadata
-        if isinstance(detail, dict):
-            return (
-                str(detail.get("type", "text")),
-                detail.get("section_id"),
-                detail.get("title"),
-                detail.get("content"),
-                detail.get("summary"),
-                detail.get("items", []),
-                detail.get("actions", []),
-                detail.get("metadata", {}),
-            )
-        return "text", None, None, None, None, [], [], {}
+    def _unpack_detail(self, detail: DetailContent | None):
+        if detail is None:
+            return "text", None, None, None, None, [], [], {}
+        return detail.type, detail.section_id, detail.title, detail.content, detail.summary, detail.items, detail.actions, detail.metadata
 
     def _format_detail_item(self, item) -> str:
         if isinstance(item, dict):

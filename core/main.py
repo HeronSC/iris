@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 import sys
@@ -19,7 +19,7 @@ def _render_console_response(response, assistant_name: str) -> None:
         print(f"{assistant_name}: {conversation.message}")
 
     details = getattr(response, "details", None)
-    if isinstance(details, DetailContent):
+    if details is not None:
         title = details.title or details.type.replace("_", " ").title()
         if title:
             print(f"Details: {title}")
@@ -27,13 +27,6 @@ def _render_console_response(response, assistant_name: str) -> None:
             print(details.summary)
         for item in details.items:
             print(f"- {item}")
-    elif isinstance(details, dict):
-        title = details.get("title") or details.get("type")
-        if title:
-            print(f"Details: {title}")
-        summary = details.get("summary")
-        if summary:
-            print(summary)
 
     for role, text in [(message.role, message.text) for message in getattr(response, "messages", [])]:
         if role == MessageRole.USER:
