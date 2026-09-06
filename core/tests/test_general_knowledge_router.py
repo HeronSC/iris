@@ -4,6 +4,7 @@ import unittest
 
 from core.assistant.general_knowledge_router import (
     CalculatorProvider,
+    CapabilityDefinition,
     ConversionProvider,
     GeneralKnowledgeRouter,
     KnowledgeProvider,
@@ -35,6 +36,69 @@ class _NoResultProvider(KnowledgeProvider):
 
     def execute(self, text: str) -> str:
         raise ProviderExecutionError("no result", unavailable=False)
+
+
+class _CustomProvider(KnowledgeProvider):
+    """A provider added without touching the router, which is the point of the hooks."""
+
+    name = "custom"
+
+    def can_handle(self, text: str) -> bool:
+        return False
+
+    def definition(self) -> CapabilityDefinition:
+        return CapabilityDefinition(
+            name=self.name,
+            description="A capability the router has never heard of.",
+            request_schema={"thing": "string"},
+        )
+
+    def parse_request(self, payload: dict[str, object]) -> dict[str, object] | None:
+        thing = str(payload.get("thing", "")).strip()
+        return {"thing": thing} if thing else None
+
+
+class CapabilityRegistrationTests(unittest.TestCase):
+    def test_definitions_come_from_the_registered_providers(self) -> None:
+        router = GeneralKnowledgeRouter({})
+
+        names = [item.name for item in router.capability_definitions()]
+
+        self.assertEqual(names, ["weather", "news", "stocks", "time", "lookup"])
+
+    def test_disabled_providers_are_not_advertised(self) -> None:
+        """A capability the router cannot execute must not be offered to the planner."""
+        router = GeneralKnowledgeRouter({"enabled": {"stocks": False, "news": False}})
+
+        names = [item.name for item in router.capability_definitions()]
+
+        self.assertNotIn("stocks", names)
+        self.assertNotIn("news", names)
+        self.assertIsNone(router.build_capability_request("stocks", {"ticker": "NVDA"}))
+
+    def test_a_new_provider_needs_no_router_changes(self) -> None:
+        router = GeneralKnowledgeRouter({})
+        router.providers.append(_CustomProvider())
+
+        names = [item.name for item in router.capability_definitions()]
+        request_obj = router.build_capability_request("custom", {"thing": "widget"})
+
+        self.assertIn("custom", names)
+        self.assertEqual(request_obj, {"thing": "widget"})
+        self.assertIsNone(router.build_capability_request("custom", {"thing": "  "}))
+
+    def test_weather_request_falls_back_to_the_default_location(self) -> None:
+        router = GeneralKnowledgeRouter({})
+        router.set_weather_default_location("Anderson, SC")
+
+        request_obj = router.build_capability_request("weather", {})
+
+        self.assertEqual(request_obj.location, "Anderson, SC")
+
+    def test_weather_request_rejects_an_unknown_range(self) -> None:
+        router = GeneralKnowledgeRouter({})
+
+        self.assertIsNone(router.build_capability_request("weather", {"range_name": "next_century"}))
 
 
 class GeneralKnowledgeRouterTests(unittest.TestCase):

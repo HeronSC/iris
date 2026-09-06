@@ -90,6 +90,14 @@ class KnowledgeProvider:
     def execute_detailed_request(self, request_obj: Any) -> GeneralKnowledgeResult | None:
         return None
 
+    def definition(self) -> CapabilityDefinition | None:
+        """Describe this capability to the orchestrator, or None to stay unadvertised."""
+        return None
+
+    def parse_request(self, payload: dict[str, Any]) -> Any | None:
+        """Turn orchestrator-supplied arguments into this provider's request object."""
+        return None
+
 
 class GeneralKnowledgeRouter:
     def __init__(self, config: dict[str, Any] | None = None) -> None:
@@ -145,86 +153,16 @@ class GeneralKnowledgeRouter:
         return None
 
     def capability_definitions(self) -> list[CapabilityDefinition]:
-        return [
-            CapabilityDefinition(
-                name="weather",
-                description="Use for live weather conditions and forecasts using a structured weather request.",
-                request_schema={
-                    "location": "string",
-                    "range_name": "current|today|tomorrow|week|next_week|weekend",
-                    "start": "today|tomorrow|next_week",
-                    "granularity": "current|hourly|daily",
-                    "period": "morning|afternoon|evening|null",
-                    "focus": "rain|null",
-                },
-            ),
-            CapabilityDefinition(
-                name="stocks",
-                description="Use for stock quotes and price lookups.",
-                request_schema={"ticker": "string"},
-            ),
-            CapabilityDefinition(
-                name="news",
-                description="Use for current news and headline requests.",
-                request_schema={"topic": "string", "max_items": "integer"},
-            ),
-            CapabilityDefinition(
-                name="time",
-                description="Use for current time requests by timezone or location alias.",
-                request_schema={"timezone": "string"},
-            ),
-            CapabilityDefinition(
-                name="lookup",
-                description="Use for quick factual lookups.",
-                request_schema={"query": "string"},
-            ),
-        ]
+        """What the orchestrator may call. Each provider describes itself."""
+        definitions = [provider.definition() for provider in self.providers]
+        return [item for item in definitions if item is not None]
 
     def build_capability_request(self, provider_name: str, payload: dict[str, Any]) -> Any | None:
         if not isinstance(payload, dict):
             return None
-        if provider_name == "weather":
-            location = str(payload.get("location", "")).strip()
-            if not location:
-                location = self._weather_default_location
-            range_name = str(payload.get("range_name", "current")).strip().lower() or "current"
-            if range_name not in {"current", "today", "tomorrow", "week", "next_week", "weekend"}:
-                return None
-            start = str(payload.get("start", "today")).strip().lower() or "today"
-            granularity = str(payload.get("granularity", "current")).strip().lower() or "current"
-            period_value = payload.get("period")
-            period = str(period_value).strip().lower() if period_value is not None and str(period_value).strip() else None
-            if period not in {None, "morning", "afternoon", "evening"}:
-                return None
-            focus_value = payload.get("focus")
-            focus = str(focus_value).strip().lower() if focus_value is not None and str(focus_value).strip() else None
-            if focus not in {None, "rain"}:
-                return None
-            return WeatherRequest(
-                location=location,
-                range_name=range_name,
-                start=start,
-                granularity=granularity,
-                period=period,
-                focus=focus,
-            )
-        if provider_name == "stocks":
-            ticker = str(payload.get("ticker", "")).strip().upper()
-            return StockQuoteRequest(ticker=ticker) if ticker else None
-        if provider_name == "news":
-            topic = str(payload.get("topic", "")).strip() or "general"
-            max_items_raw = payload.get("max_items", 5)
-            try:
-                max_items = max(1, min(10, int(max_items_raw)))
-            except (TypeError, ValueError):
-                max_items = 5
-            return NewsRequest(topic=topic, max_items=max_items)
-        if provider_name == "time":
-            timezone = str(payload.get("timezone", "")).strip()
-            return TimeRequest(timezone=timezone) if timezone else None
-        if provider_name == "lookup":
-            query = str(payload.get("query", "")).strip()
-            return LookupRequest(query=query) if query else None
+        for provider in self.providers:
+            if provider.name == provider_name:
+                return provider.parse_request(payload)
         return None
 
     def set_active_provider(self, provider_name: str | None) -> None:
@@ -440,6 +378,44 @@ class WeatherProvider(KnowledgeProvider):
 
     def set_default_location(self, location: str | None) -> None:
         self._default_location = str(location or "").strip()
+
+    def definition(self) -> CapabilityDefinition:
+        return CapabilityDefinition(
+            name=self.name,
+            description="Use for live weather conditions and forecasts using a structured weather request.",
+            request_schema={
+                "location": "string",
+                "range_name": "current|today|tomorrow|week|next_week|weekend",
+                "start": "today|tomorrow|next_week",
+                "granularity": "current|hourly|daily",
+                "period": "morning|afternoon|evening|null",
+                "focus": "rain|null",
+            },
+        )
+
+    def parse_request(self, payload: dict[str, Any]) -> WeatherRequest | None:
+        location = str(payload.get("location", "")).strip() or self._default_location
+        range_name = str(payload.get("range_name", "current")).strip().lower() or "current"
+        if range_name not in {"current", "today", "tomorrow", "week", "next_week", "weekend"}:
+            return None
+        start = str(payload.get("start", "today")).strip().lower() or "today"
+        granularity = str(payload.get("granularity", "current")).strip().lower() or "current"
+        period_value = payload.get("period")
+        period = str(period_value).strip().lower() if period_value is not None and str(period_value).strip() else None
+        if period not in {None, "morning", "afternoon", "evening"}:
+            return None
+        focus_value = payload.get("focus")
+        focus = str(focus_value).strip().lower() if focus_value is not None and str(focus_value).strip() else None
+        if focus not in {None, "rain"}:
+            return None
+        return WeatherRequest(
+            location=location,
+            range_name=range_name,
+            start=start,
+            granularity=granularity,
+            period=period,
+            focus=focus,
+        )
 
     def can_handle(self, text: str) -> bool:
         lowered = text.lower()
@@ -1011,6 +987,21 @@ class NewsProvider(KnowledgeProvider):
     def __init__(self, fetch_text: Callable[[str], str]) -> None:
         self.fetch_text = fetch_text
 
+    def definition(self) -> CapabilityDefinition:
+        return CapabilityDefinition(
+            name=self.name,
+            description="Use for current news and headline requests.",
+            request_schema={"topic": "string", "max_items": "integer"},
+        )
+
+    def parse_request(self, payload: dict[str, Any]) -> NewsRequest:
+        topic = str(payload.get("topic", "")).strip() or "general"
+        try:
+            max_items = max(1, min(10, int(payload.get("max_items", 5))))
+        except (TypeError, ValueError):
+            max_items = 5
+        return NewsRequest(topic=topic, max_items=max_items)
+
     def can_handle(self, text: str) -> bool:
         lowered = text.lower()
         return "news" in lowered or "headline" in lowered or "headlines" in lowered
@@ -1091,6 +1082,17 @@ class StockProvider(KnowledgeProvider):
             "amazon": "AMZN",
             "meta": "META",
         }
+
+    def definition(self) -> CapabilityDefinition:
+        return CapabilityDefinition(
+            name=self.name,
+            description="Use for stock quotes and price lookups.",
+            request_schema={"ticker": "string"},
+        )
+
+    def parse_request(self, payload: dict[str, Any]) -> StockQuoteRequest | None:
+        ticker = str(payload.get("ticker", "")).strip().upper()
+        return StockQuoteRequest(ticker=ticker) if ticker else None
 
     def can_handle(self, text: str) -> bool:
         lowered = text.lower().strip()
@@ -1359,6 +1361,17 @@ class TimeProvider(KnowledgeProvider):
             "utc": "Etc/UTC",
         }
 
+    def definition(self) -> CapabilityDefinition:
+        return CapabilityDefinition(
+            name=self.name,
+            description="Use for current time requests by timezone or location alias.",
+            request_schema={"timezone": "string"},
+        )
+
+    def parse_request(self, payload: dict[str, Any]) -> TimeRequest | None:
+        timezone = str(payload.get("timezone", "")).strip()
+        return TimeRequest(timezone=timezone) if timezone else None
+
     def can_handle(self, text: str) -> bool:
         lowered = text.lower()
         return "time in" in lowered or "current time" in lowered
@@ -1432,6 +1445,17 @@ class LookupProvider(KnowledgeProvider):
 
     def __init__(self, fetch_json: Callable[[str], dict[str, Any]]) -> None:
         self.fetch_json = fetch_json
+
+    def definition(self) -> CapabilityDefinition:
+        return CapabilityDefinition(
+            name=self.name,
+            description="Use for quick factual lookups.",
+            request_schema={"query": "string"},
+        )
+
+    def parse_request(self, payload: dict[str, Any]) -> LookupRequest | None:
+        query = str(payload.get("query", "")).strip()
+        return LookupRequest(query=query) if query else None
 
     def can_handle(self, text: str) -> bool:
         lowered = text.lower().strip()
