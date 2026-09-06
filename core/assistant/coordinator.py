@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -119,39 +120,33 @@ class AssistantCoordinator:
                         response = "No approved file roots are configured."
                     else:
                         response = f"The file could not be read: {resolved} (not in an approved root)"
-                    trace_payload.update(
-                        {
-                            "selected_tool": "read_file",
-                            "tool_arguments": {"path": str(resolved)},
-                            "tool_result": {"status": "error", "path": str(resolved), "reason": "not_authorized"},
-                            "final_response": response,
-                        }
+                    return self._trace_and_persist(
+                        trace_payload,
+                        user_message,
+                        response,
+                        selected_tool="read_file",
+                        tool_arguments={"path": str(resolved)},
+                        tool_result={"status": "error", "path": str(resolved), "reason": "not_authorized"},
                     )
-                    self.trace_logger.log(trace_payload)
-                    return self._persist_and_return(user_message, response)
                 if resolved.exists() and resolved.is_file():
                     response = self._summarize_file(resolved, user_message, project_id)
-                    trace_payload.update(
-                        {
-                            "selected_tool": "read_file",
-                            "tool_arguments": {"path": str(resolved)},
-                            "tool_result": {"status": "success", "path": str(resolved)},
-                            "final_response": response,
-                        }
+                    return self._trace_and_persist(
+                        trace_payload,
+                        user_message,
+                        response,
+                        selected_tool="read_file",
+                        tool_arguments={"path": str(resolved)},
+                        tool_result={"status": "success", "path": str(resolved)},
                     )
-                    self.trace_logger.log(trace_payload)
-                    return self._persist_and_return(user_message, response)
                 response = f"The file could not be read: {resolved}"
-                trace_payload.update(
-                    {
-                        "selected_tool": "read_file",
-                        "tool_arguments": {"path": str(resolved)},
-                        "tool_result": {"status": "error", "path": str(resolved)},
-                        "final_response": response,
-                    }
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="read_file",
+                    tool_arguments={"path": str(resolved)},
+                    tool_result={"status": "error", "path": str(resolved)},
                 )
-                self.trace_logger.log(trace_payload)
-                return self._persist_and_return(user_message, response)
 
         if request.requires_tool and request.intent == "count_files":
             root_path = str(request.target.get("path", "")).strip()
@@ -168,40 +163,34 @@ class AssistantCoordinator:
                         response = f"The root could not be scanned: {resolved_root} (no approved roots are configured)"
                     else:
                         response = f"The root could not be scanned: {resolved_root} (not in an approved root)"
-                    trace_payload.update(
-                        {
-                            "selected_tool": "count_files",
-                            "tool_arguments": {"path": str(resolved_root), "extension": extension},
-                            "tool_result": {"status": "error", "path": str(resolved_root), "reason": "not_authorized"},
-                            "final_response": response,
-                        }
+                    return self._trace_and_persist(
+                        trace_payload,
+                        user_message,
+                        response,
+                        selected_tool="count_files",
+                        tool_arguments={"path": str(resolved_root), "extension": extension},
+                        tool_result={"status": "error", "path": str(resolved_root), "reason": "not_authorized"},
                     )
-                    self.trace_logger.log(trace_payload)
-                    return self._persist_and_return(user_message, response)
                 if not resolved_root.exists():
                     response = f"The root could not be scanned: {resolved_root} (does not exist)"
-                    trace_payload.update(
-                        {
-                            "selected_tool": "count_files",
-                            "tool_arguments": {"path": str(resolved_root), "extension": extension},
-                            "tool_result": {"status": "error", "path": str(resolved_root), "reason": "missing_root"},
-                            "final_response": response,
-                        }
+                    return self._trace_and_persist(
+                        trace_payload,
+                        user_message,
+                        response,
+                        selected_tool="count_files",
+                        tool_arguments={"path": str(resolved_root), "extension": extension},
+                        tool_result={"status": "error", "path": str(resolved_root), "reason": "missing_root"},
                     )
-                    self.trace_logger.log(trace_payload)
-                    return self._persist_and_return(user_message, response)
                 if not resolved_root.is_dir():
                     response = f"The root could not be scanned: {resolved_root} (not a directory)"
-                    trace_payload.update(
-                        {
-                            "selected_tool": "count_files",
-                            "tool_arguments": {"path": str(resolved_root), "extension": extension},
-                            "tool_result": {"status": "error", "path": str(resolved_root), "reason": "not_a_directory"},
-                            "final_response": response,
-                        }
+                    return self._trace_and_persist(
+                        trace_payload,
+                        user_message,
+                        response,
+                        selected_tool="count_files",
+                        tool_arguments={"path": str(resolved_root), "extension": extension},
+                        tool_result={"status": "error", "path": str(resolved_root), "reason": "not_a_directory"},
                     )
-                    self.trace_logger.log(trace_payload)
-                    return self._persist_and_return(user_message, response)
                 matches = []
                 walk_errors: list[str] = []
                 try:
@@ -223,35 +212,31 @@ class AssistantCoordinator:
                                 matches.append(os.path.join(current_root, name))
                 except PermissionError as error:
                     response = f"The root could not be scanned: {resolved_root} ({error})"
-                    trace_payload.update(
-                        {
-                            "selected_tool": "count_files",
-                            "tool_arguments": {"path": str(resolved_root), "extension": extension},
-                            "tool_result": {"status": "error", "path": str(resolved_root), "reason": str(error)},
-                            "final_response": response,
-                        }
+                    return self._trace_and_persist(
+                        trace_payload,
+                        user_message,
+                        response,
+                        selected_tool="count_files",
+                        tool_arguments={"path": str(resolved_root), "extension": extension},
+                        tool_result={"status": "error", "path": str(resolved_root), "reason": str(error)},
                     )
-                    self.trace_logger.log(trace_payload)
-                    return self._persist_and_return(user_message, response)
                 response = f"Found {len(matches)} {extension} files under {resolved_root}"
                 if walk_errors:
                     response = response + f"; {len(walk_errors)} subdirectory access error(s) were encountered."
-                trace_payload.update(
-                    {
-                        "selected_tool": "count_files",
-                        "tool_arguments": {"path": str(resolved_root), "extension": extension},
-                        "tool_result": {
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="count_files",
+                    tool_arguments={"path": str(resolved_root), "extension": extension},
+                    tool_result={
                             "status": "partial" if walk_errors else "success",
                             "count": len(matches),
                             "path": str(resolved_root),
                             "extension": extension,
                             "walk_errors": walk_errors,
                         },
-                        "final_response": response,
-                    }
                 )
-                self.trace_logger.log(trace_payload)
-                return self._persist_and_return(user_message, response)
 
         if request.requires_tool and request.intent == "find_files":
             query = str(request.target.get("query", "")).strip()
@@ -371,16 +356,14 @@ class AssistantCoordinator:
                         response = response + f"\nSome roots or subdirectories could not be searched: {', '.join(failed_roots)}."
                     if walk_errors_by_root:
                         response = response + "\nSome subdirectory access error(s) were encountered during the scan."
-                trace_payload.update(
-                    {
-                        "selected_tool": "find_files",
-                        "tool_arguments": {"query": query},
-                        "tool_result": {"status": status, "matches": [match["path"] for match in displayed_matches], "searched_roots": searched_roots, "failed_roots": failed_roots, "walk_errors": walk_errors_by_root},
-                        "final_response": response,
-                    }
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="find_files",
+                    tool_arguments={"query": query},
+                    tool_result={"status": status, "matches": [match["path"] for match in displayed_matches], "searched_roots": searched_roots, "failed_roots": failed_roots, "walk_errors": walk_errors_by_root},
                 )
-                self.trace_logger.log(trace_payload)
-                return self._persist_and_return(user_message, response)
 
         if request.requires_tool and request.intent == "select_pending_result":
             try:
@@ -408,29 +391,25 @@ class AssistantCoordinator:
                         response = self._open_path(Path(path_value).expanduser())
                     else:
                         response = f"Selected {path_value}"
-                    trace_payload.update(
-                        {
-                            "selected_tool": "select_pending_result",
-                            "tool_arguments": {"selection": selection},
-                            "tool_result": {"status": "success", "path": path_value},
-                            "final_response": response,
-                        }
-                    )
-                    self.trace_logger.log(trace_payload)
                     session.pending_interaction = None
-                    return self._persist_and_return(user_message, response)
+                    return self._trace_and_persist(
+                        trace_payload,
+                        user_message,
+                        response,
+                        selected_tool="select_pending_result",
+                        tool_arguments={"selection": selection},
+                        tool_result={"status": "success", "path": path_value},
+                    )
             results = pending.get("results", []) if pending is not None and isinstance(pending, dict) and isinstance(pending.get("results", []), list) else []
             response = f"Choose a number from 1 through {len(results)}." if results else "No matching selection was found."
-            trace_payload.update(
-                {
-                    "selected_tool": "select_pending_result",
-                    "tool_arguments": {"selection": selection},
-                    "tool_result": {"status": "error"},
-                    "final_response": response,
-                }
+            return self._trace_and_persist(
+                trace_payload,
+                user_message,
+                response,
+                selected_tool="select_pending_result",
+                tool_arguments={"selection": selection},
+                tool_result={"status": "error"},
             )
-            self.trace_logger.log(trace_payload)
-            return self._persist_and_return(user_message, response)
 
         if user_message.strip().lower() == "/help":
             help_text = (
@@ -448,78 +427,75 @@ class AssistantCoordinator:
                 "- /resume <session-id>\n"
                 "- /new"
             )
-            trace_payload.update(
-                {
-                    "selected_tool": "help",
-                    "tool_arguments": {},
-                    "tool_result": {"status": "success"},
-                    "final_response": help_text,
-                }
+            return self._trace_and_persist(
+                trace_payload,
+                user_message,
+                help_text,
+                selected_tool="help",
+                tool_arguments={},
+                tool_result={"status": "success"},
             )
-            self.trace_logger.log(trace_payload)
-            return self._persist_and_return(user_message, help_text)
 
         if request.requires_tool and not request.response_allowed:
             response = f"Tool routing failed: unsupported intent {request.intent}"
-            trace_payload.update(
-                {
-                    "selected_tool": None,
-                    "tool_arguments": {},
-                    "tool_result": {"status": "error", "reason": "unsupported_intent"},
-                    "final_response": response,
-                }
+            return self._trace_and_persist(
+                trace_payload,
+                user_message,
+                response,
+                selected_tool=None,
+                tool_arguments={},
+                tool_result={"status": "error", "reason": "unsupported_intent"},
             )
-            self.trace_logger.log(trace_payload)
-            return self._persist_and_return(user_message, response)
 
         self.orchestrator.router = self.general_knowledge_router
-        orchestration_outcome = self.orchestrator.orchestrate(
-            user_message,
-            session=session,
-        )
+        try:
+            orchestration_outcome = self.orchestrator.orchestrate(
+                user_message,
+                session=session,
+            )
+        except Exception as error:
+            # Orchestration runs before the turn is recorded, so preserve the
+            # user message and the error event exactly as the generation path does.
+            record = self._turn_recorder(session)
+            record("user", user_message)
+            self._record_generation_failure(record, error)
+            raise
         trace_payload["orchestration"] = orchestration_outcome.trace_payload()
 
         if orchestration_outcome.state == OrchestrationExecutionState.AWAITING_CLARIFICATION and orchestration_outcome.chat_response:
-            trace_payload.update(
-                {
-                    "selected_tool": None,
-                    "tool_arguments": {},
-                    "tool_result": {"status": "clarification_required"},
-                    "final_response": orchestration_outcome.chat_response,
-                }
+            return self._trace_and_persist(
+                trace_payload,
+                user_message,
+                orchestration_outcome.chat_response,
+                selected_tool=None,
+                tool_arguments={},
+                tool_result={"status": "clarification_required"},
             )
-            self.trace_logger.log(trace_payload)
-            return self._persist_and_return(user_message, orchestration_outcome.chat_response)
 
         if orchestration_outcome.state == OrchestrationExecutionState.FAILED and orchestration_outcome.chat_response:
-            trace_payload.update(
-                {
-                    "selected_tool": None,
-                    "tool_arguments": {},
-                    "tool_result": {"status": "failed"},
-                    "final_response": orchestration_outcome.chat_response,
-                }
+            return self._trace_and_persist(
+                trace_payload,
+                user_message,
+                orchestration_outcome.chat_response,
+                selected_tool=None,
+                tool_arguments={},
+                tool_result={"status": "failed"},
             )
-            self.trace_logger.log(trace_payload)
-            return self._persist_and_return(user_message, orchestration_outcome.chat_response)
 
         if orchestration_outcome.state == OrchestrationExecutionState.PARTIALLY_COMPLETED and orchestration_outcome.chat_response:
-            trace_payload.update(
-                {
-                    "selected_tool": orchestration_outcome.selected_capability,
-                    "tool_arguments": {},
-                    "tool_result": {"status": "partial"},
-                    "final_response": orchestration_outcome.chat_response,
-                }
+            return self._trace_and_persist(
+                trace_payload,
+                user_message,
+                orchestration_outcome.chat_response,
+                selected_tool=orchestration_outcome.selected_capability,
+                tool_arguments={},
+                tool_result={"status": "partial"},
             )
-            self.trace_logger.log(trace_payload)
-            return self._persist_and_return(user_message, orchestration_outcome.chat_response)
 
         route_result = orchestration_outcome.route_result
         selected_tool: str | None = None
         tool_arguments: dict[str, Any] = {}
         tool_result: dict[str, Any] = {"status": "skipped"}
-        fallback_notice: str | None = None
         if route_result is not None:
             selected_tool = route_result.provider
             if route_result.response is not None:
@@ -535,18 +511,15 @@ class AssistantCoordinator:
                 capability_response = self._summary_from_capability_facts(for_chat_summary=False)
                 if not capability_response:
                     capability_response = str(route_result.response).strip()
-                trace_payload.update(
-                    {
-                        "selected_tool": selected_tool,
-                        "tool_arguments": tool_arguments,
-                        "tool_result": {"status": "success"},
-                        "final_response": capability_response,
-                    }
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    capability_response,
+                    selected_tool=selected_tool,
+                    tool_arguments=tool_arguments,
+                    tool_result={"status": "success"},
                 )
-                self.trace_logger.log(trace_payload)
-                return self._persist_and_return(user_message, capability_response)
             if route_result.fallback_notice is not None:
-                fallback_notice = route_result.fallback_notice
                 tool_result = {"status": "fallback", "reason": route_result.fallback_notice}
 
         active_session = self.session_manager.get_active_session() if self.session_manager is not None else None
@@ -581,65 +554,17 @@ class AssistantCoordinator:
             persistent_memory_context=persistent_memory_context,
         )
 
+        record = self._turn_recorder(session)
+        record("user", user_message)
+        try:
+            response = self.ollama_client.generate(system_prompt, llm_user_message)
+        except Exception as error:
+            self._record_generation_failure(record, error)
+            raise
+        record("assistant", response)
+        self._finalize_topic_memory(prepared_memory, user_message, response)
         if active_session is not None:
-            self.session_manager.add_message("user", user_message)
-            try:
-                response = self.ollama_client.generate(system_prompt, llm_user_message)
-            except Exception as error:
-                self.session_manager.add_message(
-                    "system",
-                    "Assistant response failed.",
-                    metadata={
-                        "error_type": error.__class__.__name__,
-                        "error": str(error),
-                    },
-                )
-                raise
-            self.session_manager.add_message("assistant", response)
-            if prepared_memory is not None and self.topic_memory_service is not None:
-                try:
-                    topic_patch = self._generate_topic_patch(prepared_memory, user_message, response)
-                    finalized_public_recall = self.topic_memory_service.finalize_assistant_turn(prepared_memory, response, topic_patch=topic_patch)
-                    if isinstance(finalized_public_recall, dict):
-                        self._last_recalled_public_context = finalized_public_recall
-                except Exception as error:
-                    logger.warning("Persistent memory finalize failed: %s", error)
-            refreshed_session = self.session_manager.get_active_session()
-            if refreshed_session is not None:
-                trigger = self._summary_trigger_message_count()
-                message_count = len(refreshed_session.get_messages())
-                last_summarized = int(refreshed_session.metadata.get("last_summarized_message_count", 0))
-                if trigger > 0 and message_count >= last_summarized + trigger:
-                    new_messages = refreshed_session.get_messages()[last_summarized:message_count]
-                    refreshed_session.summary = self.summarizer.summarize(
-                        refreshed_session.summary,
-                        new_messages,
-                    )
-                    refreshed_session.metadata["last_summarized_message_count"] = message_count
-                    self.session_manager.save_active_session()
-        else:
-            session.add_message("user", user_message)
-            try:
-                response = self.ollama_client.generate(system_prompt, llm_user_message)
-            except Exception as error:
-                session.add_message(
-                    "system",
-                    "Assistant response failed.",
-                    metadata={
-                        "error_type": error.__class__.__name__,
-                        "error": str(error),
-                    },
-                )
-                raise
-            session.add_message("assistant", response)
-            if prepared_memory is not None and self.topic_memory_service is not None:
-                try:
-                    topic_patch = self._generate_topic_patch(prepared_memory, user_message, response)
-                    finalized_public_recall = self.topic_memory_service.finalize_assistant_turn(prepared_memory, response, topic_patch=topic_patch)
-                    if isinstance(finalized_public_recall, dict):
-                        self._last_recalled_public_context = finalized_public_recall
-                except Exception as error:
-                    logger.warning("Persistent memory finalize failed: %s", error)
+            self._maybe_update_session_summary()
         trace_payload.update(
             {
                 "selected_tool": selected_tool,
@@ -1177,6 +1102,68 @@ class AssistantCoordinator:
             return target.capitalize()
         return target
 
+    def _trace_and_persist(
+        self,
+        trace_payload: dict[str, Any],
+        user_message: str,
+        response: str,
+        *,
+        selected_tool: str | None,
+        tool_arguments: dict[str, Any],
+        tool_result: dict[str, Any],
+    ) -> str:
+        """Close out a turn: finish its trace record, log it, and persist the exchange."""
+        trace_payload.update(
+            {
+                "selected_tool": selected_tool,
+                "tool_arguments": tool_arguments,
+                "tool_result": tool_result,
+                "final_response": response,
+            }
+        )
+        self.trace_logger.log(trace_payload)
+        return self._persist_and_return(user_message, response)
+
+    def _turn_recorder(self, session: ConversationSession) -> Callable[..., None]:
+        """Return the add_message callable for whichever store owns this turn."""
+        if self.session_manager is not None and self.session_manager.get_active_session() is not None:
+            return self.session_manager.add_message
+        return session.add_message
+
+    def _record_generation_failure(self, record: Callable[..., None], error: Exception) -> None:
+        record(
+            "system",
+            "Assistant response failed.",
+            {"error_type": error.__class__.__name__, "error": str(error)},
+        )
+
+    def _finalize_topic_memory(self, prepared_memory: PreparedMemoryContext | None, user_message: str, response: str) -> None:
+        if prepared_memory is None or self.topic_memory_service is None:
+            return
+        try:
+            topic_patch = self._generate_topic_patch(prepared_memory, user_message, response)
+            finalized_public_recall = self.topic_memory_service.finalize_assistant_turn(prepared_memory, response, topic_patch=topic_patch)
+            if isinstance(finalized_public_recall, dict):
+                self._last_recalled_public_context = finalized_public_recall
+        except Exception as error:
+            logger.warning("Persistent memory finalize failed: %s", error)
+
+    def _maybe_update_session_summary(self) -> None:
+        if self.session_manager is None:
+            return
+        refreshed_session = self.session_manager.get_active_session()
+        if refreshed_session is None:
+            return
+        trigger = self._summary_trigger_message_count()
+        message_count = len(refreshed_session.get_messages())
+        last_summarized = int(refreshed_session.metadata.get("last_summarized_message_count", 0))
+        if trigger <= 0 or message_count < last_summarized + trigger:
+            return
+        new_messages = refreshed_session.get_messages()[last_summarized:message_count]
+        refreshed_session.summary = self.summarizer.summarize(refreshed_session.summary, new_messages)
+        refreshed_session.metadata["last_summarized_message_count"] = message_count
+        self.session_manager.save_active_session()
+
     def _persist_and_return(self, user_message: str, content: str) -> str:
         session = self._resolve_session()
         self._persist_topic_memory_turn(session, user_message, content)
@@ -1256,79 +1243,6 @@ class AssistantCoordinator:
             "known_entities": known_entities,
         }
         return payload
-
-    def _interpret_capability_request(self, user_message: str, *, session: ConversationSession) -> tuple[str, Any] | None:
-        definitions_method = getattr(self.general_knowledge_router, "capability_definitions", None)
-        build_request_method = getattr(self.general_knowledge_router, "build_capability_request", None)
-        if not callable(definitions_method) or not callable(build_request_method):
-            return None
-
-        definitions = definitions_method()
-        if not isinstance(definitions, list) or not definitions:
-            return None
-
-        history = session.get_messages()[-4:] if hasattr(session, "get_messages") else []
-        history_lines: list[str] = []
-        for entry in history:
-            if not isinstance(entry, dict):
-                continue
-            role = str(entry.get("role", "")).strip()
-            content = str(entry.get("content", "")).strip()
-            if role and content:
-                history_lines.append(f"- {role}: {content}")
-        active_capability = str(session.metadata.get("active_capability", "")).strip() if hasattr(session, "metadata") else ""
-        default_location = self._default_weather_location()
-        definition_lines: list[str] = []
-        for item in definitions:
-            name = str(getattr(item, "name", "")).strip()
-            description = str(getattr(item, "description", "")).strip()
-            schema = getattr(item, "request_schema", {})
-            if not name:
-                continue
-            definition_lines.append(f"- {name}: {description} | schema={json.dumps(schema, ensure_ascii=True)}")
-        prompt = (
-            "Available capabilities:\n"
-            f"{chr(10).join(definition_lines) if definition_lines else '- none'}\n"
-            f"Active capability: {active_capability or 'none'}\n"
-            f"Default weather location: {default_location or 'unknown'}\n\n"
-            "Recent conversation:\n"
-            f"{chr(10).join(history_lines) if history_lines else '- none'}\n\n"
-            "User message:\n"
-            f"{user_message}\n\n"
-            "Return JSON only as an object with keys capability and request.\n"
-            "Use capability='none' when no registered capability is needed.\n"
-            "The request must match the selected capability schema exactly.\n"
-            "Do not return prose or markdown."
-        )
-
-        try:
-            payload = self.ollama_client.generate(self._capability_request_system_prompt(), prompt)
-        except (OllamaClientError, TimeoutError, OSError, ValueError) as error:
-            logger.warning("Capability request interpretation failed: %s", error)
-            return None
-
-        parsed = self._parse_json_object(payload)
-        if not isinstance(parsed, dict):
-            return None
-        capability_name = str(parsed.get("capability", "")).strip()
-        if not capability_name or capability_name == "none":
-            return None
-        request_payload = parsed.get("request")
-        if not isinstance(request_payload, dict):
-            return None
-        request_obj = build_request_method(capability_name, request_payload)
-        if request_obj is None:
-            return None
-        return capability_name, request_obj
-
-    def _capability_request_system_prompt(self) -> str:
-        return (
-            "You translate user conversation into validated capability requests.\n"
-            "Use the user message and recent conversation to interpret follow-ups.\n"
-            "Return JSON only as {\"capability\": string, \"request\": object}.\n"
-            "Do not answer the user's question directly.\n"
-            "Do not include markdown or explanations."
-        )
 
     def _resolve_session(self) -> ConversationSession:
         if self.session_manager is not None:
@@ -1433,11 +1347,6 @@ class AssistantCoordinator:
             return value != 0
         return default
 
-    def _normalize_filename(self, name: str) -> str:
-        lowered = name.lower()
-        lowered = re.sub(r"[\s._-]+", " ", lowered).strip()
-        return re.sub(r"\s+", " ", lowered)
-
     def _classify_match(self, filename: str, query: str) -> str | None:
         lowered_name = filename.lower()
         lowered_query = query.lower().strip()
@@ -1478,15 +1387,6 @@ class AssistantCoordinator:
                     return normalized
                 return set()
         return {"."}
-
-    def _is_excluded_directory(self, directory_name: str) -> bool:
-        lowered = directory_name.lower()
-        if lowered in self._excluded_directories():
-            return True
-        for prefix in self._excluded_directory_prefixes():
-            if prefix and lowered.startswith(prefix):
-                return True
-        return False
 
     def _max_file_chars(self) -> int:
         configured = self.config.get("max_file_chars") if isinstance(self.config, dict) else None

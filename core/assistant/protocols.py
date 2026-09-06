@@ -83,7 +83,3 @@ class MemoryUpdateServiceProtocol(Protocol):
     def apply_proposal(self, proposal: MemoryProposal) -> dict[str, Any]:
         ...
 
-
-class MemoryStoreProtocol(Protocol):
-    def to_dict(self) -> dict[str, Any]:
-        ...

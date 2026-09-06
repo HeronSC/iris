@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -54,8 +54,3 @@ class ApplicationConfig:
     executable: str
     aliases: list[str]
 
-
-@dataclass(frozen=True)
-class WebShortcut:
-    id: str
-    url: str

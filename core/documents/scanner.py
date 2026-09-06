@@ -21,7 +21,10 @@ class ScanResult:
     error_files: int
 
 
-_MAX_DIRECTORY_ERRORS = 1
+# Circuit breaker for a directory that fails systematically (permissions, a bad
+# mount). It must stay above 1 so that one unreadable file does not drop every
+# other file in its directory from the index.
+_MAX_DIRECTORY_ERRORS = 10
 
 
 class DocumentScanner:

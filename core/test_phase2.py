@@ -42,13 +42,13 @@ class OllamaClientTests(unittest.TestCase):
         response.__exit__ = Mock(return_value=False)
         response.read.return_value = b'{"message": {"content": "hello"}}'
 
-        with patch("iris.llm.ollama_client.request.urlopen", return_value=response):
+        with patch("core.llm.ollama_client.request.urlopen", return_value=response):
             self.assertEqual(client.generate("system", "user"), "hello")
 
     def test_generate_report_connection_failures(self) -> None:
         client = OllamaClient("http://localhost:11434", "qwen")
 
-        with patch("iris.llm.ollama_client.request.urlopen", side_effect=OSError("boom")):
+        with patch("core.llm.ollama_client.request.urlopen", side_effect=OSError("boom")):
             with self.assertRaises(OllamaClientError):
                 client.generate("system", "user")
 
@@ -59,7 +59,7 @@ class OllamaClientTests(unittest.TestCase):
         response.__exit__ = Mock(return_value=False)
         response.read.return_value = b""
 
-        with patch("iris.llm.ollama_client.request.urlopen", return_value=response):
+        with patch("core.llm.ollama_client.request.urlopen", return_value=response):
             with self.assertRaises(OllamaClientError):
                 client.generate("system", "user")
 
@@ -74,7 +74,7 @@ class OllamaClientTests(unittest.TestCase):
         )
         http_error.read = Mock(return_value=b'{"error":"model not found"}')
 
-        with patch("iris.llm.ollama_client.request.urlopen", side_effect=http_error):
+        with patch("core.llm.ollama_client.request.urlopen", side_effect=http_error):
             with self.assertRaises(OllamaClientError) as error:
                 client.generate("system", "user")
 
@@ -267,7 +267,8 @@ class CoordinatorSummaryTriggerTests(unittest.TestCase):
                 }
             )
             client = Mock(spec=LLMClient)
-            client.generate.return_value = "ok"
+            # First call is the orchestrator decision, second is the reply itself.
+            client.generate.side_effect = ['{"decision": "respond"}', "ok"]
             coordinator = AssistantCoordinator(
                 "Iris",
                 store,
@@ -283,6 +284,42 @@ class CoordinatorSummaryTriggerTests(unittest.TestCase):
             self.assertIn("Topic:", active.summary)
 
     def test_failed_generation_preserves_user_message_and_records_error_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repository = SessionRepository(tmpdir)
+            manager = SessionManager(repository)
+            manager.start_session(title="Demo")
+            store = MemoryStore(
+                {
+                    "profile": {"profile": {}},
+                    "preferences": {"preferences": []},
+                    "projects": {"projects": []},
+                    "knowledge": {"knowledge_areas": []},
+                }
+            )
+            client = Mock(spec=LLMClient)
+            # Let the orchestrator decision succeed so the failure lands on generation.
+            client.generate.side_effect = ['{"decision": "respond"}', OllamaClientError("Connection refused")]
+            coordinator = AssistantCoordinator(
+                "Iris",
+                store,
+                {"conversation": {"summary_trigger_message_count": 2}},
+                ollama_client=client,
+                session_manager=manager,
+            )
+
+            with self.assertRaises(OllamaClientError):
+                coordinator.respond("hello")
+
+            active = manager.get_active_session()
+            self.assertIsNotNone(active)
+            messages = active.get_messages()
+            self.assertEqual(messages[0]["role"], "user")
+            self.assertEqual(messages[0]["content"], "hello")
+            self.assertEqual(messages[1]["role"], "system")
+            self.assertEqual(messages[1]["content"], "Assistant response failed.")
+            self.assertEqual(messages[1].get("metadata", {}).get("error_type"), "OllamaClientError")
+
+    def test_orchestration_failure_records_user_message_and_error_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             repository = SessionRepository(tmpdir)
             manager = SessionManager(repository)
@@ -316,6 +353,7 @@ class CoordinatorSummaryTriggerTests(unittest.TestCase):
             self.assertEqual(messages[1]["role"], "system")
             self.assertEqual(messages[1]["content"], "Assistant response failed.")
             self.assertEqual(messages[1].get("metadata", {}).get("error_type"), "OllamaClientError")
+
 
 
 if __name__ == "__main__":

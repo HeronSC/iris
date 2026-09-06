@@ -791,7 +791,7 @@ class PhaseFourPointEightSliceTwoTests(unittest.TestCase):
                 session=ConversationSession(max_messages=4),
             )
 
-            with patch("iris.assistant.coordinator._platform_start_file", side_effect=RuntimeError("boom")):
+            with patch("core.assistant.coordinator._platform_start_file", side_effect=RuntimeError("boom")):
                 response = coordinator._open_path(target)
 
             self.assertIn("could not be opened", response.lower())
@@ -1021,7 +1021,7 @@ class PhaseFourPointEightSliceTwoTests(unittest.TestCase):
                     onerror(PermissionError("blocked subdirectory"))
                 return [(str(path), [], ["one.md"])]
 
-            with patch("iris.assistant.coordinator.os.walk", side_effect=fake_walk):
+            with patch("core.assistant.coordinator.os.walk", side_effect=fake_walk):
                 coordinator.respond("Count .md files in the AI folder")
 
             trace_path = Path(tmpdir) / "request_trace.jsonl"
@@ -1051,7 +1051,7 @@ class PhaseFourPointEightSliceTwoTests(unittest.TestCase):
                 session=ConversationSession(max_messages=4),
             )
 
-            with patch("iris.assistant.coordinator.os.walk", return_value=[(str(root), [], ["partial phase 5 archive.md", "phase 5 notes.md", "phase 5.md"])]):
+            with patch("core.assistant.coordinator.os.walk", return_value=[(str(root), [], ["partial phase 5 archive.md", "phase 5 notes.md", "phase 5.md"])]):
                 response = coordinator.respond("Find phase 5")
 
             self.assertIn("Showing the first 2 of 3", response)
@@ -1082,7 +1082,7 @@ class PhaseFourPointEightSliceTwoTests(unittest.TestCase):
                     onerror(PermissionError("blocked subdirectory"))
                 return [(str(path), ["blocked"], [])]
 
-            with patch("iris.assistant.coordinator.os.walk", side_effect=fake_walk):
+            with patch("core.assistant.coordinator.os.walk", side_effect=fake_walk):
                 response = coordinator.respond("Find alpha")
 
             self.assertIn("subdirectory access error", response.lower())
