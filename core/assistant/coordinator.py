@@ -14,7 +14,7 @@ from core.assistant.llm_client import LLMClient
 from core.assistant.orchestrator import AssistantOrchestrator, OrchestrationExecutionState
 from core.conversation.context_builder import ContextBuilder
 from core.conversation.persistent_memory import PreparedMemoryContext, TopicMemoryService, diagnostics_to_text
-from core.conversation.request_pipeline import RequestPipeline
+from core.conversation.request_pipeline import RequestPipeline, RequestPipelineResult
 from core.conversation.request_trace import RequestTraceLogger
 from core.conversation.session import ConversationSession
 from core.conversation.session_manager import SessionManager
@@ -140,336 +140,25 @@ class AssistantCoordinator:
             "tracked_data_context": self._tracked_orchestration_context(session),
         }
 
-        if request.requires_tool and request.intent == "read_file":
-            target_path = str(request.target.get("path", "")).strip()
-            if target_path:
-                candidate = Path(target_path).expanduser()
-                try:
-                    resolved = candidate.resolve()
-                except OSError:
-                    resolved = candidate
-                authorized = self._is_path_authorized(resolved)
-                if not authorized:
-                    roots = self._candidate_roots()
-                    if not roots:
-                        response = "No approved file roots are configured."
-                    else:
-                        response = f"The file could not be read: {resolved} (not in an approved root)"
-                    return self._trace_and_persist(
-                        trace_payload,
-                        user_message,
-                        response,
-                        selected_tool="read_file",
-                        tool_arguments={"path": str(resolved)},
-                        tool_result={"status": "error", "path": str(resolved), "reason": "not_authorized"},
-                    )
-                if resolved.exists() and resolved.is_file():
-                    response = self._summarize_file(resolved, user_message, project_id)
-                    return self._trace_and_persist(
-                        trace_payload,
-                        user_message,
-                        response,
-                        selected_tool="read_file",
-                        tool_arguments={"path": str(resolved)},
-                        tool_result={"status": "success", "path": str(resolved)},
-                    )
-                response = f"The file could not be read: {resolved}"
-                return self._trace_and_persist(
-                    trace_payload,
-                    user_message,
-                    response,
-                    selected_tool="read_file",
-                    tool_arguments={"path": str(resolved)},
-                    tool_result={"status": "error", "path": str(resolved)},
-                )
+        handled = self._handle_read_file(request, user_message, project_id, trace_payload)
+        if handled is not None:
+            return handled
 
-        if request.requires_tool and request.intent == "count_files":
-            root_path = str(request.target.get("path", "")).strip()
-            if root_path:
-                root = Path(root_path).expanduser()
-                try:
-                    resolved_root = root.resolve()
-                except OSError:
-                    resolved_root = root
-                extension = self._normalize_extension(str(request.filters.get("extension", ".md") or ".md"))
-                recursive = self._parse_bool(request.filters.get("recursive", True), default=True)
-                if not self._is_path_authorized(resolved_root):
-                    if not self._candidate_roots():
-                        response = f"The root could not be scanned: {resolved_root} (no approved roots are configured)"
-                    else:
-                        response = f"The root could not be scanned: {resolved_root} (not in an approved root)"
-                    return self._trace_and_persist(
-                        trace_payload,
-                        user_message,
-                        response,
-                        selected_tool="count_files",
-                        tool_arguments={"path": str(resolved_root), "extension": extension},
-                        tool_result={"status": "error", "path": str(resolved_root), "reason": "not_authorized"},
-                    )
-                if not resolved_root.exists():
-                    response = f"The root could not be scanned: {resolved_root} (does not exist)"
-                    return self._trace_and_persist(
-                        trace_payload,
-                        user_message,
-                        response,
-                        selected_tool="count_files",
-                        tool_arguments={"path": str(resolved_root), "extension": extension},
-                        tool_result={"status": "error", "path": str(resolved_root), "reason": "missing_root"},
-                    )
-                if not resolved_root.is_dir():
-                    response = f"The root could not be scanned: {resolved_root} (not a directory)"
-                    return self._trace_and_persist(
-                        trace_payload,
-                        user_message,
-                        response,
-                        selected_tool="count_files",
-                        tool_arguments={"path": str(resolved_root), "extension": extension},
-                        tool_result={"status": "error", "path": str(resolved_root), "reason": "not_a_directory"},
-                    )
-                matches = []
-                walk_errors: list[str] = []
-                try:
-                    for current_root, dirs, files in os.walk(resolved_root, onerror=lambda error: walk_errors.append(str(error))):
-                        if not recursive:
-                            dirs[:] = []
-                        root_config = self._document_search_root_for_path(resolved_root)
-                        dirs[:] = [
-                            item
-                            for item in dirs
-                            if root_config is None or not self._document_search_config().is_excluded_directory(
-                                root_config,
-                                Path(current_root).relative_to(resolved_root) / item,
-                                item,
-                            )
-                        ]
-                        for name in files:
-                            if self._matches_extension(name, extension):
-                                matches.append(os.path.join(current_root, name))
-                except PermissionError as error:
-                    response = f"The root could not be scanned: {resolved_root} ({error})"
-                    return self._trace_and_persist(
-                        trace_payload,
-                        user_message,
-                        response,
-                        selected_tool="count_files",
-                        tool_arguments={"path": str(resolved_root), "extension": extension},
-                        tool_result={"status": "error", "path": str(resolved_root), "reason": str(error)},
-                    )
-                response = f"Found {len(matches)} {extension} files under {resolved_root}"
-                if walk_errors:
-                    response = response + f"; {len(walk_errors)} subdirectory access error(s) were encountered."
-                return self._trace_and_persist(
-                    trace_payload,
-                    user_message,
-                    response,
-                    selected_tool="count_files",
-                    tool_arguments={"path": str(resolved_root), "extension": extension},
-                    tool_result={
-                            "status": "partial" if walk_errors else "success",
-                            "count": len(matches),
-                            "path": str(resolved_root),
-                            "extension": extension,
-                            "walk_errors": walk_errors,
-                        },
-                )
+        handled = self._handle_count_files(request, user_message, trace_payload)
+        if handled is not None:
+            return handled
 
-        if request.requires_tool and request.intent == "find_files":
-            query = str(request.target.get("query", "")).strip()
-            if query:
-                ranked_matches: list[dict[str, Any]] = []
-                configured_roots = self._candidate_roots()
-                searched_roots: list[str] = []
-                failed_roots: list[str] = []
-                walk_errors_by_root: dict[str, list[str]] = {}
-                for root in configured_roots:
-                    try:
-                        resolved_root = Path(root).expanduser().resolve()
-                    except OSError:
-                        resolved_root = Path(root).expanduser()
-                    if not self._is_path_authorized(resolved_root):
-                        failed_roots.append(str(resolved_root))
-                        continue
-                    if not resolved_root.exists():
-                        failed_roots.append(str(resolved_root))
-                        continue
-                    if not resolved_root.is_dir():
-                        failed_roots.append(str(resolved_root))
-                        continue
-                    searched_roots.append(str(resolved_root))
-                    walk_errors: list[str] = []
-                    for current_root, dirs, files in os.walk(resolved_root, onerror=lambda error: walk_errors.append(str(error))):
-                        root_config = self._document_search_root_for_path(resolved_root)
-                        dirs[:] = [
-                            item
-                            for item in dirs
-                            if root_config is None or not self._document_search_config().is_excluded_directory(
-                                root_config,
-                                Path(current_root).relative_to(resolved_root) / item,
-                                item,
-                            )
-                        ]
-                        for name in files:
-                            classification = self._classify_match(name, query)
-                            if classification is None:
-                                continue
-                            ranked_matches.append(
-                                {
-                                    "path": str(Path(current_root) / name),
-                                    "classification": classification,
-                                }
-                            )
-                    if walk_errors:
-                        walk_errors_by_root[str(resolved_root)] = walk_errors
-                classification_order = {
-                    "exact": 0,
-                    "suffix": 1,
-                    "partial": 2,
-                }
-                ranked_matches.sort(
-                    key=lambda item: (
-                        classification_order.get(item["classification"], 99),
-                        str(item["path"]).lower(),
-                    )
-                )
-                total_matches = len(ranked_matches)
-                limit = self._search_result_limit()
-                displayed_matches = ranked_matches[:limit]
-                requested_action = str(request.target.get("requested_action", "select_file"))
-                self._last_file_operations_payload = {
-                    "mode": "search",
-                    "query": query,
-                    "total_matches": total_matches,
-                    "displayed_matches": len(displayed_matches),
-                    "requested_action": requested_action,
-                    "searched_roots": searched_roots,
-                    "failed_roots": failed_roots,
-                    "walk_errors": walk_errors_by_root,
-                    "matches": [
-                        {
-                            "position": index,
-                            "path": str(match["path"]),
-                            "classification": str(match.get("classification", "partial")),
-                        }
-                        for index, match in enumerate(ranked_matches, start=1)
-                    ],
-                }
-                if ranked_matches:
-                    results = [
-                        {"position": index, "path": match["path"], "classification": match["classification"]}
-                        for index, match in enumerate(displayed_matches, start=1)
-                    ]
-                    session.pending_interaction = {
-                        "type": "file_selection",
-                        "requested_action": requested_action,
-                        "results": results,
-                    }
-                    session.last_result_set = {
-                        "query": query,
-                        "total_matches": total_matches,
-                        "all_results": self._last_file_operations_payload["matches"],
-                        "results": results,
-                        "selected_position": None,
-                        "requested_action": requested_action,
-                    }
-                    labels = [f"{item['position']}. {item['path']} ({item['classification']})" for item in results]
-                    response = "Found matching files:\n" + "\n".join(labels)
-                    if total_matches > limit:
-                        response = f"Showing the first {limit} of {total_matches} matching files.\n" + response
-                    if requested_action == "open_path":
-                        response = response + "\nReply with the number to open the selected file."
-                    else:
-                        response = response + "\nReply with the number to continue."
-                else:
-                    if searched_roots:
-                        response = f"No match was found in {len(searched_roots)} successfully searched root(s)."
-                    else:
-                        response = f"No match was found. No configured roots could be searched ({', '.join(failed_roots) if failed_roots else 'unknown'})."
-                has_partial_failure = bool(failed_roots or walk_errors_by_root)
-                status = "error" if not searched_roots else "partial" if has_partial_failure else "success"
-                if has_partial_failure:
-                    if failed_roots:
-                        response = response + f"\nSome roots or subdirectories could not be searched: {', '.join(failed_roots)}."
-                    if walk_errors_by_root:
-                        response = response + "\nSome subdirectory access error(s) were encountered during the scan."
-                return self._trace_and_persist(
-                    trace_payload,
-                    user_message,
-                    response,
-                    selected_tool="find_files",
-                    tool_arguments={"query": query},
-                    tool_result={"status": status, "matches": [match["path"] for match in displayed_matches], "searched_roots": searched_roots, "failed_roots": failed_roots, "walk_errors": walk_errors_by_root},
-                )
+        handled = self._handle_find_files(request, user_message, session, trace_payload)
+        if handled is not None:
+            return handled
 
-        if request.requires_tool and request.intent == "select_pending_result":
-            try:
-                selection = int(request.target.get("selection", 0))
-            except (TypeError, ValueError):
-                selection = 0
-            pending = session.pending_interaction if hasattr(session, "pending_interaction") else None
-            if pending is not None and isinstance(pending, dict):
-                results = pending.get("results", []) if isinstance(pending.get("results", []), list) else []
-                selected = None
-                for item in results:
-                    if isinstance(item, dict) and int(item.get("position", 0)) == selection:
-                        selected = item
-                        break
-                if selected is not None:
-                    path_value = str(selected.get("path", ""))
-                    session.last_selected_file = path_value
-                    session.last_tool_result = {"selection": selection, "path": path_value}
-                    if session.last_result_set is not None:
-                        session.last_result_set["selected_position"] = selection
-                    requested_action = str(pending.get("requested_action", "select_file"))
-                    if requested_action == "summarize_file":
-                        response = self._summarize_file(Path(path_value).expanduser(), user_message, project_id)
-                    elif requested_action == "open_path":
-                        response = self._open_path(Path(path_value).expanduser())
-                    else:
-                        response = f"Selected {path_value}"
-                    session.pending_interaction = None
-                    return self._trace_and_persist(
-                        trace_payload,
-                        user_message,
-                        response,
-                        selected_tool="select_pending_result",
-                        tool_arguments={"selection": selection},
-                        tool_result={"status": "success", "path": path_value},
-                    )
-            results = pending.get("results", []) if pending is not None and isinstance(pending, dict) and isinstance(pending.get("results", []), list) else []
-            response = f"Choose a number from 1 through {len(results)}." if results else "No matching selection was found."
-            return self._trace_and_persist(
-                trace_payload,
-                user_message,
-                response,
-                selected_tool="select_pending_result",
-                tool_arguments={"selection": selection},
-                tool_result={"status": "error"},
-            )
+        handled = self._handle_select_pending_result(request, user_message, session, project_id, trace_payload)
+        if handled is not None:
+            return handled
 
-        if user_message.strip().lower() == "/help":
-            help_text = (
-                "Available commands:\n"
-                "- /help\n"
-                "- /index status\n"
-                "- /index scan\n"
-                "- /index scan <root>\n"
-                "- /index errors\n"
-                "- /search <query>\n"
-                "- /search recent\n"
-                "- /topics\n"
-                "- /topic <name-or-id>\n"
-                "- /conversations\n"
-                "- /resume <session-id>\n"
-                "- /new"
-            )
-            return self._trace_and_persist(
-                trace_payload,
-                user_message,
-                help_text,
-                selected_tool="help",
-                tool_arguments={},
-                tool_result={"status": "success"},
-            )
+        handled = self._handle_help(user_message, trace_payload)
+        if handled is not None:
+            return handled
 
         if request.requires_tool and not request.response_allowed:
             response = f"Tool routing failed: unsupported intent {request.intent}"
@@ -1136,6 +825,386 @@ class AssistantCoordinator:
         if source.istitle():
             return target.capitalize()
         return target
+
+    def _handle_read_file(
+        self,
+        request: RequestPipelineResult,
+        user_message: str,
+        project_id: str | None,
+        trace_payload: dict[str, Any],
+    ) -> str | None:
+        """Resolve and summarize a single requested file, or None if that is not this turn."""
+        if not (request.requires_tool and request.intent == "read_file"):
+            return None
+
+        target_path = str(request.target.get("path", "")).strip()
+        if target_path:
+            candidate = Path(target_path).expanduser()
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                resolved = candidate
+            authorized = self._is_path_authorized(resolved)
+            if not authorized:
+                roots = self._candidate_roots()
+                if not roots:
+                    response = "No approved file roots are configured."
+                else:
+                    response = f"The file could not be read: {resolved} (not in an approved root)"
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="read_file",
+                    tool_arguments={"path": str(resolved)},
+                    tool_result={"status": "error", "path": str(resolved), "reason": "not_authorized"},
+                )
+            if resolved.exists() and resolved.is_file():
+                response = self._summarize_file(resolved, user_message, project_id)
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="read_file",
+                    tool_arguments={"path": str(resolved)},
+                    tool_result={"status": "success", "path": str(resolved)},
+                )
+            response = f"The file could not be read: {resolved}"
+            return self._trace_and_persist(
+                trace_payload,
+                user_message,
+                response,
+                selected_tool="read_file",
+                tool_arguments={"path": str(resolved)},
+                tool_result={"status": "error", "path": str(resolved)},
+            )
+        return None
+
+    def _handle_count_files(
+        self,
+        request: RequestPipelineResult,
+        user_message: str,
+        trace_payload: dict[str, Any],
+    ) -> str | None:
+        """Count files of one extension beneath an approved root, or None if that is not this turn."""
+        if not (request.requires_tool and request.intent == "count_files"):
+            return None
+
+        root_path = str(request.target.get("path", "")).strip()
+        if root_path:
+            root = Path(root_path).expanduser()
+            try:
+                resolved_root = root.resolve()
+            except OSError:
+                resolved_root = root
+            extension = self._normalize_extension(str(request.filters.get("extension", ".md") or ".md"))
+            recursive = self._parse_bool(request.filters.get("recursive", True), default=True)
+            if not self._is_path_authorized(resolved_root):
+                if not self._candidate_roots():
+                    response = f"The root could not be scanned: {resolved_root} (no approved roots are configured)"
+                else:
+                    response = f"The root could not be scanned: {resolved_root} (not in an approved root)"
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="count_files",
+                    tool_arguments={"path": str(resolved_root), "extension": extension},
+                    tool_result={"status": "error", "path": str(resolved_root), "reason": "not_authorized"},
+                )
+            if not resolved_root.exists():
+                response = f"The root could not be scanned: {resolved_root} (does not exist)"
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="count_files",
+                    tool_arguments={"path": str(resolved_root), "extension": extension},
+                    tool_result={"status": "error", "path": str(resolved_root), "reason": "missing_root"},
+                )
+            if not resolved_root.is_dir():
+                response = f"The root could not be scanned: {resolved_root} (not a directory)"
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="count_files",
+                    tool_arguments={"path": str(resolved_root), "extension": extension},
+                    tool_result={"status": "error", "path": str(resolved_root), "reason": "not_a_directory"},
+                )
+            matches = []
+            walk_errors: list[str] = []
+            try:
+                for current_root, dirs, files in os.walk(resolved_root, onerror=lambda error: walk_errors.append(str(error))):
+                    if not recursive:
+                        dirs[:] = []
+                    root_config = self._document_search_root_for_path(resolved_root)
+                    dirs[:] = [
+                        item
+                        for item in dirs
+                        if root_config is None or not self._document_search_config().is_excluded_directory(
+                            root_config,
+                            Path(current_root).relative_to(resolved_root) / item,
+                            item,
+                        )
+                    ]
+                    for name in files:
+                        if self._matches_extension(name, extension):
+                            matches.append(os.path.join(current_root, name))
+            except PermissionError as error:
+                response = f"The root could not be scanned: {resolved_root} ({error})"
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="count_files",
+                    tool_arguments={"path": str(resolved_root), "extension": extension},
+                    tool_result={"status": "error", "path": str(resolved_root), "reason": str(error)},
+                )
+            response = f"Found {len(matches)} {extension} files under {resolved_root}"
+            if walk_errors:
+                response = response + f"; {len(walk_errors)} subdirectory access error(s) were encountered."
+            return self._trace_and_persist(
+                trace_payload,
+                user_message,
+                response,
+                selected_tool="count_files",
+                tool_arguments={"path": str(resolved_root), "extension": extension},
+                tool_result={
+                        "status": "partial" if walk_errors else "success",
+                        "count": len(matches),
+                        "path": str(resolved_root),
+                        "extension": extension,
+                        "walk_errors": walk_errors,
+                    },
+            )
+        return None
+
+    def _handle_find_files(
+        self,
+        request: RequestPipelineResult,
+        user_message: str,
+        session: ConversationSession,
+        trace_payload: dict[str, Any],
+    ) -> str | None:
+        """Search approved roots and offer ranked matches, or None if that is not this turn."""
+        if not (request.requires_tool and request.intent == "find_files"):
+            return None
+
+        query = str(request.target.get("query", "")).strip()
+        if query:
+            ranked_matches: list[dict[str, Any]] = []
+            configured_roots = self._candidate_roots()
+            searched_roots: list[str] = []
+            failed_roots: list[str] = []
+            walk_errors_by_root: dict[str, list[str]] = {}
+            for root in configured_roots:
+                try:
+                    resolved_root = Path(root).expanduser().resolve()
+                except OSError:
+                    resolved_root = Path(root).expanduser()
+                if not self._is_path_authorized(resolved_root):
+                    failed_roots.append(str(resolved_root))
+                    continue
+                if not resolved_root.exists():
+                    failed_roots.append(str(resolved_root))
+                    continue
+                if not resolved_root.is_dir():
+                    failed_roots.append(str(resolved_root))
+                    continue
+                searched_roots.append(str(resolved_root))
+                walk_errors: list[str] = []
+                for current_root, dirs, files in os.walk(resolved_root, onerror=lambda error: walk_errors.append(str(error))):
+                    root_config = self._document_search_root_for_path(resolved_root)
+                    dirs[:] = [
+                        item
+                        for item in dirs
+                        if root_config is None or not self._document_search_config().is_excluded_directory(
+                            root_config,
+                            Path(current_root).relative_to(resolved_root) / item,
+                            item,
+                        )
+                    ]
+                    for name in files:
+                        classification = self._classify_match(name, query)
+                        if classification is None:
+                            continue
+                        ranked_matches.append(
+                            {
+                                "path": str(Path(current_root) / name),
+                                "classification": classification,
+                            }
+                        )
+                if walk_errors:
+                    walk_errors_by_root[str(resolved_root)] = walk_errors
+            classification_order = {
+                "exact": 0,
+                "suffix": 1,
+                "partial": 2,
+            }
+            ranked_matches.sort(
+                key=lambda item: (
+                    classification_order.get(item["classification"], 99),
+                    str(item["path"]).lower(),
+                )
+            )
+            total_matches = len(ranked_matches)
+            limit = self._search_result_limit()
+            displayed_matches = ranked_matches[:limit]
+            requested_action = str(request.target.get("requested_action", "select_file"))
+            self._last_file_operations_payload = {
+                "mode": "search",
+                "query": query,
+                "total_matches": total_matches,
+                "displayed_matches": len(displayed_matches),
+                "requested_action": requested_action,
+                "searched_roots": searched_roots,
+                "failed_roots": failed_roots,
+                "walk_errors": walk_errors_by_root,
+                "matches": [
+                    {
+                        "position": index,
+                        "path": str(match["path"]),
+                        "classification": str(match.get("classification", "partial")),
+                    }
+                    for index, match in enumerate(ranked_matches, start=1)
+                ],
+            }
+            if ranked_matches:
+                results = [
+                    {"position": index, "path": match["path"], "classification": match["classification"]}
+                    for index, match in enumerate(displayed_matches, start=1)
+                ]
+                session.pending_interaction = {
+                    "type": "file_selection",
+                    "requested_action": requested_action,
+                    "results": results,
+                }
+                session.last_result_set = {
+                    "query": query,
+                    "total_matches": total_matches,
+                    "all_results": self._last_file_operations_payload["matches"],
+                    "results": results,
+                    "selected_position": None,
+                    "requested_action": requested_action,
+                }
+                labels = [f"{item['position']}. {item['path']} ({item['classification']})" for item in results]
+                response = "Found matching files:\n" + "\n".join(labels)
+                if total_matches > limit:
+                    response = f"Showing the first {limit} of {total_matches} matching files.\n" + response
+                if requested_action == "open_path":
+                    response = response + "\nReply with the number to open the selected file."
+                else:
+                    response = response + "\nReply with the number to continue."
+            else:
+                if searched_roots:
+                    response = f"No match was found in {len(searched_roots)} successfully searched root(s)."
+                else:
+                    response = f"No match was found. No configured roots could be searched ({', '.join(failed_roots) if failed_roots else 'unknown'})."
+            has_partial_failure = bool(failed_roots or walk_errors_by_root)
+            status = "error" if not searched_roots else "partial" if has_partial_failure else "success"
+            if has_partial_failure:
+                if failed_roots:
+                    response = response + f"\nSome roots or subdirectories could not be searched: {', '.join(failed_roots)}."
+                if walk_errors_by_root:
+                    response = response + "\nSome subdirectory access error(s) were encountered during the scan."
+            return self._trace_and_persist(
+                trace_payload,
+                user_message,
+                response,
+                selected_tool="find_files",
+                tool_arguments={"query": query},
+                tool_result={"status": status, "matches": [match["path"] for match in displayed_matches], "searched_roots": searched_roots, "failed_roots": failed_roots, "walk_errors": walk_errors_by_root},
+            )
+        return None
+
+    def _handle_select_pending_result(
+        self,
+        request: RequestPipelineResult,
+        user_message: str,
+        session: ConversationSession,
+        project_id: str | None,
+        trace_payload: dict[str, Any],
+    ) -> str | None:
+        """Act on a numbered choice against the pending results, or None if that is not this turn."""
+        if not (request.requires_tool and request.intent == "select_pending_result"):
+            return None
+
+        try:
+            selection = int(request.target.get("selection", 0))
+        except (TypeError, ValueError):
+            selection = 0
+        pending = session.pending_interaction if hasattr(session, "pending_interaction") else None
+        if pending is not None and isinstance(pending, dict):
+            results = pending.get("results", []) if isinstance(pending.get("results", []), list) else []
+            selected = None
+            for item in results:
+                if isinstance(item, dict) and int(item.get("position", 0)) == selection:
+                    selected = item
+                    break
+            if selected is not None:
+                path_value = str(selected.get("path", ""))
+                session.last_selected_file = path_value
+                session.last_tool_result = {"selection": selection, "path": path_value}
+                if session.last_result_set is not None:
+                    session.last_result_set["selected_position"] = selection
+                requested_action = str(pending.get("requested_action", "select_file"))
+                if requested_action == "summarize_file":
+                    response = self._summarize_file(Path(path_value).expanduser(), user_message, project_id)
+                elif requested_action == "open_path":
+                    response = self._open_path(Path(path_value).expanduser())
+                else:
+                    response = f"Selected {path_value}"
+                session.pending_interaction = None
+                return self._trace_and_persist(
+                    trace_payload,
+                    user_message,
+                    response,
+                    selected_tool="select_pending_result",
+                    tool_arguments={"selection": selection},
+                    tool_result={"status": "success", "path": path_value},
+                )
+        results = pending.get("results", []) if pending is not None and isinstance(pending, dict) and isinstance(pending.get("results", []), list) else []
+        response = f"Choose a number from 1 through {len(results)}." if results else "No matching selection was found."
+        return self._trace_and_persist(
+            trace_payload,
+            user_message,
+            response,
+            selected_tool="select_pending_result",
+            tool_arguments={"selection": selection},
+            tool_result={"status": "error"},
+        )
+        return None
+
+    def _handle_help(self, user_message: str, trace_payload: dict[str, Any]) -> str | None:
+        """Answer the /help command, or None if that is not this turn."""
+        if not (user_message.strip().lower() == "/help"):
+            return None
+
+        help_text = (
+            "Available commands:\n"
+            "- /help\n"
+            "- /index status\n"
+            "- /index scan\n"
+            "- /index scan <root>\n"
+            "- /index errors\n"
+            "- /search <query>\n"
+            "- /search recent\n"
+            "- /topics\n"
+            "- /topic <name-or-id>\n"
+            "- /conversations\n"
+            "- /resume <session-id>\n"
+            "- /new"
+        )
+        return self._trace_and_persist(
+            trace_payload,
+            user_message,
+            help_text,
+            selected_tool="help",
+            tool_arguments={},
+            tool_result={"status": "success"},
+        )
+        return None
 
     def _trace_and_persist(
         self,
