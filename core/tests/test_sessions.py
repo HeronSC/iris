@@ -1,7 +1,9 @@
 ﻿import tempfile
 import unittest
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from core.conversation.session_manager import SessionManager
 from core.conversation.session_repository import SessionRepository
@@ -33,6 +35,25 @@ class SessionRepositoryTests(unittest.TestCase):
             sessions = repository.list_sessions(project_id="assistant")
             self.assertEqual(len(sessions), 1)
             self.assertEqual(sessions[0]["title"], "One")
+
+    def test_sessions_created_in_one_clock_tick_do_not_overwrite_each_other(self) -> None:
+        """Session ids must not depend on clock resolution to be unique.
+
+        The clock is pinned so every call reports the same instant, which is
+        what a coarse system clock effectively does to consecutive calls.
+        """
+        frozen = datetime(2026, 9, 6, 12, 0, 0, 123456, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repository = SessionRepository(tmpdir)
+            with patch("core.conversation.session_repository.datetime") as clock:
+                clock.now.return_value = frozen
+                created = [repository.create_session(title=f"S{index}", project_id="p") for index in range(5)]
+
+            identifiers = [session.id for session in created]
+            self.assertEqual(len(set(identifiers)), 5, f"ids collided: {identifiers}")
+            self.assertEqual(len(repository.list_sessions(project_id="p")), 5)
+            for session in created:
+                self.assertIsNotNone(repository.get_session(session.id))
 
     def test_list_sessions_returns_most_recent_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

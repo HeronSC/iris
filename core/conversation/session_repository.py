@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from core.conversation.session import ConversationSession
 
@@ -171,8 +172,20 @@ class SessionRepository:
         return self.sessions_folder / f"{session_id}.json"
 
     def _generate_session_id(self) -> str:
-        now = datetime.now(timezone.utc)
-        return now.strftime("%Y%m%d-%H%M%S") + "-" + f"{now.microsecond % 10000:04d}"
+        """A readable session id that is unique on disk.
+
+        The suffix used to be microseconds mod 10000, which gave the id only
+        10ms of resolution. The system clock is coarse enough that consecutive
+        calls routinely report the same microsecond, so two sessions created in
+        quick succession got the same id and the second silently overwrote the
+        first. The suffix is now a counter over ids already taken this second.
+        """
+        base = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        for counter in range(10000):
+            candidate = f"{base}-{counter:04d}"
+            if not self._session_path(candidate).exists():
+                return candidate
+        return f"{base}-{uuid4().hex[:8]}"
 
     def _utc_now_iso(self) -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()

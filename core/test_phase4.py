@@ -785,6 +785,77 @@ class PhaseFourTests(unittest.TestCase):
             self.assertEqual(entries[1].get("action"), "open_url")
 
 
+class SystemAdapterFailureTests(unittest.TestCase):
+    """A failed shell open must be reported as failed, not as success."""
+
+    def _indexed_file(self, root: Path) -> tuple[ActionExecutor, str]:
+        """An executor wired to a real SystemAdapter, plus the file_id of one indexed file."""
+        docs = root / "docs"
+        docs.mkdir(parents=True, exist_ok=True)
+        (docs / "note.txt").write_text("hello", encoding="utf-8")
+
+        catalog = DocumentCatalog(SQLiteDatabase(root / "index" / "documents.db"))
+        DocumentScanner(
+            config=DocumentSearchConfig(
+                roots=[docs],
+                excluded_directories=set(),
+                supported_extensions={".txt"},
+                max_file_size_mb=10,
+            ),
+            catalog=catalog,
+            extractors=[TextExtractor()],
+        ).scan()
+        record = catalog.get_by_path(str((docs / "note.txt").resolve()))
+        assert record is not None
+
+        registry = ActionRegistry()
+        registry.register(OpenFileAction())
+        executor = ActionExecutor(
+            registry=registry,
+            policy=ActionPolicy(),
+            audit=ActionAuditLogger(root / "audit"),
+            context=ActionExecutionContext(
+                catalog=catalog,
+                allowed_roots=[docs],
+                applications={},
+                app_alias_map={},
+                web_shortcuts={},
+                system=SystemAdapter(),
+            ),
+        )
+        return executor, record.id
+
+    def test_open_file_reports_failure_when_the_shell_call_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            executor, file_id = self._indexed_file(root)
+
+            with patch("core.actions.executor.os.startfile", create=True, side_effect=OSError("no association")):
+                result = executor.execute(ActionRequest(action="open_file", arguments={"file_id": file_id}))
+
+            self.assertEqual(result.status, "failed")
+            self.assertIn("no association", result.message)
+
+    def test_open_file_reports_success_when_the_shell_call_works(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            executor, file_id = self._indexed_file(root)
+
+            opened: list[str] = []
+            with patch("core.actions.executor.os.startfile", create=True, side_effect=opened.append):
+                result = executor.execute(ActionRequest(action="open_file", arguments={"file_id": file_id}))
+
+            self.assertEqual(result.status, "success")
+            self.assertEqual(opened, [str((root / "docs" / "note.txt").resolve())])
+
+    def test_start_file_raises_where_the_platform_has_no_shell_open(self) -> None:
+        adapter = SystemAdapter()
+        with patch("core.actions.executor.os") as fake_os:
+            del fake_os.startfile
+            with self.assertRaises(OSError):
+                adapter.open_file("/tmp/anything")
+
+
 if __name__ == "__main__":
     unittest.main()
 

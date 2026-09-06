@@ -17,17 +17,24 @@ from core.documents.catalog import DocumentCatalog
 
 
 class SystemAdapter:
+    def _start_file(self, path: str) -> None:
+        """Hand a path to the shell.
+
+        Failures propagate: ActionExecutor turns them into a failed
+        ActionResult, which is how every other method here reports trouble.
+        Swallowing them made the assistant claim success on an open that
+        never happened.
+        """
+        start_file = getattr(os, "startfile", None)
+        if start_file is None:
+            raise OSError("Opening paths is not supported on this platform")
+        start_file(path)
+
     def open_file(self, path: str) -> None:
-        try:
-            os.startfile(path)  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        self._start_file(path)
 
     def open_folder(self, path: str) -> None:
-        try:
-            os.startfile(path)  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        self._start_file(path)
 
     def show_in_explorer(self, path: str) -> None:
         subprocess.run(["explorer.exe", "/select,", path], check=False)
