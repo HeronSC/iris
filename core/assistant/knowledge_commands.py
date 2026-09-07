@@ -7,7 +7,8 @@ from core.knowledge import KnowledgeError, MemoryKind, MemoryStatus
 from core.knowledge.review import KnowledgeReviewWorkflow
 
 _USAGE = (
-    "Usage: /knowledge pending | review | show <id> | why <id> | "
+    "Usage: /knowledge observe <topic> <what you saw> | outcome <id> <what happened> | "
+    "open [topic] | pending | review | show <id> | why <id> | "
     "approve <id> [note] | decline <id> <reason> | topics"
 )
 
@@ -46,6 +47,12 @@ class KnowledgeCommandHandler:
             return True
 
     def _dispatch(self, command: str, argument: str, rest: str) -> bool:
+        if command == "observe":
+            return self._observe(argument, rest)
+        if command == "outcome":
+            return self._outcome(argument, rest)
+        if command == "open":
+            return self._open(argument)
         if command in {"pending", "list"}:
             return self._pending(refresh=False)
         if command == "review":
@@ -60,6 +67,46 @@ class KnowledgeCommandHandler:
             return self._decline(argument, rest)
 
         emit_output(self.output, _USAGE)
+        return True
+
+    def _observe(self, topic: str, content: str) -> bool:
+        if not topic or not content:
+            emit_output(self.output, "Usage: /knowledge observe <topic> <what you saw>", "error")
+            return True
+
+        normalized = topic.strip().lower()
+        record = self.workflow.observe(normalized, content, source=f"user:{self.actor}")
+        emit_output(self.output, f"Recorded {record.id[:8]} in {normalized}.")
+        if "/" not in normalized:
+            emit_output(
+                self.output,
+                "Topics read best as domain/subtopic, like trading/candidates. "
+                "It is the main filter when recalling, so it is worth keeping consistent.",
+            )
+        emit_output(self.output, f"Close it later with /knowledge outcome {record.id[:8]} <what happened>")
+        return True
+
+    def _outcome(self, argument: str, content: str) -> bool:
+        if not argument or not content:
+            emit_output(self.output, "Usage: /knowledge outcome <id> <what happened>", "error")
+            return True
+        record = self._resolve(argument)
+        if record is None:
+            return True
+        outcome = self.workflow.close(record.id, content, source=f"user:{self.actor}")
+        emit_output(self.output, f"Recorded {outcome.id[:8]} as the outcome of {record.id[:8]}.")
+        emit_output(self.output, f"  {record.content}")
+        emit_output(self.output, f"  -> {outcome.content}")
+        return True
+
+    def _open(self, topic: str) -> bool:
+        found = self.workflow.open_observations(topic=topic.strip().lower() or None)
+        if not found:
+            emit_output(self.output, "No observations are waiting on an outcome.")
+            return True
+        emit_output(self.output, f"{len(found)} observation(s) still open:")
+        for record in found:
+            emit_output(self.output, f"{record.id[:8]}  {record.topic}\n  {record.content}")
         return True
 
     def _pending(self, *, refresh: bool) -> bool:
@@ -95,9 +142,8 @@ class KnowledgeCommandHandler:
         if not argument:
             emit_output(self.output, _USAGE)
             return True
-        record = self.workflow.find(argument)
+        record = self._resolve(argument)
         if record is None:
-            emit_output(self.output, f"No hypothesis matches '{argument}'.", "error")
             return True
 
         if why:
@@ -134,7 +180,13 @@ class KnowledgeCommandHandler:
         if not argument:
             emit_output(self.output, _USAGE)
             return None
-        record = self.workflow.find(argument)
-        if record is None:
-            emit_output(self.output, f"No hypothesis matches '{argument}'.", "error")
-        return record
+        found = self.workflow.matches(argument)
+        if not found:
+            emit_output(self.output, f"Nothing matches '{argument}'.", "error")
+            return None
+        if len(found) > 1:
+            emit_output(self.output, f"'{argument}' is ambiguous; type more of the id:", "error")
+            for record in found:
+                emit_output(self.output, f"  {record.id[:12]}  {record.kind.value}  {record.content[:60]}")
+            return None
+        return found[0]

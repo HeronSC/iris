@@ -202,7 +202,7 @@ class KnowledgeCommandTests(unittest.TestCase):
     def test_an_unknown_id_is_reported_not_ignored(self) -> None:
         self.handler.handle("/knowledge approve zzzzzzzz", {})
 
-        self.assertIn("No hypothesis matches", self.sink.errors)
+        self.assertIn("Nothing matches", self.sink.errors)
 
     def test_bare_command_shows_usage(self) -> None:
         self.handler.handle("/knowledge", {})
@@ -217,6 +217,136 @@ class KnowledgeCommandTests(unittest.TestCase):
         self.handler.handle(f"/knowledge approve {self.hypothesis.id[:8]}", {})
 
         self.assertIn("Only a supported hypothesis", self.sink.errors)
+
+
+class RecordingCommandTests(unittest.TestCase):
+    """Stage one: the plainest way to get something into the store."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.graph = KnowledgeGraph(SQLiteDatabase(root / "knowledge.db"))
+        self.tracker = HypothesisTracker(self.graph)
+        self.workflow = KnowledgeReviewWorkflow(self.tracker, audit_logger=AuditLogger(root / "audit"))
+        self.sink = _Sink()
+        self.handler = KnowledgeCommandHandler(self.workflow, output=self.sink, actor="henry")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _observe(self, text: str = "/knowledge observe iris/performance indexing 4200 documents took 90 seconds"):
+        self.handler.handle(text, {})
+        return self.graph.records.list_by_topic(text.split()[2], kind=MemoryKind.OBSERVATION)[0]
+
+    def test_observing_records_what_was_seen(self) -> None:
+        record = self._observe()
+
+        self.assertEqual(record.kind, MemoryKind.OBSERVATION)
+        self.assertEqual(record.topic, "iris/performance")
+        self.assertEqual(record.content, "indexing 4200 documents took 90 seconds")
+        self.assertEqual(record.status, MemoryStatus.OBSERVED)
+
+    def test_a_typed_observation_records_who_typed_it(self) -> None:
+        """Provenance separates what a person said from what a feed reported."""
+        self.assertEqual(self._observe().source, "user:henry")
+
+    def test_the_reply_says_how_to_close_it(self) -> None:
+        record = self._observe()
+
+        self.assertIn(f"Recorded {record.id[:8]}", self.sink.text)
+        self.assertIn(f"/knowledge outcome {record.id[:8]}", self.sink.text)
+
+    def test_a_flat_topic_earns_a_nudge_not_a_refusal(self) -> None:
+        self.handler.handle("/knowledge observe scratch something happened", {})
+
+        self.assertIn("domain/subtopic", self.sink.text)
+        self.assertEqual(len(self.graph.records.list_by_topic("scratch")), 1, "the nudge must not block the write")
+
+    def test_topics_are_normalised(self) -> None:
+        self.handler.handle("/knowledge observe Iris/Performance a thing", {})
+
+        self.assertEqual(len(self.graph.records.list_by_topic("iris/performance")), 1)
+
+    def test_observing_needs_a_topic_and_content(self) -> None:
+        self.handler.handle("/knowledge observe", {})
+        self.handler.handle("/knowledge observe iris/performance", {})
+
+        self.assertEqual(self.graph.records.count(), 0)
+        self.assertIn("Usage:", self.sink.errors)
+
+    def test_an_outcome_closes_the_observation(self) -> None:
+        record = self._observe()
+        self.sink.lines.clear()
+
+        self.handler.handle(f"/knowledge outcome {record.id[:8]} the index rebuild fixed it", {})
+
+        outcome = self.graph.outcome_for(record.id)
+        self.assertIsNotNone(outcome)
+        assert outcome is not None
+        self.assertEqual(outcome.content, "the index rebuild fixed it")
+        self.assertEqual(outcome.topic, "iris/performance", "an outcome inherits its observation's topic")
+        self.assertIn("as the outcome of", self.sink.text)
+
+    def test_only_an_observation_can_be_closed(self) -> None:
+        hypothesis = self.tracker.propose("An idea.", topic="iris/performance", source="analysis")
+
+        self.handler.handle(f"/knowledge outcome {hypothesis.id[:8]} something", {})
+
+        self.assertIn("that is a hypothesis", self.sink.errors)
+
+    def test_an_outcome_needs_something_to_say(self) -> None:
+        record = self._observe()
+        self.sink.lines.clear()
+
+        self.handler.handle(f"/knowledge outcome {record.id[:8]}", {})
+
+        self.assertIsNone(self.graph.outcome_for(record.id))
+        self.assertIn("Usage:", self.sink.errors)
+
+    def test_open_lists_what_still_needs_an_outcome(self) -> None:
+        first = self._observe()
+        self.handler.handle("/knowledge observe iris/routing the planner chose recall", {})
+        self.handler.handle(f"/knowledge outcome {first.id[:8]} resolved", {})
+        self.sink.lines.clear()
+
+        self.handler.handle("/knowledge open", {})
+
+        self.assertIn("the planner chose recall", self.sink.text)
+        self.assertNotIn("indexing 4200", self.sink.text)
+
+    def test_open_can_be_narrowed_to_a_topic(self) -> None:
+        self._observe()
+        self.handler.handle("/knowledge observe iris/routing the planner chose recall", {})
+        self.sink.lines.clear()
+
+        self.handler.handle("/knowledge open iris/routing", {})
+
+        self.assertIn("the planner chose recall", self.sink.text)
+        self.assertNotIn("indexing 4200", self.sink.text)
+
+    def test_open_says_so_when_nothing_is_waiting(self) -> None:
+        self.handler.handle("/knowledge open", {})
+        self.assertIn("No observations are waiting", self.sink.text)
+
+    def test_an_ambiguous_id_asks_for_more_rather_than_guessing(self) -> None:
+        from core.knowledge import MemoryRecord as Record
+
+        for suffix in ("aaaa1111", "aaaa2222"):
+            self.graph.records.add(Record(id="dead" + suffix, kind=MemoryKind.OBSERVATION,
+                                          topic="iris/performance", source="user:henry", content=f"one {suffix}"))
+
+        self.handler.handle("/knowledge outcome dead something", {})
+
+        self.assertIn("ambiguous", self.sink.errors)
+
+    def test_an_observation_can_be_asked_about_by_id(self) -> None:
+        """find() used to search hypotheses only, so this was unreachable."""
+        record = self._observe()
+        self.sink.lines.clear()
+
+        self.handler.handle(f"/knowledge why {record.id[:8]}", {})
+
+        self.assertIn("indexing 4200 documents", self.sink.text)
 
 
 class ApplicationRoutingTests(unittest.TestCase):

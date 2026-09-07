@@ -112,6 +112,23 @@ class KnowledgeRepository:
             ).fetchall()
         return [record_from_row(row) for row in rows]
 
+    def find_by_id_prefix(self, prefix: str, *, limit: int = 5) -> list[MemoryRecord]:
+        """Records whose id starts with this, so a person can type the first few characters.
+
+        A range comparison rather than LIKE, so the primary key index serves it.
+        Returns several when the prefix is ambiguous; the caller decides.
+        """
+        cleaned = str(prefix or "").strip().lower()
+        if not cleaned:
+            return []
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                f"SELECT {MEMORY_COLUMNS} FROM memories WHERE id >= ? AND id < ? "
+                "ORDER BY sequence DESC LIMIT ?",
+                (cleaned, cleaned + "￿", max(1, int(limit))),
+            ).fetchall()
+        return [record_from_row(row) for row in rows]
+
     def list_by_kind_and_status(
         self, kind: MemoryKind, status: MemoryStatus, *, limit: int = 50
     ) -> list[MemoryRecord]:
