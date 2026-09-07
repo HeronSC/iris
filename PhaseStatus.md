@@ -3,7 +3,7 @@
 Companion to `PhaseDesign.md`. That document is the brief; this one records what
 exists, what was decided along the way, what is measured, and what is still open.
 
-Delivered in seven commits, `a48b09d` through `2c4a66d`. 359 tests pass.
+Delivered in ten commits, `a48b09d` through the hypothesis route. 395 tests pass.
 
 ---
 
@@ -15,7 +15,7 @@ Delivered in seven commits, `a48b09d` through `2c4a66d`. 359 tests pass.
 | §2 Provenance | Done | `MemoryRecord` — source is required, not optional |
 | §3 Retrieval, no prompt stuffing | Done | `retrieval.py`, token-budgeted |
 | §4 Topic / working state | Pre-existing, reused | `core/conversation/persistent_memory/` |
-| §5 Learning loop | Structure done, no trigger | `hypotheses.py` — see Open Questions |
+| §5 Learning loop | Done, driven by hand | `hypotheses.py`, `/knowledge` — see Open Questions |
 | §6 Never auto-promote | Done, enforced in code | `HypothesisTracker.promote` |
 | §7 Generalised, not trading-specific | Done | nothing in `core/knowledge/` mentions trading |
 | §8 Orchestrator can reach it | Done | `core/assistant/knowledge_provider.py` |
@@ -39,7 +39,7 @@ What §10 asked for, and where it lives:
 ## 2. The shape of it
 
 ```
-core/knowledge/                    1511 lines
+core/knowledge/                    1774 lines
 ├── models.py         MemoryRecord, MemoryKind, MemoryStatus
 ├── schema.py         all DDL in one place, idempotent
 ├── repository.py     append-only record store
@@ -52,7 +52,19 @@ core/knowledge/                    1511 lines
 
 core/assistant/
 ├── knowledge_provider.py   recall, as a capability the planner may choose
-└── knowledge_commands.py   /knowledge pending | review | why | approve | decline
+└── knowledge_commands.py   the whole loop, as slash commands
+```
+
+The loop, end to end, without opening Python:
+
+```
+/knowledge observe <topic> <what you saw>        OBSERVE
+/knowledge outcome <id> <what happened>          MEASURE
+/knowledge hypothesize <topic> <claim>           HYPOTHESIZE
+/knowledge evidence <id> for|against <id>        TEST
+/knowledge testing | pending | review            what is where
+/knowledge approve <id> | decline <id> <reason>  ADOPT or REJECT
+/knowledge why <id>                              the audit trail
 ```
 
 Three namespaces now mean three different things, which is why `core.memory` was
@@ -80,7 +92,25 @@ relations and `evidence_for` is a query.
 **Every edge points from a claim to what it rests on.** The evidence relations are
 named from the hypothesis's side deliberately: it makes provenance one uniform
 walk along outgoing edges instead of a different direction per relation.
-`RELATES_TO` is excluded from that walk, because association is not grounds.
+`RELATES_TO` is the only relation excluded, because association is not grounds.
+`OUTCOME_OF` was excluded too until the loop was driven end to end and `why`
+was seen stopping at the measurement, one hop short of what was actually
+observed — which is the hop §10 asks for.
+
+**Evidence is an existing record, never text typed at the moment of linking.**
+What argues for an idea has to have been recorded in its own right, with its own
+source and timestamp; a sentence typed into the evidence command would let a
+claim be justified by a restatement of itself. Another hypothesis is refused for
+the same reason: verdicts count edges, so a belief grounded in a belief would
+let two unproven ideas support each other into being supported.
+
+**Evidence may demote, never reopen.** Filing evidence re-reads the verdict only
+while a hypothesis is still proposed, testing or supported — the statuses
+evidence reached on its own. Accepted and rejected are where a person put it, and
+walking those back would undo a decision nobody was asked about; the link is
+still written and the reply says the verdict was not applied. Pulling something
+back out of the approval queue is the safe direction, so `refresh()` covers
+supported as well.
 
 **Verdicts run on counts, never on confidence.** `MemoryRecord` has a `confidence`
 field and an LLM will fill it with 1.0. Nothing in the lifecycle reads it. A test
@@ -145,8 +175,8 @@ standing prior. The weights are a starting point, exposed as arguments so they
 can be moved on evidence. Every score keeps its parts and every retrieval returns
 diagnostics, which is the instrumentation that decision will need.
 
-**The store is empty.** Nothing writes observations automatically. Records arrive
-only through the API or `/knowledge`.
+**Nothing writes to the store on its own.** Every record arrives because a
+person typed it or called the API. The loop runs, but a hand turns it.
 
 **None of it has met real data.** Every property is proven against records written
 for the tests.
@@ -158,15 +188,18 @@ from an earlier path-joining bug. Nothing reads it.
 
 ## 6. Open questions
 
-**What should automatically become an observation?** (§8) The store cannot be
-useful until something writes to it, and a store that records the wrong things is
-worse than an empty one. This is the next real decision.
+**What should automatically become an observation?** (§8) Stage one was explicit
+typing, and it is what the loop runs on today. Stage two is LLM-proposed
+observations, which have an obvious home: the same review gate promotions go
+through. Stage three is the bot feed. A store that records the wrong things is
+worse than an empty one, which is why using the typed path first is the point
+rather than a delay.
 
-**What triggers TEST and MEASURE?** (§5) Iris has no scheduler; nothing runs
-outside a user turn. The lifecycle was built as a function of evidence plus an
-explicit `evaluate()` call precisely so a slash command, a background job, or the
-bot's feedback can all drive it without changing that code. The decision is still
-open and still cheap.
+**What triggers TEST and MEASURE without a person?** (§5) A person now triggers
+them: filing evidence re-reads the verdict, and `/knowledge review` re-reads every
+open one. Iris still has no scheduler, so nothing re-assesses between turns. The
+lifecycle is a function of evidence plus an `evaluate()` call, so a background job
+or the bot's feedback can drive the same code when there is one.
 
 **Does recall answer real questions well?** Candidates now come from SQLite's
 search index, but the re-ranking weights and the relevance floor are still

@@ -1,3 +1,5 @@
+# File: core/knowledge/links.py
+
 from __future__ import annotations
 
 import sqlite3
@@ -12,20 +14,6 @@ from core.storage.sqlite_database import SQLiteDatabase
 
 
 class MemoryRelation(str, Enum):
-    """How one record relates to another.
-
-    Every edge points from a record to something it rests on or refers back
-    to, so the source is always the claim and the target always the grounds.
-    A hypothesis is SUPPORTED_BY a measurement; a learned rule is DERIVED_FROM
-    the observations behind it; an outcome is the OUTCOME_OF the observation
-    it closes.
-
-    Naming the evidence relations from the hypothesis's side, rather than as
-    "supports" pointing the other way, is what makes "why do we believe this"
-    a single uniform walk along outgoing edges instead of a different
-    direction per relation.
-    """
-
     SUPPORTED_BY = "supported_by"
     CONTRADICTED_BY = "contradicted_by"
     DERIVED_FROM = "derived_from"
@@ -34,17 +22,14 @@ class MemoryRelation(str, Enum):
     RELATES_TO = "relates_to"
 
 
-#: Relations that make the target evidence about the source. Evidence is a
-#: query over links, not a table of its own.
 EVIDENCE_RELATIONS = (MemoryRelation.SUPPORTED_BY, MemoryRelation.CONTRADICTED_BY)
 
-#: Relations that justify the source. RELATES_TO is excluded: it is an
-#: association, not grounds, and following it would let an explanation wander.
 GROUNDING_RELATIONS = (
     MemoryRelation.SUPPORTED_BY,
     MemoryRelation.CONTRADICTED_BY,
     MemoryRelation.DERIVED_FROM,
     MemoryRelation.DECIDED_FROM,
+    MemoryRelation.OUTCOME_OF,
 )
 
 
@@ -54,8 +39,6 @@ class MemoryLink:
     target_id: str
     relation: MemoryRelation
     id: str = field(default_factory=lambda: uuid4().hex)
-    #: Optional strength. Deliberately not derived from an LLM's self-reported
-    #: confidence: it is meant for measured effect sizes.
     weight: float | None = None
     note: str | None = None
     created_at: str = field(default_factory=utc_now_iso)
@@ -73,12 +56,6 @@ _COLUMNS = "id, source_id, target_id, relation, weight, note, created_at"
 
 
 class LinkRepository:
-    """Append-only edges between memory records.
-
-    There is no unlink: an association that was once believed is part of the
-    audit trail, the same way a superseded record is.
-    """
-
     def __init__(self, database: SQLiteDatabase) -> None:
         self.database = database
         ensure_schema(database)
@@ -139,10 +116,6 @@ class LinkRepository:
         return [_link_from_row(row) for row in rows]
 
     def count_relations_from(self, source_id: str) -> dict[MemoryRelation, int]:
-        """How many edges of each relation leave this record.
-
-        One grouped query. Counting evidence should not load the evidence.
-        """
         with self.database.connect() as conn:
             rows = conn.execute(
                 "SELECT relation, COUNT(*) FROM memory_links WHERE source_id = ? GROUP BY relation",

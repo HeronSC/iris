@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: house-rules
+        name: house-rules
+        language: system
+        entry: python -B tools/house_rules.py
+        pass_filenames: true
+        files: \.(py|js)$
+        exclude: ^(tools/|tests/|runtime/|data/)

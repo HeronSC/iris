@@ -1,3 +1,5 @@
+# File: core/assistant/knowledge_commands.py
+
 from __future__ import annotations
 
 from typing import Any
@@ -8,14 +10,19 @@ from core.knowledge.review import KnowledgeReviewWorkflow
 
 _USAGE = (
     "Usage: /knowledge observe <topic> <what you saw> | outcome <id> <what happened> | "
-    "open [topic] | pending | review | show <id> | why <id> | "
+    "open [topic] | hypothesize <topic> <claim> | "
+    "evidence <hypothesis> for|against <id> [note] | testing [topic] | "
+    "pending | review | show <id> | why <id> | "
     "approve <id> [note] | decline <id> <reason> | topics"
+)
+
+_TOPIC_NUDGE = (
+    "Topics read best as domain/subtopic, like trading/candidates. "
+    "It is the main filter when recalling, so it is worth keeping consistent."
 )
 
 
 class KnowledgeCommandHandler:
-    """The review queue for things Iris has learned but is not yet acting on."""
-
     def __init__(
         self,
         workflow: KnowledgeReviewWorkflow,
@@ -53,6 +60,12 @@ class KnowledgeCommandHandler:
             return self._outcome(argument, rest)
         if command == "open":
             return self._open(argument)
+        if command in {"hypothesize", "hypothesise"}:
+            return self._hypothesize(argument, rest)
+        if command == "evidence":
+            return self._evidence(argument, rest)
+        if command == "testing":
+            return self._testing(argument)
         if command in {"pending", "list"}:
             return self._pending(refresh=False)
         if command == "review":
@@ -77,14 +90,77 @@ class KnowledgeCommandHandler:
         normalized = topic.strip().lower()
         record = self.workflow.observe(normalized, content, source=f"user:{self.actor}")
         emit_output(self.output, f"Recorded {record.id[:8]} in {normalized}.")
-        if "/" not in normalized:
-            emit_output(
-                self.output,
-                "Topics read best as domain/subtopic, like trading/candidates. "
-                "It is the main filter when recalling, so it is worth keeping consistent.",
-            )
+        self._nudge_topic(normalized)
         emit_output(self.output, f"Close it later with /knowledge outcome {record.id[:8]} <what happened>")
         return True
+
+    def _hypothesize(self, topic: str, content: str) -> bool:
+        if not topic or not content:
+            emit_output(self.output, "Usage: /knowledge hypothesize <topic> <claim>", "error")
+            return True
+
+        normalized = topic.strip().lower()
+        record = self.workflow.hypothesize(normalized, content, source=f"user:{self.actor}")
+        emit_output(self.output, f"Proposed {record.id[:8]} in {normalized}. Nothing acts on it yet.")
+        self._nudge_topic(normalized)
+        emit_output(
+            self.output,
+            f"Aim evidence at it with /knowledge evidence {record.id[:8]} for|against <id>",
+        )
+        return True
+
+    def _evidence(self, argument: str, rest: str) -> bool:
+        direction, _, tail = rest.partition(" ")
+        evidence_id, _, note = tail.strip().partition(" ")
+        direction = direction.strip().lower()
+        if not argument or direction not in {"for", "against"} or not evidence_id:
+            emit_output(
+                self.output,
+                "Usage: /knowledge evidence <hypothesis> for|against <id> [note]",
+                "error",
+            )
+            return True
+
+        hypothesis = self._resolve(argument)
+        if hypothesis is None:
+            return True
+        evidence = self._resolve(evidence_id)
+        if evidence is None:
+            return True
+
+        assessment = self.workflow.attach_evidence(
+            hypothesis.id,
+            evidence.id,
+            supports=direction == "for",
+            source=f"user:{self.actor}",
+            note=note.strip() or None,
+        )
+        emit_output(self.output, f"Filed {evidence.id[:8]} {direction} {hypothesis.id[:8]}.")
+        emit_output(self.output, f"  {hypothesis.content}")
+        emit_output(self.output, f"  {assessment.rationale}")
+        if assessment.would_change:
+            emit_output(
+                self.output,
+                f"It stays {assessment.status.value}: a settled hypothesis is reopened by a person, "
+                "not by the arithmetic.",
+            )
+        elif assessment.status is MemoryStatus.SUPPORTED:
+            emit_output(self.output, "It is now waiting for approval; see /knowledge pending.")
+        return True
+
+    def _testing(self, topic: str) -> bool:
+        found = self.workflow.under_test(topic=topic.strip().lower() or None)
+        if not found:
+            emit_output(self.output, "No hypotheses are under test.")
+            return True
+        emit_output(self.output, f"{len(found)} hypothesis(es) still gathering evidence:")
+        for item in found:
+            emit_output(self.output, item.summary())
+        return True
+
+    def _nudge_topic(self, topic: str) -> None:
+        if "/" not in topic:
+            emit_output(self.output, _TOPIC_NUDGE)
 
     def _outcome(self, argument: str, content: str) -> bool:
         if not argument or not content:

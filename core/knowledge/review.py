@@ -1,3 +1,5 @@
+# File: core/knowledge/review.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,10 +11,11 @@ from core.knowledge.hypotheses import Assessment, HypothesisTracker
 from core.knowledge.models import KnowledgeError, MemoryKind, MemoryRecord, MemoryStatus
 
 
-@dataclass(frozen=True)
-class PendingPromotion:
-    """A hypothesis the evidence supports, waiting on a person."""
+_UNSETTLED = (MemoryStatus.PROPOSED, MemoryStatus.TESTING, MemoryStatus.SUPPORTED)
 
+
+@dataclass(frozen=True)
+class HypothesisSummary:
     hypothesis: MemoryRecord
     assessment: Assessment
 
@@ -25,14 +28,6 @@ class PendingPromotion:
 
 
 class KnowledgeReviewWorkflow:
-    """The gate between what the evidence supports and what Iris acts on.
-
-    Nothing here decides anything. It lists what is waiting, applies the
-    decision a person made, and writes both outcomes to the same audit log the
-    profile approval path uses, so there is one place to answer "what was
-    approved, by whom, and when".
-    """
-
     def __init__(
         self,
         tracker: HypothesisTracker,
@@ -46,23 +41,26 @@ class KnowledgeReviewWorkflow:
         return self.tracker.graph
 
     def refresh(self, *, topic: str | None = None, limit: int = 50) -> int:
-        """Re-assess everything under test, so the queue reflects current evidence.
-
-        Evidence arrives without anyone asking a hypothesis whether it has
-        changed its mind, so the queue is only honest if something re-runs the
-        verdicts. Returns how many statuses moved.
-        """
         moved = 0
-        for status in (MemoryStatus.PROPOSED, MemoryStatus.TESTING):
+        for status in _UNSETTLED:
             for hypothesis in self.tracker.in_status(status, topic=topic, limit=limit):
                 if self.tracker.evaluate(hypothesis.id).would_change:
                     moved += 1
         return moved
 
-    def pending(self, *, topic: str | None = None, limit: int = 50) -> list[PendingPromotion]:
+    def pending(self, *, topic: str | None = None, limit: int = 50) -> list[HypothesisSummary]:
+        return self._summarise(self.tracker.awaiting_approval(topic=topic, limit=limit))
+
+    def under_test(self, *, topic: str | None = None, limit: int = 50) -> list[HypothesisSummary]:
+        found: list[MemoryRecord] = []
+        for status in (MemoryStatus.PROPOSED, MemoryStatus.TESTING):
+            found.extend(self.tracker.in_status(status, topic=topic, limit=limit))
+        return self._summarise(found[:limit])
+
+    def _summarise(self, records: list[MemoryRecord]) -> list[HypothesisSummary]:
         return [
-            PendingPromotion(hypothesis=item, assessment=self.tracker.assess(item.id))
-            for item in self.tracker.awaiting_approval(topic=topic, limit=limit)
+            HypothesisSummary(hypothesis=item, assessment=self.tracker.assess(item.id))
+            for item in records
         ]
 
     def approve(self, hypothesis_id: str, *, approved_by: str, note: str | None = None) -> MemoryRecord:
@@ -82,11 +80,6 @@ class KnowledgeReviewWorkflow:
         return render_explanation(self.graph.explain(hypothesis_id, max_depth=max_depth))
 
     def matches(self, needle: str) -> list[MemoryRecord]:
-        """Every record a full or shortened id could mean.
-
-        Any kind, not only hypotheses: an observation needs to be nameable too,
-        both to close it with an outcome and to ask why it is believed.
-        """
         exact = self.graph.records.get(needle)
         if exact is not None:
             return [exact]
@@ -96,12 +89,10 @@ class KnowledgeReviewWorkflow:
         return self.graph.records.find_by_id_prefix(prefix)
 
     def find(self, needle: str) -> MemoryRecord | None:
-        """The one record this names, or None if it names none or several."""
         found = self.matches(needle)
         return found[0] if len(found) == 1 else None
 
     def observe(self, topic: str, content: str, *, source: str, **fields: Any) -> MemoryRecord:
-        """Record something seen. The plainest way into the store."""
         return self.graph.records.add(
             MemoryRecord(
                 kind=MemoryKind.OBSERVATION,
@@ -113,7 +104,6 @@ class KnowledgeReviewWorkflow:
         )
 
     def close(self, observation_id: str, content: str, *, source: str) -> MemoryRecord:
-        """Record what came of an observation, and link the two."""
         return self.graph.record_outcome(
             observation_id,
             MemoryRecord(
@@ -123,6 +113,35 @@ class KnowledgeReviewWorkflow:
                 source=source,
             ),
         )
+
+    def hypothesize(self, topic: str, content: str, *, source: str, **fields: Any) -> MemoryRecord:
+        return self.tracker.propose(content, topic=topic, source=source, **fields)
+
+    def attach_evidence(
+        self,
+        hypothesis_id: str,
+        evidence_id: str,
+        *,
+        supports: bool,
+        source: str,
+        note: str | None = None,
+    ) -> Assessment:
+        record = self.graph.records.get(evidence_id)
+        if record is None:
+            raise KnowledgeError(f"No such memory: {evidence_id}")
+        if record.kind is MemoryKind.HYPOTHESIS:
+            raise KnowledgeError(
+                "Evidence has to be something that happened, and that is a hypothesis"
+            )
+        self.graph.add_evidence(
+            hypothesis_id,
+            record,
+            supports=supports,
+            note=f"{source}: {note}" if note else source,
+        )
+        if self.tracker.assess(hypothesis_id).status in _UNSETTLED:
+            self.tracker.evaluate(hypothesis_id)
+        return self.tracker.assess(hypothesis_id)
 
     def open_observations(self, *, topic: str | None = None, limit: int = 20) -> list[MemoryRecord]:
         if topic is not None:
@@ -169,4 +188,4 @@ class KnowledgeReviewWorkflow:
         )
 
 
-__all__ = ["KnowledgeReviewWorkflow", "PendingPromotion", "MemoryKind"]
+__all__ = ["KnowledgeReviewWorkflow", "HypothesisSummary", "MemoryKind"]
