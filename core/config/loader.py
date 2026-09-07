@@ -238,7 +238,6 @@ class ConfigLoader:
             "maximum_supporting_excerpts": int(memory_cfg.get("maximum_supporting_excerpts", 6)),
             "maximum_supporting_excerpts_per_topic": int(memory_cfg.get("maximum_supporting_excerpts_per_topic", 3)),
             "maximum_excerpt_chars": int(memory_cfg.get("maximum_excerpt_chars", 280)),
-            "summary_update_message_count": int(memory_cfg.get("summary_update_message_count", 6)),
             "include_current_topic": bool(memory_cfg.get("include_current_topic", True)),
             "diagnostics": bool(memory_cfg.get("diagnostics", False)),
             "semantic_weight": float(memory_cfg.get("semantic_weight", 0.75)),

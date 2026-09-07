@@ -4,19 +4,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.conversation.persistent_memory.models import MemoryConfig, TopicCandidate, TopicRecord, _topic_basis
-from core.conversation.persistent_memory.repositories import MessageRepository, TopicRepository
+from core.conversation.persistent_memory.repositories import MessageRepository
 from core.conversation.persistent_memory.text import (
     _clean_excerpt,
     _contains_price_signal,
-    _dedupe_keep_order,
     _estimate_tokens,
-    _extract_decisions,
-    _extract_entities,
-    _extract_model_mentions,
-    _extract_open_questions,
-    _extract_recommendation_highlights,
-    _extract_requirements,
-    _extract_spec_facts,
     _is_anaphoric_query,
     _looks_like_recommendation_or_price,
     _looks_like_topic_enrichment,
@@ -25,7 +17,6 @@ from core.conversation.persistent_memory.text import (
     _token_overlap_score,
     _token_set,
 )
-from core.conversation.persistent_memory.topic_state import _derive_topic_state, _summary_from_topic_state
 
 class TopicClassifier:
     def __init__(self, config: MemoryConfig) -> None:
@@ -79,94 +70,6 @@ class TopicClassifier:
             stamp = stamp.replace(tzinfo=timezone.utc)
         delta_days = max(0.0, (now - stamp).total_seconds() / 86400.0)
         return self.config.recency_bonus_max * (1.0 / (1.0 + delta_days))
-
-
-class TopicSummaryService:
-    def __init__(self, config: MemoryConfig, message_repository: MessageRepository, topic_repository: TopicRepository) -> None:
-        self.config = config
-        self.message_repository = message_repository
-        self.topic_repository = topic_repository
-
-    def maybe_update_summary(self, topic: TopicRecord) -> None:
-        message_count = self.message_repository.count_topic_messages(topic.id)
-        if message_count <= 0:
-            return
-        # Seed a summary early so retrieval has meaningful text after the first exchange.
-        if not topic.summary.strip() and message_count >= 2:
-            messages = self.message_repository.get_recent_topic_messages(topic.id, limit=40)
-            summary = self._build_summary(topic.name, messages)
-            self.topic_repository.update_summary(topic.id, summary)
-            return
-        if message_count % self.config.summary_update_message_count != 0:
-            return
-        messages = self.message_repository.get_recent_topic_messages(topic.id, limit=40)
-        summary = self._build_summary(topic.name, messages)
-        self.topic_repository.update_summary(topic.id, summary)
-
-    def _build_summary(self, topic_name: str, messages: list[dict[str, Any]]) -> str:
-        user_messages = [str(item.get("content", "")).strip() for item in messages if str(item.get("role", "")) == "user"]
-        assistant_messages = [str(item.get("content", "")).strip() for item in messages if str(item.get("role", "")) == "assistant"]
-
-        goals = _dedupe_keep_order([item for item in user_messages[:3] if item])
-        requirements = _extract_requirements(user_messages + assistant_messages)
-        spec_facts = _extract_spec_facts(user_messages + assistant_messages)
-        decisions = _extract_decisions(assistant_messages)
-        recommendation_highlights = _extract_recommendation_highlights(assistant_messages)
-        recommended_models = _extract_model_mentions(assistant_messages)
-        open_questions = _extract_open_questions(user_messages)
-        entities = _extract_entities(user_messages + assistant_messages)
-
-        lines: list[str] = []
-        lines.append(f"Topic: {topic_name}")
-        if goals:
-            lines.append("Goal:")
-            lines.append(f"- {goals[0][:220]}")
-        if requirements:
-            lines.append("Requirements:")
-            for item in requirements[:6]:
-                lines.append(f"- {item[:180]}")
-        elif spec_facts:
-            lines.append("Requirements:")
-            for item in spec_facts[:6]:
-                lines.append(f"- {item[:180]}")
-        if recommended_models:
-            lines.append("Recommended models:")
-            for item in recommended_models[:6]:
-                lines.append(f"- {item[:180]}")
-        if decisions:
-            lines.append("Previously discussed:")
-            for item in decisions[:6]:
-                lines.append(f"- {item[:180]}")
-        if recommendation_highlights:
-            lines.append("Assistant highlights:")
-            for item in recommendation_highlights[:6]:
-                lines.append(f"- {item[:180]}")
-        if entities:
-            lines.append("Relevant entities:")
-            for item in entities[:8]:
-                lines.append(f"- {item}")
-        if open_questions:
-            lines.append("Open questions:")
-            for item in open_questions[:5]:
-                lines.append(f"- {item[:180]}")
-
-        summary = "\n".join(lines).strip()
-        if len(summary) > 2400:
-            summary = summary[:2397].rsplit("\n", 1)[0] + "..."
-        return summary
-
-
-class TopicDetailStateService:
-    def __init__(self, message_repository: MessageRepository, topic_repository: TopicRepository) -> None:
-        self.message_repository = message_repository
-        self.topic_repository = topic_repository
-
-    def rebuild(self, topic_id: int, topic_name: str) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
-        messages = self.message_repository.get_topic_messages(topic_id)
-        state, change_log = _derive_topic_state(topic_name, messages)
-        summary = _summary_from_topic_state(state)
-        self.topic_repository.update_state(topic_id, state, change_log, summary)
-        return state, change_log, summary
 
 
 class TokenBudgetManager:

@@ -12,9 +12,7 @@ from core.conversation.persistent_memory.services import (
     MemoryContextBuilder,
     TokenBudgetManager,
     TopicClassifier,
-    TopicDetailStateService,
     TopicRetriever,
-    TopicSummaryService,
 )
 from core.conversation.persistent_memory.text import _generate_topic_name
 from core.conversation.persistent_memory.topic_state import (
@@ -33,8 +31,6 @@ class TopicMemoryService:
         self.topics = TopicRepository(self.database)
         self.messages = MessageRepository(self.database)
         self.classifier = TopicClassifier(config)
-        self.summary_service = TopicSummaryService(config, self.messages, self.topics)
-        self.detail_state_service = TopicDetailStateService(self.messages, self.topics)
         self.token_budget = TokenBudgetManager(config)
         self.context_builder = MemoryContextBuilder(config, self.token_budget)
         self.retriever = TopicRetriever(config, self.classifier, self.messages)
@@ -233,7 +229,6 @@ class TopicMemoryService:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     last_active_at TEXT NOT NULL,
-                    embedding BLOB,
                     status TEXT NOT NULL DEFAULT 'active'
                 );
 
@@ -247,16 +242,6 @@ class TopicMemoryService:
                     sequence_number INTEGER NOT NULL,
                     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
                     FOREIGN KEY(topic_id) REFERENCES topics(id)
-                );
-
-                CREATE TABLE IF NOT EXISTS topic_links (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source_topic_id INTEGER NOT NULL,
-                    target_topic_id INTEGER NOT NULL,
-                    relationship TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY(source_topic_id) REFERENCES topics(id),
-                    FOREIGN KEY(target_topic_id) REFERENCES topics(id)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation_seq ON messages(conversation_id, sequence_number);

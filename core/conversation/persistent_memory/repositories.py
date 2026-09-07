@@ -84,7 +84,7 @@ class TopicRepository:
         now = _utc_now()
         with self.database.connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO topics (name, summary, state_json, change_log_json, created_at, updated_at, last_active_at, embedding, status) VALUES (?, '', '{}', '[]', ?, ?, ?, NULL, ?)",
+                "INSERT INTO topics (name, summary, state_json, change_log_json, created_at, updated_at, last_active_at, status) VALUES (?, '', '{}', '[]', ?, ?, ?, ?)",
                 (name, now, now, now, status),
             )
             conn.commit()
@@ -358,19 +358,3 @@ class MessageRepository:
         ordered = [dict(row) for row in rows]
         ordered.reverse()
         return ordered
-
-    def get_topic_messages(self, topic_id: int) -> list[dict[str, Any]]:
-        with self.database.connect() as conn:
-            rows = conn.execute(
-                "SELECT id, conversation_id, topic_id, role, content, created_at, sequence_number FROM messages WHERE topic_id = ? ORDER BY created_at ASC, id ASC",
-                (topic_id,),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    def count_topic_messages(self, topic_id: int) -> int:
-        with self.database.connect() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) AS c FROM messages WHERE topic_id = ?",
-                (topic_id,),
-            ).fetchone()
-        return int(row["c"]) if row is not None else 0

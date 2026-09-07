@@ -9,89 +9,14 @@ from core.conversation.persistent_memory.text import (
     _clean_excerpt,
     _extract_action_target,
     _extract_model_mentions,
-    _extract_open_questions,
     _extract_price_value,
     _extract_requirements,
     _extract_spec_facts,
-    _match_item_id,
     _query_coverage_score,
     _slugify_name,
     _split_sentences,
     _token_set,
 )
-
-def _derive_topic_state(topic_name: str, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    user_messages = [str(item.get("content", "")).strip() for item in messages if str(item.get("role", "")) == "user"]
-    all_messages = [str(item.get("content", "")).strip() for item in messages if str(item.get("content", "")).strip()]
-    goal = user_messages[0][:220] if user_messages else topic_name
-    requirements = _extract_requirements(all_messages)
-    if not requirements:
-        requirements = _extract_spec_facts(all_messages)
-
-    items_by_id: dict[str, dict[str, Any]] = {}
-    change_history: list[dict[str, Any]] = []
-
-    for message in messages:
-        role = str(message.get("role", "")).strip().lower()
-        content = str(message.get("content", "")).strip()
-        created_at = str(message.get("created_at", ""))
-        if not content:
-            continue
-
-        if role == "assistant":
-            for sentence in _split_sentences(content):
-                models = _extract_model_mentions([sentence])
-                price_value = _extract_price_value(sentence)
-                for model in models:
-                    item_id = _slugify_name(model)
-                    item = items_by_id.get(item_id)
-                    if item is None:
-                        item = {
-                            "id": item_id,
-                            "name": model,
-                            "status": "active",
-                            "facts": {"details": [], "price": None},
-                        }
-                        items_by_id[item_id] = item
-                        change_history.append({"type": "add_item", "item_id": item_id, "message": f"Added {model}", "at": created_at})
-                    detail = _clean_excerpt(sentence, 180)
-                    details_list = item["facts"].setdefault("details", [])
-                    if detail and detail not in details_list:
-                        details_list.append(detail)
-                    if price_value and item["facts"].get("price") != price_value:
-                        item["facts"]["price"] = price_value
-                        change_history.append({"type": "update_price", "item_id": item_id, "message": f"Updated price for {model} to {price_value}", "at": created_at})
-
-        if role == "user":
-            rejection_target = _extract_action_target(content, action="reject")
-            if rejection_target:
-                matched = _match_item_id(rejection_target, list(items_by_id.values()))
-                if matched is not None and items_by_id[matched].get("status") != "rejected":
-                    items_by_id[matched]["status"] = "rejected"
-                    items_by_id[matched]["rejection_reason"] = content[:180]
-                    change_history.append({"type": "reject_item", "item_id": matched, "message": f"Rejected {items_by_id[matched]['name']}", "at": created_at})
-            restore_target = _extract_action_target(content, action="restore")
-            if restore_target:
-                matched = _match_item_id(restore_target, list(items_by_id.values()))
-                if matched is not None and items_by_id[matched].get("status") == "rejected":
-                    items_by_id[matched]["status"] = "active"
-                    items_by_id[matched].pop("rejection_reason", None)
-                    change_history.append({"type": "restore_item", "item_id": matched, "message": f"Restored {items_by_id[matched]['name']}", "at": created_at})
-
-    items = [item for item in items_by_id.values() if item.get("status") != "rejected"]
-    rejected_items = [item for item in items_by_id.values() if item.get("status") == "rejected"]
-    state = {
-        "schema": "topic_detail_state_v1",
-        "title": topic_name,
-        "goal": goal,
-        "requirements": requirements,
-        "items": items,
-        "rejected_items": rejected_items,
-        "open_questions": _extract_open_questions(user_messages),
-    }
-    normalized_state = _normalize_topic_state(state, topic_id=0, topic_name=topic_name)
-    return normalized_state, change_history
-
 
 def _summary_from_topic_state(state: dict[str, Any]) -> str:
     normalized = _normalize_topic_state(state, topic_id=0, topic_name=str(state.get("title", "General") or "General"))

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from difflib import SequenceMatcher
-from typing import Any
 
 def _slugify_name(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
@@ -39,26 +38,6 @@ def _extract_action_target(text: str, *, action: str) -> str:
         if match is not None:
             return match.group(1).strip(" .?!")
     return ""
-
-
-def _match_item_id(target: str, items: list[dict[str, Any]]) -> str | None:
-    normalized_target = _token_set(target)
-    if not normalized_target:
-        return None
-    best_item_id: str | None = None
-    best_score = 0.0
-    for item in items:
-        item_id = str(item.get("id", "")).strip()
-        item_name = str(item.get("name", "")).strip()
-        if not item_id or not item_name:
-            continue
-        score = _query_coverage_score(normalized_target, _token_set(item_name))
-        if score > best_score:
-            best_score = score
-            best_item_id = item_id
-    if best_score <= 0.0:
-        return None
-    return best_item_id
 
 
 def _estimate_tokens(text: str) -> int:
@@ -218,32 +197,6 @@ def _extract_spec_facts(items: list[str]) -> list[str]:
     return _dedupe_keep_order(facts)
 
 
-def _extract_decisions(items: list[str]) -> list[str]:
-    output: list[str] = []
-    for text in items:
-        for line in re.split(r"[\n\r]+", text):
-            candidate = line.strip(" -\t")
-            lowered = candidate.lower()
-            if not candidate:
-                continue
-            if any(token in lowered for token in ("suggest", "recommend", "recommended", "decide", "selected", "reject", "prefer", "compared")):
-                output.append(candidate)
-    return _dedupe_keep_order(output)
-
-
-def _extract_recommendation_highlights(items: list[str]) -> list[str]:
-    output: list[str] = []
-    for text in items:
-        for line in re.split(r"[\n\r]+", text):
-            candidate = line.strip(" -\t")
-            lowered = candidate.lower()
-            if not candidate:
-                continue
-            if _looks_like_recommendation_or_price(candidate) or _contains_price_signal(candidate):
-                output.append(candidate)
-    return _dedupe_keep_order(output)
-
-
 def _extract_model_mentions(items: list[str]) -> list[str]:
     brands = "HP|Lenovo|Dell|Microsoft|Asus|Acer|MSI|Razer|Samsung|LG|Framework|Alienware"
     brand_values = {"hp", "lenovo", "dell", "microsoft", "asus", "acer", "msi", "razer", "samsung", "lg", "framework", "alienware"}
@@ -268,31 +221,6 @@ def _extract_model_mentions(items: list[str]) -> list[str]:
                     continue
                 matches.append(cleaned)
     return _dedupe_keep_order(matches)
-
-
-def _extract_open_questions(items: list[str]) -> list[str]:
-    output: list[str] = []
-    for text in items:
-        for sentence in re.split(r"(?<=[?])\s+", text):
-            candidate = sentence.strip()
-            if candidate.endswith("?"):
-                output.append(candidate)
-    return _dedupe_keep_order(output)
-
-
-def _extract_entities(items: list[str]) -> list[str]:
-    entities: list[str] = []
-    pattern = re.compile(r"\b[A-Z][a-zA-Z0-9]+(?:\s+[A-Z][a-zA-Z0-9]+){0,3}\b")
-    stopwords = {"For", "The", "This", "That", "And", "But", "RAM", "SSD"}
-    for text in items:
-        for match in pattern.findall(text or ""):
-            candidate = match.strip()
-            if len(candidate) < 3:
-                continue
-            if candidate in stopwords:
-                continue
-            entities.append(candidate)
-    return _dedupe_keep_order(entities)
 
 
 def _clean_excerpt(text: str, maximum_chars: int) -> str:
