@@ -138,6 +138,18 @@ class LinkRepository:
             ).fetchall()
         return [_link_from_row(row) for row in rows]
 
+    def count_relations_from(self, source_id: str) -> dict[MemoryRelation, int]:
+        """How many edges of each relation leave this record.
+
+        One grouped query. Counting evidence should not load the evidence.
+        """
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                "SELECT relation, COUNT(*) FROM memory_links WHERE source_id = ? GROUP BY relation",
+                (source_id,),
+            ).fetchall()
+        return {MemoryRelation(str(row[0])): int(row[1]) for row in rows}
+
     def count(self) -> int:
         with self.database.connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM memory_links").fetchone()[0])

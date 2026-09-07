@@ -112,6 +112,22 @@ class KnowledgeRepository:
             ).fetchall()
         return [record_from_row(row) for row in rows]
 
+    def list_by_kind_and_status(
+        self, kind: MemoryKind, status: MemoryStatus, *, limit: int = 50
+    ) -> list[MemoryRecord]:
+        """Every record of one kind in one state, across topics.
+
+        Served by idx_memories_kind_status, so asking "what is waiting on me"
+        does not scan.
+        """
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                f"SELECT {MEMORY_COLUMNS} FROM memories WHERE kind = ? AND status = ? "
+                "ORDER BY created_at DESC, sequence DESC LIMIT ?",
+                (MemoryKind(kind).value, MemoryStatus(status).value, max(1, int(limit))),
+            ).fetchall()
+        return [record_from_row(row) for row in rows]
+
     def count(self) -> int:
         with self.database.connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0])
