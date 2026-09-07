@@ -1,3 +1,5 @@
+# File: core/application/service.py
+
 from __future__ import annotations
 
 import re
@@ -5,6 +7,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
 
 from core.actions.audit import ActionAuditLogger
 from core.actions.executor import ActionExecutionContext, ActionExecutor, SystemAdapter
@@ -125,7 +128,6 @@ class IrisApplication:
         self.topic_memory_service: TopicMemoryService | None = None
         self._last_coordinator_turn: CoordinatorTurn | None = None
 
-        # Safe defaults for partial test harnesses that bypass initialize().
         self.topic_handler: CommandHandler = _NoopCommandHandler()
         self.save_handler: CommandHandler = _NoopCommandHandler()
         self.session_handler: CommandHandler = _NoopCommandHandler()
@@ -203,7 +205,6 @@ class IrisApplication:
         knowledge_cfg = self.config.get("general_knowledge", {}) if isinstance(self.config, dict) else {}
         recall_enabled = bool((knowledge_cfg.get("enabled", {}) or {}).get("recall", True))
         if recall_enabled:
-            # The planner decides when to recall; there is no keyword route to it.
             self.coordinator.general_knowledge_router.register(
                 KnowledgeRecallProvider(self.knowledge_retriever)
             )
@@ -843,7 +844,6 @@ class IrisApplication:
         self._current_status = status
         all_messages = list(self._response_messages)
         messages = list(all_messages)
-        # When a request-level event handler is active, interim events were already rendered.
         if self._active_event_handler is not None and self._streamed_message_counts:
             remaining_counts = dict(self._streamed_message_counts)
             filtered: list[IrisMessage] = []

@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿# File: core/assistant/coordinator.py
+
+from __future__ import annotations
 
 import json
 import logging
@@ -36,13 +38,6 @@ def _platform_start_file(path: str) -> None:
 
 @dataclass(frozen=True)
 class CoordinatorTurn:
-    """Everything one conversational turn produces.
-
-    Callers previously had to read the coordinator's private attributes to get
-    at anything other than the response text; this is that contract, made
-    explicit.
-    """
-
     text: str
     general_knowledge: dict[str, Any] | None = None
     file_operations: dict[str, Any] | None = None
@@ -97,7 +92,6 @@ class AssistantCoordinator:
         self.trace_logger = RequestTraceLogger(audit_path / "request_trace.jsonl" if isinstance(audit_path, Path) else None)
 
     def respond(self, user_message: str, project_id: str | None = None) -> str:
-        """Answer as plain text. Use respond_detailed for the full turn."""
         return self.respond_detailed(user_message, project_id=project_id).text
 
     def respond_detailed(self, user_message: str, project_id: str | None = None) -> CoordinatorTurn:
@@ -178,8 +172,6 @@ class AssistantCoordinator:
                 session=session,
             )
         except Exception as error:
-            # Orchestration runs before the turn is recorded, so preserve the
-            # user message and the error event exactly as the generation path does.
             record = self._turn_recorder(session)
             record("user", user_message)
             self._record_generation_failure(record, error)
@@ -833,7 +825,6 @@ class AssistantCoordinator:
         project_id: str | None,
         trace_payload: dict[str, Any],
     ) -> str | None:
-        """Resolve and summarize a single requested file, or None if that is not this turn."""
         if not (request.requires_tool and request.intent == "read_file"):
             return None
 
@@ -886,7 +877,6 @@ class AssistantCoordinator:
         user_message: str,
         trace_payload: dict[str, Any],
     ) -> str | None:
-        """Count files of one extension beneath an approved root, or None if that is not this turn."""
         if not (request.requires_tool and request.intent == "count_files"):
             return None
 
@@ -987,7 +977,6 @@ class AssistantCoordinator:
         session: ConversationSession,
         trace_payload: dict[str, Any],
     ) -> str | None:
-        """Search approved roots and offer ranked matches, or None if that is not this turn."""
         if not (request.requires_tool and request.intent == "find_files"):
             return None
 
@@ -1126,7 +1115,6 @@ class AssistantCoordinator:
         project_id: str | None,
         trace_payload: dict[str, Any],
     ) -> str | None:
-        """Act on a numbered choice against the pending results, or None if that is not this turn."""
         if not (request.requires_tool and request.intent == "select_pending_result"):
             return None
 
@@ -1177,7 +1165,6 @@ class AssistantCoordinator:
         return None
 
     def _handle_help(self, user_message: str, trace_payload: dict[str, Any]) -> str | None:
-        """Answer the /help command, or None if that is not this turn."""
         if not (user_message.strip().lower() == "/help"):
             return None
 
@@ -1216,7 +1203,6 @@ class AssistantCoordinator:
         tool_arguments: dict[str, Any],
         tool_result: dict[str, Any],
     ) -> str:
-        """Close out a turn: finish its trace record, log it, and persist the exchange."""
         trace_payload.update(
             {
                 "selected_tool": selected_tool,
@@ -1229,7 +1215,6 @@ class AssistantCoordinator:
         return self._persist_and_return(user_message, response)
 
     def _turn_recorder(self, session: ConversationSession) -> Callable[..., None]:
-        """Return the add_message callable for whichever store owns this turn."""
         if self.session_manager is not None and self.session_manager.get_active_session() is not None:
             return self.session_manager.add_message
         return session.add_message
@@ -1312,12 +1297,6 @@ class AssistantCoordinator:
             logger.info("memory_diagnostics_text=%s", diagnostics_to_text(payload))
 
     def _apply_router_defaults(self) -> None:
-        """Seed provider-specific defaults on the router before a turn is planned.
-
-        This lives here rather than in AssistantOrchestrator: the orchestrator
-        is capability-agnostic, and the profile that supplies the location is
-        the coordinator's to read.
-        """
         setter = getattr(self.general_knowledge_router, "set_weather_default_location", None)
         if not callable(setter):
             return

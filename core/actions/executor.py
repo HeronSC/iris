@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿# File: core/actions/executor.py
+
+from __future__ import annotations
 
 import os
 import subprocess
@@ -18,13 +20,6 @@ from core.documents.catalog import DocumentCatalog
 
 class SystemAdapter:
     def _start_file(self, path: str) -> None:
-        """Hand a path to the shell.
-
-        Failures propagate: ActionExecutor turns them into a failed
-        ActionResult, which is how every other method here reports trouble.
-        Swallowing them made the assistant claim success on an open that
-        never happened.
-        """
         start_file = getattr(os, "startfile", None)
         if start_file is None:
             raise OSError("Opening paths is not supported on this platform")

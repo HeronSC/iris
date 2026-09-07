@@ -1,3 +1,5 @@
+# File: core/assistant/general_knowledge_router.py
+
 from __future__ import annotations
 
 import ast
@@ -91,11 +93,9 @@ class KnowledgeProvider:
         return None
 
     def definition(self) -> CapabilityDefinition | None:
-        """Describe this capability to the orchestrator, or None to stay unadvertised."""
         return None
 
     def parse_request(self, payload: dict[str, Any]) -> Any | None:
-        """Turn orchestrator-supplied arguments into this provider's request object."""
         return None
 
 
@@ -153,7 +153,6 @@ class GeneralKnowledgeRouter:
         return None
 
     def capability_definitions(self) -> list[CapabilityDefinition]:
-        """What the orchestrator may call. Each provider describes itself."""
         definitions = [provider.definition() for provider in self.providers]
         return [item for item in definitions if item is not None]
 
@@ -166,11 +165,6 @@ class GeneralKnowledgeRouter:
         return None
 
     def register(self, provider: KnowledgeProvider) -> None:
-        """Add a capability the router did not construct itself.
-
-        Providers built here are gated by the general_knowledge.enabled config;
-        one passed in has already been decided on by its caller.
-        """
         if any(existing.name == provider.name for existing in self.providers):
             raise ValueError(f"A provider named {provider.name} is already registered")
         self.providers.append(provider)
@@ -474,7 +468,7 @@ class WeatherProvider(KnowledgeProvider):
         return str(result.response or "").strip()
 
     def execute_detailed(self, text: str) -> GeneralKnowledgeResult | None:
-        weather_request = self._legacy_parse_weather_request(text)
+        weather_request = self._parse_weather_request(text)
         return self.execute_detailed_request(weather_request)
 
     def execute_request(self, request_obj: Any) -> str:
@@ -667,7 +661,7 @@ class WeatherProvider(KnowledgeProvider):
 
         raise ProviderExecutionError(f"unsupported weather range: {weather_request.range_name}", unavailable=False)
 
-    def _legacy_parse_weather_request(self, text: str) -> WeatherRequest:
+    def _parse_weather_request(self, text: str) -> WeatherRequest:
         lowered = text.lower().strip()
         location = self._extract_location(text)
         if not location and self._last_location and self._is_follow_up_weather_question(text):

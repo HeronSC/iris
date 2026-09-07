@@ -1,6 +1,9 @@
-﻿from __future__ import annotations
+﻿# File: core/assistant/index_commands.py
+
+from __future__ import annotations
 
 import json
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -312,12 +315,14 @@ class IndexCommandHandler:
         if self._progress_line_length > len(message):
             padded = message + (" " * (self._progress_line_length - len(message)))
         self._progress_line_length = len(message)
-        print(f"\r{padded}", end="", flush=True)
+        sys.stdout.write(f"\r{padded}")
+        sys.stdout.flush()
 
     def _clear_progress_line(self) -> None:
         if self._progress_line_length == 0:
             return
-        print("\r" + (" " * self._progress_line_length) + "\r", end="", flush=True)
+        sys.stdout.write("\r" + (" " * self._progress_line_length) + "\r")
+        sys.stdout.flush()
         self._progress_line_length = 0
         self._progress_last_update = 0.0
 

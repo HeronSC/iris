@@ -1,9 +1,12 @@
+# File: core/actions/implementations/add_document_root.py
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 from core.actions.executor import ActionExecutionContext
+from core.config.loader import ConfigLoader
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
 from core.config.document_search_mutations import build_confirmation_preview, ensure_document_search_section, ensure_root_entries, upsert_root_entry
 
@@ -85,8 +88,6 @@ class AddDocumentRootAction:
                 handle.write("\n")
         except Exception as error:
             return ActionResult(status="failed", message=f"Failed to write config: {error}", action=self.name, error="config_write_failed")
-
-        from core.config.loader import ConfigLoader
 
         loaded = ConfigLoader(config_path).load()
         loaded_document_search = loaded.get("document_search", {}) if isinstance(loaded, dict) else {}
