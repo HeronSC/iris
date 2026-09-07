@@ -186,6 +186,37 @@ class HypothesisTracker:
         self.graph.records.set_status(hypothesis_id, MemoryStatus.ACCEPTED)
         return self._hypothesis(hypothesis_id)
 
+    def decline(self, hypothesis_id: str, *, declined_by: str, reason: str) -> MemoryRecord:
+        """Refuse a supported hypothesis, on a named person's authority.
+
+        The counterpart to promote(). Evidence can say an idea holds and a
+        person can still not want the behaviour, and that judgement is worth
+        keeping: without it the same hypothesis returns next time the evidence
+        crosses the threshold, with no record of why it was turned down.
+        """
+        if not str(declined_by).strip():
+            raise KnowledgeError("Declining requires naming who decided")
+        if not str(reason).strip():
+            raise KnowledgeError("Declining requires a reason: it is the part worth keeping")
+        hypothesis = self._hypothesis(hypothesis_id)
+        if hypothesis.status is not MemoryStatus.SUPPORTED:
+            raise KnowledgeError(
+                f"Only a supported hypothesis can be declined; this one is {hypothesis.status.value}"
+            )
+
+        decision = self.graph.records.add(
+            MemoryRecord(
+                kind=MemoryKind.DECISION,
+                topic=hypothesis.topic,
+                content=f"Declined '{hypothesis.content}': {reason}",
+                source=f"approval:{declined_by}",
+                data={"declined_by": declined_by, "hypothesis_id": hypothesis_id, "reason": reason},
+            )
+        )
+        self.graph.links.link(decision.id, hypothesis_id, MemoryRelation.DECIDED_FROM)
+        self.graph.records.set_status(hypothesis_id, MemoryStatus.REJECTED)
+        return self._hypothesis(hypothesis_id)
+
     # -- finding work --------------------------------------------------------
 
     def in_status(self, status: MemoryStatus, *, topic: str | None = None, limit: int = 50) -> list[MemoryRecord]:

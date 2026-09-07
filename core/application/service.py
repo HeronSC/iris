@@ -38,6 +38,7 @@ from core.assistant.coordinator import AssistantCoordinator, CoordinatorTurn
 from core.assistant.command_handler import CommandHandler
 from core.assistant.conversation_synonyms import ConversationSynonymStore
 from core.assistant.index_commands import IndexCommandHandler
+from core.assistant.knowledge_commands import KnowledgeCommandHandler
 from core.assistant.intent_example_store import IntentExampleStore
 from core.assistant.intent_router import IntentRouter
 from core.assistant.memory_commands import MemoryCommandHandler
@@ -67,6 +68,9 @@ from core.documents.models import DocumentSearchConfig
 from core.documents.query_parser import FileSearchQueryParser, QueryParserConfig
 from core.documents.scanner import DocumentScanner
 from core.documents.search_service import DocumentSearchService
+from core.knowledge import KnowledgeGraph
+from core.knowledge.hypotheses import HypothesisTracker
+from core.knowledge.review import KnowledgeReviewWorkflow
 from core.llm.ollama_client import OllamaClient, OllamaClientError
 from core.profile.loader import AssistantMemoryError, MemoryLoader
 from core.profile.proposal_generator import MemoryProposalGenerator
@@ -130,6 +134,7 @@ class IrisApplication:
         self.search_handler: CommandHandler = _NoopNaturalLanguageHandler()
         self.action_handler: CommandHandler = _NoopNaturalLanguageHandler()
         self.project_handler: CommandHandler = _NoopCommandHandler()
+        self.knowledge_handler: CommandHandler = _NoopCommandHandler()
 
     def initialize(self, event_handler: EventHandler | None = None) -> None:
         self.event_handler = event_handler
@@ -188,10 +193,20 @@ class IrisApplication:
             self.topic_memory_service = None
             self.topic_handler = _NoopCommandHandler()
 
+        knowledge_path = self.config.get("knowledge_path") or memory_config.database_path.parent / "knowledge.db"
+        self.knowledge = KnowledgeGraph(SQLiteDatabase(knowledge_path))
+        self.hypotheses = HypothesisTracker(self.knowledge)
+
         self.project_handler: CommandHandler = ProjectCommandHandler(output=self._sink)
         self.save_handler: CommandHandler = SaveCommandHandler(output=self._sink)
         proposal_store = MemoryProposalStore(self.config.get("proposal_path") or Path(__file__).resolve().parents[1] / "memory" / "proposals")
         audit_logger = AuditLogger(self.config.get("audit_path") or Path(__file__).resolve().parents[1] / "audit")
+        self.knowledge_review = KnowledgeReviewWorkflow(self.hypotheses, audit_logger=audit_logger)
+        self.knowledge_handler: CommandHandler = KnowledgeCommandHandler(
+            self.knowledge_review,
+            output=self._sink,
+            actor=str(self.config.get("assistant_user", "user")),
+        )
         proposal_generator = MemoryProposalGenerator(self.ollama_client)
         reviewer = MemoryProposalReviewer()
         update_service = MemoryUpdateService(self.config["memory_path"], proposal_store, audit_logger, memory_store=self.store)
@@ -435,6 +450,8 @@ class IrisApplication:
             if self._handle_slash_command(self.proposal_handler, stripped, status, command_prefixes=("/proposal",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.memory_handler, stripped, status, command_prefixes=("/memory",)):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.knowledge_handler, stripped, status, command_prefixes=("/knowledge",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)
