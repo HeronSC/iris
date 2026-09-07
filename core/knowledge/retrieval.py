@@ -44,6 +44,12 @@ class KnowledgeQuery:
     candidate_limit: int = 400
     limit: int = 10
     max_tokens: int | None = None
+    #: Least text overlap a record may have and still be returned, applied only
+    #: when ``text`` is given. Without it, recency and standing alone keep a
+    #: record with nothing to do with the question, and anything handed to a
+    #: model as context is read as relevant to it. Set to 0.0 to keep everything
+    #: the filters matched, which is what a browse wants and a question does not.
+    minimum_text_match: float = 0.01
 
 
 @dataclass(frozen=True)
@@ -88,7 +94,10 @@ class KnowledgeRetriever:
             (score(record, query_tokens, now=now) for record in candidates),
             key=lambda item: (-item.score, item.record.created_at),
         )
-        top = scored[: max(1, int(query.limit))]
+        relevant = scored
+        if query_tokens and query.minimum_text_match > 0:
+            relevant = [item for item in scored if item.reasons.get("text", 0.0) >= query.minimum_text_match]
+        top = relevant[: max(1, int(query.limit))]
         kept, spent = fit_to_budget(top, query.max_tokens)
 
         return RetrievalResult(
@@ -96,6 +105,7 @@ class KnowledgeRetriever:
             diagnostics={
                 "candidates_examined": len(candidates),
                 "candidate_limit_reached": len(candidates) >= max(1, int(query.candidate_limit)),
+                "dropped_as_irrelevant": len(scored) - len(relevant),
                 "returned": len(kept),
                 "dropped_for_budget": len(top) - len(kept),
                 "estimated_tokens": spent,

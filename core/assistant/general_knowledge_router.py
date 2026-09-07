@@ -165,6 +165,16 @@ class GeneralKnowledgeRouter:
                 return provider.parse_request(payload)
         return None
 
+    def register(self, provider: KnowledgeProvider) -> None:
+        """Add a capability the router did not construct itself.
+
+        Providers built here are gated by the general_knowledge.enabled config;
+        one passed in has already been decided on by its caller.
+        """
+        if any(existing.name == provider.name for existing in self.providers):
+            raise ValueError(f"A provider named {provider.name} is already registered")
+        self.providers.append(provider)
+
     def set_active_provider(self, provider_name: str | None) -> None:
         normalized = str(provider_name or "").strip() or None
         self._last_provider_name = normalized

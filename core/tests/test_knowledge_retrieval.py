@@ -162,6 +162,39 @@ class RetrievalTests(unittest.TestCase):
 
         self.assertEqual(result.records[0].record.content, "ABC showed relative volume acceleration")
 
+    def test_records_matching_nothing_in_the_question_are_dropped(self) -> None:
+        """Recency and standing alone must not keep an unrelated record.
+
+        Anything handed to a model as context is read as relevant to the
+        question, so returning a near-miss is worse than returning less.
+        """
+        self.records.add(_record("ABC showed relative volume acceleration"))
+        self.records.add(_record("unrelated note about the printer"))
+
+        result = self.retriever.retrieve(KnowledgeQuery(text="relative volume acceleration"))
+
+        self.assertEqual([item.record.content for item in result.records], ["ABC showed relative volume acceleration"])
+        self.assertEqual(result.diagnostics["dropped_as_irrelevant"], 1)
+
+    def test_a_browse_with_no_question_keeps_everything(self) -> None:
+        self.records.add(_record("one"))
+        self.records.add(_record("two"))
+
+        result = self.retriever.retrieve(KnowledgeQuery(topic="trading/candidates"))
+
+        self.assertEqual(len(result.records), 2)
+        self.assertEqual(result.diagnostics["dropped_as_irrelevant"], 0)
+
+    def test_the_relevance_floor_can_be_turned_off(self) -> None:
+        self.records.add(_record("ABC showed relative volume acceleration"))
+        self.records.add(_record("unrelated note about the printer"))
+
+        result = self.retriever.retrieve(
+            KnowledgeQuery(text="relative volume acceleration", minimum_text_match=0.0)
+        )
+
+        self.assertEqual(len(result.records), 2)
+
     def test_the_limit_caps_what_comes_back(self) -> None:
         for index in range(20):
             self.records.add(_record(f"observation {index}"))

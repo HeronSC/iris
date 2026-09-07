@@ -39,6 +39,7 @@ from core.assistant.command_handler import CommandHandler
 from core.assistant.conversation_synonyms import ConversationSynonymStore
 from core.assistant.index_commands import IndexCommandHandler
 from core.assistant.knowledge_commands import KnowledgeCommandHandler
+from core.assistant.knowledge_provider import KnowledgeRecallProvider
 from core.assistant.intent_example_store import IntentExampleStore
 from core.assistant.intent_router import IntentRouter
 from core.assistant.memory_commands import MemoryCommandHandler
@@ -68,7 +69,7 @@ from core.documents.models import DocumentSearchConfig
 from core.documents.query_parser import FileSearchQueryParser, QueryParserConfig
 from core.documents.scanner import DocumentScanner
 from core.documents.search_service import DocumentSearchService
-from core.knowledge import KnowledgeGraph
+from core.knowledge import KnowledgeGraph, KnowledgeRetriever
 from core.knowledge.hypotheses import HypothesisTracker
 from core.knowledge.review import KnowledgeReviewWorkflow
 from core.llm.ollama_client import OllamaClient, OllamaClientError
@@ -194,8 +195,18 @@ class IrisApplication:
             self.topic_handler = _NoopCommandHandler()
 
         knowledge_path = self.config.get("knowledge_path") or memory_config.database_path.parent / "knowledge.db"
-        self.knowledge = KnowledgeGraph(SQLiteDatabase(knowledge_path))
+        knowledge_database = SQLiteDatabase(knowledge_path)
+        self.knowledge = KnowledgeGraph(knowledge_database)
         self.hypotheses = HypothesisTracker(self.knowledge)
+        self.knowledge_retriever = KnowledgeRetriever(knowledge_database)
+
+        knowledge_cfg = self.config.get("general_knowledge", {}) if isinstance(self.config, dict) else {}
+        recall_enabled = bool((knowledge_cfg.get("enabled", {}) or {}).get("recall", True))
+        if recall_enabled:
+            # The planner decides when to recall; there is no keyword route to it.
+            self.coordinator.general_knowledge_router.register(
+                KnowledgeRecallProvider(self.knowledge_retriever)
+            )
 
         self.project_handler: CommandHandler = ProjectCommandHandler(output=self._sink)
         self.save_handler: CommandHandler = SaveCommandHandler(output=self._sink)
