@@ -5,43 +5,11 @@ import sqlite3
 from typing import Any
 
 from core.knowledge.models import KnowledgeError, MemoryKind, MemoryRecord, MemoryStatus
+from core.knowledge.schema import ensure_schema, next_sequence
 from core.storage.sqlite_database import SQLiteDatabase
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS memories (
-    id TEXT PRIMARY KEY,
-    -- Monotonic write order. created_at is only second-resolution and can be
-    -- backdated when history is loaded, so it ties often and is not a stable
-    -- sort on its own. This breaks those ties deterministically, and gives
-    -- retrieval a cursor to page on.
-    sequence INTEGER NOT NULL UNIQUE,
-    kind TEXT NOT NULL,
-    topic TEXT NOT NULL,
-    status TEXT NOT NULL,
-    content TEXT NOT NULL,
-    data_json TEXT NOT NULL DEFAULT '{}',
-    confidence REAL,
-    source TEXT NOT NULL,
-    source_ref TEXT,
-    occurred_at TEXT,
-    created_at TEXT NOT NULL,
-    supersedes TEXT REFERENCES memories(id),
-    superseded_by TEXT REFERENCES memories(id)
-);
-
--- Retrieval filters in SQL before it scores anything in Python, so the indexes
--- carry the query shapes slice 3 will use. The lead index covers the ORDER BY
--- as well as the WHERE, which keeps SQLite off a temp b-tree at volume.
-CREATE INDEX IF NOT EXISTS idx_memories_topic_kind
-    ON memories(topic, kind, created_at DESC, sequence DESC);
-CREATE INDEX IF NOT EXISTS idx_memories_kind_status ON memories(kind, status);
-CREATE INDEX IF NOT EXISTS idx_memories_occurred ON memories(occurred_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_supersedes ON memories(supersedes)
-    WHERE supersedes IS NOT NULL;
-"""
-
-_COLUMNS = (
+MEMORY_COLUMNS = (
     "id, kind, topic, status, content, data_json, confidence, source, "
     "source_ref, occurred_at, created_at, supersedes, superseded_by"
 )
@@ -57,12 +25,7 @@ class KnowledgeRepository:
 
     def __init__(self, database: SQLiteDatabase) -> None:
         self.database = database
-        self._ensure_schema()
-
-    def _ensure_schema(self) -> None:
-        with self.database.connect() as conn:
-            conn.executescript(_SCHEMA)
-            conn.commit()
+        ensure_schema(database)
 
     def add(self, record: MemoryRecord) -> MemoryRecord:
         with self.database.connect() as conn:
@@ -72,8 +35,8 @@ class KnowledgeRepository:
 
     def get(self, memory_id: str) -> MemoryRecord | None:
         with self.database.connect() as conn:
-            row = conn.execute(f"SELECT {_COLUMNS} FROM memories WHERE id = ?", (memory_id,)).fetchone()
-        return _record_from_row(row) if row is not None else None
+            row = conn.execute(f"SELECT {MEMORY_COLUMNS} FROM memories WHERE id = ?", (memory_id,)).fetchone()
+        return record_from_row(row) if row is not None else None
 
     def supersede(self, memory_id: str, replacement: MemoryRecord) -> MemoryRecord:
         """Replace a record with a corrected one, keeping the original readable.
@@ -143,11 +106,11 @@ class KnowledgeRepository:
         params.append(max(1, int(limit)))
         with self.database.connect() as conn:
             rows = conn.execute(
-                f"SELECT {_COLUMNS} FROM memories WHERE {' AND '.join(clauses)} "
+                f"SELECT {MEMORY_COLUMNS} FROM memories WHERE {' AND '.join(clauses)} "
                 "ORDER BY created_at DESC, sequence DESC LIMIT ?",
                 params,
             ).fetchall()
-        return [_record_from_row(row) for row in rows]
+        return [record_from_row(row) for row in rows]
 
     def count(self) -> int:
         with self.database.connect() as conn:
@@ -164,10 +127,10 @@ def _insert(conn: Any, record: MemoryRecord) -> None:
     row["data_json"] = json.dumps(row["data_json"], ensure_ascii=False)
     if conn.execute("SELECT 1 FROM memories WHERE id = ?", (record.id,)).fetchone() is not None:
         raise KnowledgeError(f"Memory already exists: {record.id}")
-    row["sequence"] = int(conn.execute("SELECT COALESCE(MAX(sequence), 0) + 1 FROM memories").fetchone()[0])
+    row["sequence"] = next_sequence(conn, "memories")
     try:
         conn.execute(
-            f"INSERT INTO memories (sequence, {_COLUMNS}) VALUES "
+            f"INSERT INTO memories (sequence, {MEMORY_COLUMNS}) VALUES "
             "(:sequence, :id, :kind, :topic, :status, :content, :data_json, :confidence, :source, "
             ":source_ref, :occurred_at, :created_at, :supersedes, :superseded_by)",
             row,
@@ -176,7 +139,7 @@ def _insert(conn: Any, record: MemoryRecord) -> None:
         raise KnowledgeError(f"Could not store memory {record.id}: {error}") from error
 
 
-def _record_from_row(row: Any) -> MemoryRecord:
+def record_from_row(row: Any) -> MemoryRecord:
     try:
         data = json.loads(row["data_json"])
     except (TypeError, ValueError):
