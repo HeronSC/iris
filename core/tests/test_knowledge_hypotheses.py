@@ -12,7 +12,7 @@ from core.knowledge import (
     MemoryRelation,
     MemoryStatus,
 )
-from core.knowledge.hypotheses import Assessment, HypothesisPolicy, HypothesisTracker
+from core.knowledge.hypotheses import HypothesisPolicy, HypothesisTracker
 from core.storage.sqlite_database import SQLiteDatabase
 
 TOPIC = "trading/candidates"

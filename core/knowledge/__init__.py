@@ -8,6 +8,7 @@ Distinct from the two older memory namespaces, which this does not replace:
 """
 
 from core.knowledge.graph import Evidence, Explanation, KnowledgeGraph, render_explanation
+from core.knowledge.hypotheses import Assessment, HypothesisPolicy, HypothesisTracker
 from core.knowledge.links import (
     EVIDENCE_RELATIONS,
     GROUNDING_RELATIONS,
@@ -29,11 +30,14 @@ from core.knowledge.repository import KnowledgeRepository
 from core.knowledge.schema import ensure_schema
 
 __all__ = [
+    "Assessment",
     "DEFAULT_STATUS",
     "EVIDENCE_RELATIONS",
     "Evidence",
     "Explanation",
     "GROUNDING_RELATIONS",
+    "HypothesisPolicy",
+    "HypothesisTracker",
     "KnowledgeError",
     "KnowledgeGraph",
     "KnowledgeQuery",

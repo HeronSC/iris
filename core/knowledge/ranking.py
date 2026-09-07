@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from core.knowledge.models import MemoryKind, MemoryRecord, MemoryStatus
+from core.knowledge.models import MemoryRecord, MemoryStatus
 
 
 #: Words carrying no signal in a record. Deliberately short: this content is
