@@ -1,7 +1,10 @@
+# File: core/knowledge/repository.py
+
 from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from typing import Any
 
 from core.knowledge.models import KnowledgeError, MemoryKind, MemoryRecord, MemoryStatus
@@ -14,24 +17,40 @@ MEMORY_COLUMNS = (
     "source_ref, occurred_at, created_at, supersedes, superseded_by"
 )
 
+_ID_CHECK_CHUNK = 400
+
 
 class KnowledgeRepository:
-    """Append-only store for what Iris knows.
-
-    ``add`` and ``supersede`` are the only ways in. There is deliberately no
-    way to edit a record's content: the audit question "why does Iris believe
-    this" is only answerable if what it believed earlier is still on disk.
-    """
-
     def __init__(self, database: SQLiteDatabase) -> None:
         self.database = database
         ensure_schema(database)
 
     def add(self, record: MemoryRecord) -> MemoryRecord:
+        return self.add_many((record,))[0]
+
+    def add_many(self, records: Sequence[MemoryRecord]) -> list[MemoryRecord]:
+        stored = list(records)
+        if not stored:
+            return []
+
+        _refuse_repeats_within(stored)
+        rows = [_row_for(record) for record in stored]
         with self.database.connect() as conn:
-            _insert(conn, record)
+            _refuse_ids_already_stored(conn, [record.id for record in stored])
+            base = next_sequence(conn, "memories")
+            for offset, row in enumerate(rows):
+                row["sequence"] = base + offset
+            try:
+                conn.executemany(
+                    f"INSERT INTO memories (sequence, {MEMORY_COLUMNS}) VALUES "
+                    "(:sequence, :id, :kind, :topic, :status, :content, :data_json, :confidence, "
+                    ":source, :source_ref, :occurred_at, :created_at, :supersedes, :superseded_by)",
+                    rows,
+                )
+            except sqlite3.IntegrityError as error:
+                raise KnowledgeError(f"Could not store {len(rows)} memories: {error}") from error
             conn.commit()
-        return record
+        return stored
 
     def get(self, memory_id: str) -> MemoryRecord | None:
         with self.database.connect() as conn:
@@ -39,12 +58,6 @@ class KnowledgeRepository:
         return record_from_row(row) if row is not None else None
 
     def supersede(self, memory_id: str, replacement: MemoryRecord) -> MemoryRecord:
-        """Replace a record with a corrected one, keeping the original readable.
-
-        The old record keeps its content and gains status ``superseded``; the
-        new one records what it replaced. Both happen in one transaction so a
-        failure cannot leave a dangling pointer.
-        """
         if replacement.id == memory_id:
             raise KnowledgeError("A memory cannot supersede itself")
 
@@ -64,7 +77,6 @@ class KnowledgeRepository:
         return stored
 
     def set_status(self, memory_id: str, status: MemoryStatus) -> None:
-        """The one permitted in-place change. Content stays immutable."""
         if not isinstance(status, MemoryStatus):
             status = MemoryStatus(str(status))
         with self.database.connect() as conn:
@@ -76,7 +88,6 @@ class KnowledgeRepository:
             conn.commit()
 
     def history(self, memory_id: str) -> list[MemoryRecord]:
-        """The chain of revisions ending at this record, oldest first."""
         chain: list[MemoryRecord] = []
         seen: set[str] = set()
         current = self.get(memory_id)
@@ -94,7 +105,6 @@ class KnowledgeRepository:
         include_superseded: bool = False,
         limit: int = 50,
     ) -> list[MemoryRecord]:
-        """Filtered in SQL, not in Python: this is the shape retrieval will grow from."""
         clauses = ["topic = ?"]
         params: list[Any] = [topic]
         if kind is not None:
@@ -113,11 +123,6 @@ class KnowledgeRepository:
         return [record_from_row(row) for row in rows]
 
     def find_by_id_prefix(self, prefix: str, *, limit: int = 5) -> list[MemoryRecord]:
-        """Records whose id starts with this, so a person can type the first few characters.
-
-        A range comparison rather than LIKE, so the primary key index serves it.
-        Returns several when the prefix is ambiguous; the caller decides.
-        """
         cleaned = str(prefix or "").strip().lower()
         if not cleaned:
             return []
@@ -129,14 +134,26 @@ class KnowledgeRepository:
             ).fetchall()
         return [record_from_row(row) for row in rows]
 
+    def list_by_source_ref(
+        self, source_ref: str, *, kind: MemoryKind | None = None, limit: int = 2000
+    ) -> list[MemoryRecord]:
+        clauses = ["source_ref = ?"]
+        params: list[Any] = [source_ref]
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(MemoryKind(kind).value)
+        params.append(max(1, int(limit)))
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                f"SELECT {MEMORY_COLUMNS} FROM memories WHERE {' AND '.join(clauses)} "
+                "ORDER BY sequence LIMIT ?",
+                params,
+            ).fetchall()
+        return [record_from_row(row) for row in rows]
+
     def list_by_kind_and_status(
         self, kind: MemoryKind, status: MemoryStatus, *, limit: int = 50
     ) -> list[MemoryRecord]:
-        """Every record of one kind in one state, across topics.
-
-        Served by idx_memories_kind_status, so asking "what is waiting on me"
-        does not scan.
-        """
         with self.database.connect() as conn:
             rows = conn.execute(
                 f"SELECT {MEMORY_COLUMNS} FROM memories WHERE kind = ? AND status = ? "
@@ -150,16 +167,34 @@ class KnowledgeRepository:
             return int(conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0])
 
 
-def _insert(conn: Any, record: MemoryRecord) -> None:
-    """Write one record, reporting a clash as a KnowledgeError rather than a sqlite one.
-
-    Callers see the same failure whether they came through add or supersede,
-    and the enclosing transaction still rolls back on the way out.
-    """
+def _row_for(record: MemoryRecord) -> dict[str, Any]:
     row = record.to_row()
     row["data_json"] = json.dumps(row["data_json"], ensure_ascii=False)
-    if conn.execute("SELECT 1 FROM memories WHERE id = ?", (record.id,)).fetchone() is not None:
-        raise KnowledgeError(f"Memory already exists: {record.id}")
+    return row
+
+
+def _refuse_repeats_within(records: Sequence[MemoryRecord]) -> None:
+    seen: set[str] = set()
+    for record in records:
+        if record.id in seen:
+            raise KnowledgeError(f"The same id appears twice in one batch: {record.id}")
+        seen.add(record.id)
+
+
+def _refuse_ids_already_stored(conn: Any, ids: Sequence[str]) -> None:
+    for start in range(0, len(ids), _ID_CHECK_CHUNK):
+        chunk = ids[start : start + _ID_CHECK_CHUNK]
+        placeholders = ",".join("?" * len(chunk))
+        row = conn.execute(
+            f"SELECT id FROM memories WHERE id IN ({placeholders}) LIMIT 1", tuple(chunk)
+        ).fetchone()
+        if row is not None:
+            raise KnowledgeError(f"Memory already exists: {str(row[0])}")
+
+
+def _insert(conn: Any, record: MemoryRecord) -> None:
+    row = _row_for(record)
+    _refuse_ids_already_stored(conn, (record.id,))
     row["sequence"] = next_sequence(conn, "memories")
     try:
         conn.execute(

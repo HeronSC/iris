@@ -1,3 +1,5 @@
+# File: core/tests/test_knowledge.py
+
 from __future__ import annotations
 
 import tempfile
@@ -6,7 +8,9 @@ from pathlib import Path
 
 from core.knowledge import (
     KnowledgeError,
+    KnowledgeQuery,
     KnowledgeRepository,
+    KnowledgeRetriever,
     MemoryKind,
     MemoryRecord,
     MemoryStatus,
@@ -251,3 +255,108 @@ class KnowledgeRepositoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BatchWriteTests(unittest.TestCase):
+    """A morning of candidates is one transaction, not five hundred."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.database = SQLiteDatabase(Path(self._tmp.name) / "knowledge.db")
+        self.repository = KnowledgeRepository(self.database)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _candidates(self, count: int, tag: str = "SYM") -> list[MemoryRecord]:
+        return [
+            _observation(content=f"{tag}{index} entered the candidate list", data={"symbol": f"{tag}{index}"})
+            for index in range(count)
+        ]
+
+    def test_a_batch_is_stored_and_handed_back(self) -> None:
+        stored = self.repository.add_many(self._candidates(500))
+
+        self.assertEqual(len(stored), 500)
+        self.assertEqual(self.repository.count(), 500)
+        self.assertEqual(self.repository.get(stored[0].id).content, stored[0].content)
+
+    def test_an_empty_batch_touches_nothing(self) -> None:
+        self.assertEqual(self.repository.add_many([]), [])
+        self.assertEqual(self.repository.count(), 0)
+
+    def test_write_order_follows_the_order_given(self) -> None:
+        """Sequence is the tie-break retrieval pages on, so it cannot be arbitrary."""
+        stored = self.repository.add_many(self._candidates(20))
+
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM memories ORDER BY sequence"
+            ).fetchall()
+
+        self.assertEqual([str(row[0]) for row in rows], [record.id for record in stored])
+
+    def test_a_batch_continues_the_sequence_of_earlier_writes(self) -> None:
+        self.repository.add(_observation())
+        self.repository.add_many(self._candidates(5))
+
+        with self.database.connect() as conn:
+            sequences = [int(row[0]) for row in conn.execute("SELECT sequence FROM memories ORDER BY sequence")]
+
+        self.assertEqual(sequences, list(range(1, 7)), "no gaps and no reuse")
+
+    def test_the_search_index_keeps_up_with_a_batch(self) -> None:
+        """The FTS trigger fires per row; a batch write must not outrun it."""
+        self.repository.add_many(self._candidates(300, tag="ZZQ"))
+
+        result = KnowledgeRetriever(self.database).retrieve(KnowledgeQuery(text="ZZQ7", limit=5))
+
+        self.assertTrue(result.records, "a batch-written record was not findable")
+        self.assertIn("ZZQ7", result.as_records()[0].content)
+
+    def test_a_repeated_id_within_one_batch_is_refused_whole(self) -> None:
+        batch = self._candidates(10)
+        batch.append(_observation(id=batch[3].id))
+
+        with self.assertRaises(KnowledgeError) as caught:
+            self.repository.add_many(batch)
+
+        self.assertIn("twice in one batch", str(caught.exception))
+        self.assertEqual(self.repository.count(), 0, "a partial morning is worse than a failed one")
+
+    def test_an_id_already_stored_is_refused_whole(self) -> None:
+        existing = self.repository.add(_observation())
+        batch = self._candidates(10)
+        batch.append(_observation(id=existing.id))
+
+        with self.assertRaises(KnowledgeError) as caught:
+            self.repository.add_many(batch)
+
+        self.assertIn("already exists", str(caught.exception))
+        self.assertEqual(self.repository.count(), 1)
+
+    def test_a_clash_is_caught_beyond_the_first_chunk(self) -> None:
+        """The stored-id check is chunked; a clash in a later chunk must still be seen."""
+        existing = self.repository.add(_observation())
+        batch = self._candidates(900)
+        batch.append(_observation(id=existing.id))
+
+        with self.assertRaises(KnowledgeError):
+            self.repository.add_many(batch)
+
+        self.assertEqual(self.repository.count(), 1)
+
+    def test_one_bad_record_leaves_nothing_behind(self) -> None:
+        batch = self._candidates(5)
+        batch.append(_observation(supersedes="no-such-memory"))
+
+        with self.assertRaises(KnowledgeError):
+            self.repository.add_many(batch)
+
+        self.assertEqual(self.repository.count(), 0)
+
+    def test_add_is_the_single_record_case_of_the_same_path(self) -> None:
+        stored = self.repository.add(_observation())
+
+        self.assertEqual(self.repository.count(), 1)
+        self.assertEqual(self.repository.get(stored.id).id, stored.id)

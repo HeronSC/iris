@@ -1,5 +1,8 @@
+# File: core/knowledge/graph.py
+
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from core.knowledge.links import (
@@ -13,29 +16,21 @@ from core.knowledge.models import KnowledgeError, MemoryKind, MemoryRecord, Memo
 from core.knowledge.repository import MEMORY_COLUMNS, KnowledgeRepository, record_from_row
 from core.storage.sqlite_database import SQLiteDatabase
 
+_LOOKUP_CHUNK = 400
+
 
 @dataclass(frozen=True)
 class Evidence:
-    """What is known for and against one claim."""
-
     supporting: list[tuple[MemoryRecord, MemoryLink]] = field(default_factory=list)
     contradicting: list[tuple[MemoryRecord, MemoryLink]] = field(default_factory=list)
 
     @property
     def balance(self) -> int:
-        """Supporting minus contradicting.
-
-        A count, not a probability. Deliberately crude: promoting a hypothesis
-        should rest on measured outcomes, not on an arithmetic that looks more
-        precise than the evidence behind it.
-        """
         return len(self.supporting) - len(self.contradicting)
 
 
 @dataclass(frozen=True)
 class Explanation:
-    """One step of "why does Iris believe this", with its grounds beneath it."""
-
     record: MemoryRecord
     relation: MemoryRelation | None = None
     grounds: list["Explanation"] = field(default_factory=list)
@@ -49,21 +44,12 @@ class Explanation:
 
 
 class KnowledgeGraph:
-    """Records plus the edges between them.
-
-    This is what makes the store answer the questions the phase is actually
-    for: what happened after we saw something, what argues for and against an
-    idea, and how a belief traces back to what was observed.
-    """
-
     def __init__(self, database: SQLiteDatabase) -> None:
         self.records = KnowledgeRepository(database)
         self.links = LinkRepository(database)
 
-    # -- observation and outcome ------------------------------------------
 
     def record_outcome(self, observation_id: str, outcome: MemoryRecord) -> MemoryRecord:
-        """Store an outcome and attach it to the observation it closes."""
         observation = self.records.get(observation_id)
         if observation is None:
             raise KnowledgeError(f"No such observation: {observation_id}")
@@ -73,20 +59,97 @@ class KnowledgeGraph:
         self.links.link(stored.id, observation_id, MemoryRelation.OUTCOME_OF)
         return stored
 
+    def record_outcomes(
+        self, pairs: Sequence[tuple[str, MemoryRecord]]
+    ) -> list[MemoryRecord]:
+        wanted = list(pairs)
+        if not wanted:
+            return []
+        for observation_id, outcome in wanted:
+            if outcome.kind is not MemoryKind.OUTCOME:
+                raise KnowledgeError(f"Expected an outcome record, got {outcome.kind.value}")
+        known = self._existing_ids([observation_id for observation_id, _ in wanted])
+        for observation_id, _ in wanted:
+            if observation_id not in known:
+                raise KnowledgeError(f"No such observation: {observation_id}")
+
+        stored = self.records.add_many([outcome for _, outcome in wanted])
+        self.links.add_many(
+            [
+                MemoryLink(
+                    source_id=outcome.id,
+                    target_id=observation_id,
+                    relation=MemoryRelation.OUTCOME_OF,
+                )
+                for (observation_id, _), outcome in zip(wanted, stored)
+            ]
+        )
+        return stored
+
+    def _existing_ids(self, ids: Sequence[str]) -> set[str]:
+        found: set[str] = set()
+        unique = list(dict.fromkeys(ids))
+        with self.records.database.connect() as conn:
+            for start in range(0, len(unique), _LOOKUP_CHUNK):
+                chunk = unique[start : start + _LOOKUP_CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT id FROM memories WHERE id IN ({placeholders})", tuple(chunk)
+                ).fetchall()
+                found.update(str(row[0]) for row in rows)
+        return found
+
+    def outcomes_for(self, observation_ids: Sequence[str]) -> dict[str, MemoryRecord]:
+        unique = list(dict.fromkeys(observation_ids))
+        if not unique:
+            return {}
+        columns = ", ".join(f"m.{name.strip()}" for name in MEMORY_COLUMNS.split(","))
+        found: dict[str, MemoryRecord] = {}
+        with self.records.database.connect() as conn:
+            for start in range(0, len(unique), _LOOKUP_CHUNK):
+                chunk = unique[start : start + _LOOKUP_CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT l.target_id, {columns} FROM memory_links l "
+                    "JOIN memories m ON m.id = l.source_id "
+                    f"WHERE l.relation = ? AND l.target_id IN ({placeholders}) "
+                    "ORDER BY l.sequence",
+                    (MemoryRelation.OUTCOME_OF.value, *chunk),
+                ).fetchall()
+                for row in rows:
+                    key = str(row["target_id"])
+                    if key not in found:
+                        found[key] = record_from_row(row)
+        return found
+
+    def decisions_for(self, observation_ids: Sequence[str]) -> dict[str, list[MemoryRecord]]:
+        unique = list(dict.fromkeys(observation_ids))
+        if not unique:
+            return {}
+        columns = ", ".join(f"m.{name.strip()}" for name in MEMORY_COLUMNS.split(","))
+        found: dict[str, list[MemoryRecord]] = {}
+        with self.records.database.connect() as conn:
+            for start in range(0, len(unique), _LOOKUP_CHUNK):
+                chunk = unique[start : start + _LOOKUP_CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT l.target_id, {columns} FROM memory_links l "
+                    "JOIN memories m ON m.id = l.source_id "
+                    f"WHERE l.relation = ? AND l.target_id IN ({placeholders}) "
+                    "ORDER BY l.sequence",
+                    (MemoryRelation.DECIDED_FROM.value, *chunk),
+                ).fetchall()
+                for row in rows:
+                    found.setdefault(str(row["target_id"]), []).append(record_from_row(row))
+        return found
+
     def outcome_for(self, observation_id: str) -> MemoryRecord | None:
-        """What happened after this observation, if anything has closed it yet."""
         incoming = self.links.links_to(observation_id, MemoryRelation.OUTCOME_OF)
         if not incoming:
             return None
         return self.records.get(incoming[0].source_id)
 
     def open_observations(self, topic: str, limit: int = 50) -> list[MemoryRecord]:
-        """Observations still waiting on an outcome.
-
-        One anti-join rather than a lookup per row: asking about a day's worth
-        of candidates is the expected use, and the per-row version cost 163ms
-        at 500 rows because it scaled with the limit.
-        """
         columns = ", ".join(f"m.{name.strip()}" for name in MEMORY_COLUMNS.split(","))
         with self.records.database.connect() as conn:
             rows = conn.execute(
@@ -105,7 +168,6 @@ class KnowledgeGraph:
             ).fetchall()
         return [record_from_row(row) for row in rows]
 
-    # -- hypotheses and evidence -------------------------------------------
 
     def add_evidence(
         self,
@@ -116,11 +178,6 @@ class KnowledgeGraph:
         weight: float | None = None,
         note: str | None = None,
     ) -> MemoryRecord:
-        """Attach a record as evidence for or against a hypothesis.
-
-        The evidence record is stored if it is new, so callers can hand over a
-        fresh measurement without a separate add.
-        """
         hypothesis = self.records.get(hypothesis_id)
         if hypothesis is None:
             raise KnowledgeError(f"No such hypothesis: {hypothesis_id}")
@@ -145,16 +202,8 @@ class KnowledgeGraph:
             bucket.append((record, link))
         return Evidence(supporting=supporting, contradicting=contradicting)
 
-    # -- provenance ---------------------------------------------------------
 
     def explain(self, memory_id: str, *, max_depth: int = 4) -> Explanation:
-        """Why Iris believes this, traced back through what grounds it.
-
-        Cycles and re-visits are pruned rather than followed, and the walk
-        stops at max_depth, so a densely linked store cannot make this run
-        away. A node cut short is marked truncated instead of silently
-        looking like a leaf.
-        """
         record = self.records.get(memory_id)
         if record is None:
             raise KnowledgeError(f"No such memory: {memory_id}")
@@ -189,7 +238,6 @@ class KnowledgeGraph:
 
 
 def render_explanation(explanation: Explanation, *, indent: int = 0) -> str:
-    """A readable answer to "why does Iris believe this", for a person or a prompt."""
     prefix = "  " * indent
     lead = f"{prefix}- " if indent else ""
     because = f" ({explanation.relation.value.replace('_', ' ')})" if explanation.relation else ""

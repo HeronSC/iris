@@ -1,3 +1,5 @@
+# File: core/knowledge/__init__.py
+
 from __future__ import annotations
 
 """Durable, append-only knowledge: what Iris saw, decided, suspects and learned.
@@ -7,6 +9,8 @@ Distinct from the two older memory namespaces, which this does not replace:
 ``core.conversation.persistent_memory`` holds conversation topics.
 """
 
+from core.knowledge.appraisal import Appraisal, Appraiser, Basis
+from core.knowledge.comparison import Comparison, RankerScore, compare_rankers, render_comparison
 from core.knowledge.graph import Evidence, Explanation, KnowledgeGraph, render_explanation
 from core.knowledge.hypotheses import Assessment, HypothesisPolicy, HypothesisTracker
 from core.knowledge.links import (
@@ -30,7 +34,14 @@ from core.knowledge.repository import KnowledgeRepository
 from core.knowledge.schema import ensure_schema
 
 __all__ = [
+    "Appraisal",
+    "Appraiser",
     "Assessment",
+    "Basis",
+    "Comparison",
+    "RankerScore",
+    "compare_rankers",
+    "render_comparison",
     "DEFAULT_STATUS",
     "EVIDENCE_RELATIONS",
     "Evidence",

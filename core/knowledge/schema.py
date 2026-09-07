@@ -1,4 +1,8 @@
+# File: core/knowledge/schema.py
+
 from __future__ import annotations
+
+import sqlite3
 
 from core.storage.sqlite_database import SQLiteDatabase
 
@@ -37,6 +41,11 @@ CREATE INDEX IF NOT EXISTS idx_memories_topic_kind
     ON memories(topic, kind, created_at DESC, sequence DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_kind_status ON memories(kind, status);
 CREATE INDEX IF NOT EXISTS idx_memories_occurred ON memories(occurred_at DESC);
+
+-- A cohort: everything one run of a source produced. The shadow comparison
+-- gathers a morning by this, so it must not scan.
+CREATE INDEX IF NOT EXISTS idx_memories_source_ref
+    ON memories(source_ref, kind) WHERE source_ref IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_supersedes ON memories(supersedes)
     WHERE supersedes IS NOT NULL;
 
@@ -87,47 +96,32 @@ END;
 
 
 def ensure_schema(database: SQLiteDatabase) -> None:
-    """Create every knowledge table. Idempotent, and safe to call from any repository.
-
-    Both repositories call this rather than owning a fragment each, so
-    memory_links can carry real foreign keys to memories regardless of which
-    one is constructed first.
-    """
     with database.connect() as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)
         conn.commit()
 
 
-#: Bumped when a change needs work doing to databases that already exist.
 SCHEMA_VERSION = 2
 
 
-def _migrate(conn: object) -> None:
-    """Bring an existing database up to the current schema version.
-
-    Version 2 added the search index. Records written before it need indexing
-    once, and the emptiness of the index cannot be used to detect that: an
-    external-content FTS table answers COUNT(*) from the content table, so it
-    always looks full. Hence an explicit version rather than an inference.
-    """
-    row = conn.execute("SELECT value FROM knowledge_meta WHERE key = 'schema_version'").fetchone()  # type: ignore[attr-defined]
+def _migrate(conn: sqlite3.Connection) -> None:
+    row = conn.execute("SELECT value FROM knowledge_meta WHERE key = 'schema_version'").fetchone()
     current = int(row[0]) if row is not None else 1
 
     if current < 2:
-        conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")  # type: ignore[attr-defined]
+        conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
 
     if current != SCHEMA_VERSION:
-        conn.execute(  # type: ignore[attr-defined]
+        conn.execute(
             "INSERT INTO knowledge_meta(key, value) VALUES('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (str(SCHEMA_VERSION),),
         )
 
 
-def next_sequence(conn: object, table: str) -> int:
-    """The next write-order number for a table. Callers hold the transaction."""
+def next_sequence(conn: sqlite3.Connection, table: str) -> int:
     if table not in {"memories", "memory_links"}:
         raise ValueError(f"Unknown table: {table}")
-    row = conn.execute(f"SELECT COALESCE(MAX(sequence), 0) + 1 FROM {table}").fetchone()  # type: ignore[attr-defined]
+    row = conn.execute(f"SELECT COALESCE(MAX(sequence), 0) + 1 FROM {table}").fetchone()
     return int(row[0])

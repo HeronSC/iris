@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+from collections.abc import Sequence
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -95,6 +96,37 @@ class LinkRepository:
         return self.add(
             MemoryLink(source_id=source_id, target_id=target_id, relation=relation, weight=weight, note=note)
         )
+
+    def add_many(self, links: Sequence[MemoryLink]) -> list[MemoryLink]:
+        stored = list(links)
+        if not stored:
+            return []
+        with self.database.connect() as conn:
+            base = next_sequence(conn, "memory_links")
+            rows = []
+            for offset, link in enumerate(stored):
+                rows.append(
+                    {
+                        "sequence": base + offset,
+                        "id": link.id,
+                        "source_id": link.source_id,
+                        "target_id": link.target_id,
+                        "relation": link.relation.value,
+                        "weight": link.weight,
+                        "note": link.note,
+                        "created_at": link.created_at,
+                    }
+                )
+            try:
+                conn.executemany(
+                    f"INSERT INTO memory_links (sequence, {_COLUMNS}) VALUES "
+                    "(:sequence, :id, :source_id, :target_id, :relation, :weight, :note, :created_at)",
+                    rows,
+                )
+            except sqlite3.IntegrityError as error:
+                raise KnowledgeError(_explain_integrity_error(error, stored[0])) from error
+            conn.commit()
+        return stored
 
     def links_from(self, source_id: str, relation: MemoryRelation | None = None) -> list[MemoryLink]:
         return self._query("source_id", source_id, relation)
