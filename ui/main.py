@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿# File: ui/main.py
+
+from __future__ import annotations
 
 import argparse
 import os
@@ -34,17 +36,22 @@ workspace_root = Path(__file__).resolve().parents[1]
 if str(workspace_root) not in sys.path:
     sys.path.insert(0, str(workspace_root))
 
+#! @allow-local-import
 from core.application import IrisApplication, IrisEvent, IrisStatus, MessageRole
+#! @allow-local-import
 from core.application.contracts import ActionSuggestion, ConversationContent, DetailContent, TopicContext
+#! @allow-local-import
 from core.assistant.prompting import PROMPT_CANCEL_TOKEN, PromptRequest, PromptType
+#! @allow-local-import
 from core.config.loader import ConfigError
+#! @allow-local-import
 from core.profile.loader import AssistantMemoryError
 
 
 class ChatInput(QTextEdit):
     submitRequested = Signal()
 
-    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+    def keyPressEvent(self, event) -> None:
         if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter} and (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
             self.insertPlainText("\n")
             event.accept()
@@ -1129,7 +1136,7 @@ class IrisWindow(QMainWindow):
             self.splitter.setSizes([left_width, right_width])
         self.details_toggle.setChecked(True)
 
-    def closeEvent(self, event) -> None:  # type: ignore[override]
+    def closeEvent(self, event) -> None:
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/splitter", self.splitter.saveState())
         self.settings.setValue("window/details_visible", self.details_panel.isVisible())

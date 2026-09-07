@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+﻿# File: core/documents/extractors/pdf_extractor.py
+
+from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -14,7 +16,8 @@ class PdfExtractor:
 
     def extract(self, path: Path) -> ExtractedDocument:
         try:
-            from pypdf import PdfReader  # type: ignore
+            #! @allow-local-import
+            from pypdf import PdfReader
         except Exception:
             return ExtractedDocument(
                 text="",
@@ -24,9 +27,6 @@ class PdfExtractor:
             )
 
         try:
-            # pypdf can emit noisy parser warnings for partially malformed PDFs.
-            # We still want to attempt extraction and report hard failures, but
-            # avoid flooding the interactive scan output with warning lines.
             pypdf_logger = logging.getLogger("pypdf")
             previous_level = pypdf_logger.level
             pypdf_logger.setLevel(logging.ERROR)

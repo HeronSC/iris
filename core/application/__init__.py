@@ -1,3 +1,5 @@
+# File: core/application/__init__.py
+
 from typing import Any
 
 from core.application.contracts import (
@@ -32,6 +34,7 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     if name == "IrisApplication":
+        #! @allow-local-import
         from core.application.service import IrisApplication
 
         return IrisApplication

@@ -1,7 +1,10 @@
-﻿from __future__ import annotations
+﻿# File: core/profile/update_service.py
+
+from __future__ import annotations
 
 import json
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -148,6 +151,5 @@ class MemoryUpdateService:
         self.writer.save_knowledge(memory.get("knowledge", {}))
 
     def _utc_now_iso(self) -> str:
-        from datetime import datetime, timezone
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
