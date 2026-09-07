@@ -6,10 +6,10 @@ from pathlib import Path
 from core.assistant.proposal_commands import ProposalCommandHandler
 from core.assistant.workflows import MemoryReviewWorkflow
 from core.audit.logger import AuditLogger
-from core.memory.proposal import MemoryProposal
-from core.memory.proposal_reviewer import MemoryProposalReviewer
-from core.memory.proposal_store import MemoryProposalStore
-from core.memory.update_service import MemoryUpdateService
+from core.profile.proposal import MemoryProposal
+from core.profile.proposal_reviewer import MemoryProposalReviewer
+from core.profile.proposal_store import MemoryProposalStore
+from core.profile.update_service import MemoryUpdateService
 
 
 class UpdateServiceTests(unittest.TestCase):

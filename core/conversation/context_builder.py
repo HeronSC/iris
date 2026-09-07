@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from core.memory.store import MemoryStore
+from core.profile.store import MemoryStore
 
 
 class ContextBuilder:

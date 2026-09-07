@@ -38,7 +38,7 @@ from core.application import IrisApplication, IrisEvent, IrisStatus, MessageRole
 from core.application.contracts import ActionSuggestion, ConversationContent, DetailContent, TopicContext
 from core.assistant.prompting import PROMPT_CANCEL_TOKEN, PromptRequest, PromptType
 from core.config.loader import ConfigError
-from core.memory.loader import AssistantMemoryError
+from core.profile.loader import AssistantMemoryError
 
 
 class ChatInput(QTextEdit):

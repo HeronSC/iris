@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from core.memory.proposal import MemoryProposal
+from core.profile.proposal import MemoryProposal
 
 
 class ProposalStoreError(Exception):

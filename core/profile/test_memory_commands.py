@@ -4,8 +4,8 @@ from pathlib import Path
 
 from core.assistant.memory_commands import MemoryCommandHandler
 from core.assistant.workflows import MemoryReviewWorkflow
-from core.memory.proposal import MemoryProposal
-from core.memory.proposal_store import MemoryProposalStore
+from core.profile.proposal import MemoryProposal
+from core.profile.proposal_store import MemoryProposalStore
 
 
 class MemoryCommandHandlerTests(unittest.TestCase):

@@ -68,13 +68,13 @@ from core.documents.query_parser import FileSearchQueryParser, QueryParserConfig
 from core.documents.scanner import DocumentScanner
 from core.documents.search_service import DocumentSearchService
 from core.llm.ollama_client import OllamaClient, OllamaClientError
-from core.memory.loader import AssistantMemoryError, MemoryLoader
-from core.memory.proposal_generator import MemoryProposalGenerator
-from core.memory.proposal_reviewer import MemoryProposalReviewer
-from core.memory.proposal_store import MemoryProposalStore
-from core.memory.store import MemoryStore
-from core.memory.update_service import MemoryUpdateService
-from core.memory.writer import MemoryWriter
+from core.profile.loader import AssistantMemoryError, MemoryLoader
+from core.profile.proposal_generator import MemoryProposalGenerator
+from core.profile.proposal_reviewer import MemoryProposalReviewer
+from core.profile.proposal_store import MemoryProposalStore
+from core.profile.store import MemoryStore
+from core.profile.update_service import MemoryUpdateService
+from core.profile.writer import MemoryWriter
 from core.state.search_result_context import SearchResultContext
 from core.storage.sqlite_database import SQLiteDatabase
 

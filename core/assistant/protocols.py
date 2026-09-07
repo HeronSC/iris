@@ -2,7 +2,7 @@
 
 from typing import Any, Protocol
 
-from core.memory.proposal import MemoryProposal
+from core.profile.proposal import MemoryProposal
 
 
 class SessionLike(Protocol):

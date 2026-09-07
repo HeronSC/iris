@@ -10,7 +10,7 @@ from core.assistant.protocols import (
     SessionLike,
     SessionManagerProtocol,
 )
-from core.memory.proposal_store import ProposalStoreError
+from core.profile.proposal_store import ProposalStoreError
 
 
 class SessionCloseWorkflow:

@@ -3,7 +3,7 @@ from __future__ import annotations
 """Durable, append-only knowledge: what Iris saw, decided, suspects and learned.
 
 Distinct from the two older memory namespaces, which this does not replace:
-``core.memory`` holds the assistant profile, and
+``core.profile`` holds the assistant profile, and
 ``core.conversation.persistent_memory`` holds conversation topics.
 """
 

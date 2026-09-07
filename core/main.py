@@ -10,7 +10,7 @@ if str(root) not in sys.path:
 from core.application import IrisApplication, MessageRole
 from core.application.contracts import DetailContent
 from core.config.loader import ConfigError
-from core.memory.loader import AssistantMemoryError
+from core.profile.loader import AssistantMemoryError
 
 
 def _render_console_response(response, assistant_name: str) -> None:

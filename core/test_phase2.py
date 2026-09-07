@@ -18,8 +18,8 @@ from core.conversation.session_manager import SessionManager
 from core.conversation.session_repository import SessionRepository
 from core.conversation.session_summarizer import SessionSummarizer
 from core.llm.ollama_client import OllamaClient, OllamaClientError
-from core.memory.store import MemoryStore
-from core.memory.writer import MemoryWriter
+from core.profile.store import MemoryStore
+from core.profile.writer import MemoryWriter
 
 
 class ConversationSessionTests(unittest.TestCase):

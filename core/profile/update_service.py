@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from core.audit.logger import AuditLogger
-from core.memory.proposal import MemoryProposal
-from core.memory.proposal_store import MemoryProposalStore
-from core.memory.writer import MemoryWriter
+from core.profile.proposal import MemoryProposal
+from core.profile.proposal_store import MemoryProposalStore
+from core.profile.writer import MemoryWriter
 
 
 class MemoryUpdateError(Exception):

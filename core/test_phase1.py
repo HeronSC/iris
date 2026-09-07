@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 
 from core.config.loader import ConfigError, ConfigLoader
 from core.conversation.context_builder import ContextBuilder
-from core.memory.store import MemoryStore
+from core.profile.store import MemoryStore
 
 
 class PhaseOneTests(unittest.TestCase):

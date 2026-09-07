@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from core.conversation.session import ConversationSession
-from core.memory.proposal import MemoryProposal, ProposalValidationError
+from core.profile.proposal import MemoryProposal, ProposalValidationError
 
 
 class MemoryProposalGenerator:
