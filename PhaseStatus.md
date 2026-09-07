@@ -116,7 +116,8 @@ invisible at test-data size.
 |---|---|---|
 | `list_by_topic`, 100k records | 25.2 ms | **0.83 ms** |
 | `open_observations(limit=500)`, 20k records | 163.4 ms | **2.9 ms** |
-| `retrieve()`, 200k records, default limits | — | **4.4 ms** |
+| `retrieve()`, 200k records, distinguishing term | — | **~4 ms** |
+| `retrieve()`, 200k records, every term in every record | — | **~140 ms** |
 
 The first was an `ORDER BY` the index did not cover, so SQLite sorted every
 matching row to return twenty; fixed with an insertion `sequence` column. The
@@ -126,16 +127,18 @@ one that mattered, because §9 has Iris receiving around 500 candidates.
 Query plans are now asserted in tests, not checked once: a reintroduced sort is
 invisible until the data is large enough to hurt.
 
+A fourth fault was a hand-rolled one. Candidate selection ordered by recency, so
+a strong older match was unreachable however well it matched; this was written up
+as a limitation needing "a text index" and a future decision about embeddings.
+SQLite ships FTS5 with BM25 in the standard library, and it was there the whole
+time. Candidate selection now uses it, the scorer still re-ranks on recency and
+standing, and the limitation is gone. The cost moved rather than vanishing: it
+now tracks how many records match the query instead of being flat, which is the
+right shape but slower for a query that matches everything.
+
 ---
 
 ## 5. Known limits
-
-**Retrieval selects candidates by recency.** `candidate_limit` bounds what SQL
-returns before ranking, so a strong match older than that window is never ranked.
-There is a test demonstrating this rather than a note hoping it is remembered.
-`candidate_limit_reached` in the diagnostics is the only signal it may have
-happened. Fixing it properly needs relevance-aware candidate selection — SQLite
-FTS5 or embeddings — and that should follow evidence from real use.
 
 **Ranking is deliberately simple.** Token overlap, a recency half-life, and a
 standing prior. The weights are a starting point, exposed as arguments so they
@@ -165,9 +168,10 @@ explicit `evaluate()` call precisely so a slash command, a background job, or th
 bot's feedback can all drive it without changing that code. The decision is still
 open and still cheap.
 
-**Does recall answer real questions well?** The ranker is untuned and the
-recency-window limit is real. The diagnostics exist so this can be judged from
-use rather than guessed.
+**Does recall answer real questions well?** Candidates now come from SQLite's
+search index, but the re-ranking weights and the relevance floor are still
+untuned guesses. The diagnostics exist so this can be judged from use rather
+than argued about.
 
 ---
 

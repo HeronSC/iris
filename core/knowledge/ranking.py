@@ -7,11 +7,15 @@ from datetime import datetime, timezone
 from core.knowledge.models import MemoryRecord, MemoryStatus
 
 
-#: Words carrying no signal in a record. Deliberately short: this content is
-#: terse and technical, so aggressive stopword removal costs more than it saves.
+#: Words carrying no signal. Kept narrow for domain content, which is terse and
+#: technical, but the question words earn their place: these terms also build
+#: the search match, and a match is only as narrow as its commonest term, so
+#: "what did we see about volume" should search for volume and nothing else.
 _STOPWORDS = frozenset(
-    """a an and are as at be by for from had has have in into is it its of on
-    or that the to was were with""".split()
+    """a an and are as at be been being by can could did do does for from had
+    has have he her him his how i in into is it its me my of on or our she
+    should some that the their them there these they this those to us was we
+    were what when where which who why will with would you your""".split()
 )
 
 _TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9_]*|\d+(?:\.\d+)?")

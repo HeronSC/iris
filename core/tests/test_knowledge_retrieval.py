@@ -163,10 +163,10 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(result.records[0].record.content, "ABC showed relative volume acceleration")
 
     def test_records_matching_nothing_in_the_question_are_dropped(self) -> None:
-        """Recency and standing alone must not keep an unrelated record.
+        """Anything handed to a model as context is read as relevant to the question.
 
-        Anything handed to a model as context is read as relevant to the
-        question, so returning a near-miss is worse than returning less.
+        The search index now excludes a non-matching record in SQL, so it never
+        reaches the scorer at all: candidates_examined shows one, not two.
         """
         self.records.add(_record("ABC showed relative volume acceleration"))
         self.records.add(_record("unrelated note about the printer"))
@@ -174,7 +174,16 @@ class RetrievalTests(unittest.TestCase):
         result = self.retriever.retrieve(KnowledgeQuery(text="relative volume acceleration"))
 
         self.assertEqual([item.record.content for item in result.records], ["ABC showed relative volume acceleration"])
-        self.assertEqual(result.diagnostics["dropped_as_irrelevant"], 1)
+        self.assertEqual(result.diagnostics["candidates_examined"], 1)
+
+    def test_a_shared_common_word_is_not_a_match(self) -> None:
+        """The index matches broadly on OR; the scorer's floor is what refuses "the"."""
+        self.records.add(_record("ABC showed relative volume"))
+        self.records.add(_record("a note about the printer"))
+
+        result = self.retriever.retrieve(KnowledgeQuery(text="relative volume"))
+
+        self.assertEqual([item.record.content for item in result.records], ["ABC showed relative volume"])
 
     def test_a_browse_with_no_question_keeps_everything(self) -> None:
         self.records.add(_record("one"))
@@ -185,7 +194,12 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(len(result.records), 2)
         self.assertEqual(result.diagnostics["dropped_as_irrelevant"], 0)
 
-    def test_the_relevance_floor_can_be_turned_off(self) -> None:
+    def test_turning_the_floor_off_still_leaves_the_index_filtering(self) -> None:
+        """minimum_text_match relaxes the scorer, not the search index.
+
+        A record sharing no word with the question is not a weak match to be
+        allowed through; it was never a candidate.
+        """
         self.records.add(_record("ABC showed relative volume acceleration"))
         self.records.add(_record("unrelated note about the printer"))
 
@@ -193,7 +207,7 @@ class RetrievalTests(unittest.TestCase):
             KnowledgeQuery(text="relative volume acceleration", minimum_text_match=0.0)
         )
 
-        self.assertEqual(len(result.records), 2)
+        self.assertEqual([item.record.content for item in result.records], ["ABC showed relative volume acceleration"])
 
     def test_the_limit_caps_what_comes_back(self) -> None:
         for index in range(20):
@@ -224,12 +238,12 @@ class RetrievalTests(unittest.TestCase):
 
         self.assertTrue(result.diagnostics["candidate_limit_reached"])
 
-    def test_relevance_beyond_the_candidate_window_is_missed(self) -> None:
-        """A known limit of ranking a recency-bounded slice, pinned so it stays known.
+    def test_an_older_strong_match_is_still_found(self) -> None:
+        """This used to fail, and was documented as a limitation.
 
-        Candidates are taken newest-first, so a strong match older than the
-        window never reaches the ranker. candidate_limit_reached is the only
-        signal that this could have happened, which is why it is reported.
+        Candidates were taken newest-first, so a strong match older than the
+        window never reached the ranker. They are now taken by relevance, using
+        SQLite's own index, so a narrow window no longer hides it.
         """
         gold = self.records.add(_record("ZZZ showed extraordinary relative volume acceleration 9.9x"))
         for index in range(30):
@@ -237,11 +251,11 @@ class RetrievalTests(unittest.TestCase):
 
         query = KnowledgeQuery(text="extraordinary relative volume acceleration 9.9x")
         found = self.retriever.retrieve(query)
-        missed = self.retriever.retrieve(KnowledgeQuery(text=query.text, candidate_limit=10))
+        narrow = self.retriever.retrieve(KnowledgeQuery(text=query.text, candidate_limit=10))
 
         self.assertIn(gold.id, [item.record.id for item in found.records])
-        self.assertNotIn(gold.id, [item.record.id for item in missed.records])
-        self.assertTrue(missed.diagnostics["candidate_limit_reached"])
+        self.assertIn(gold.id, [item.record.id for item in narrow.records],
+                      "a narrow candidate window must no longer hide a strong match")
 
     def test_budget_pressure_is_reported(self) -> None:
         for index in range(5):

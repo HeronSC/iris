@@ -4,6 +4,11 @@ from core.storage.sqlite_database import SQLiteDatabase
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS knowledge_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
     -- Monotonic write order. created_at is only second-resolution and can be
@@ -54,6 +59,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_links_edge
     ON memory_links(source_id, target_id, relation);
 CREATE INDEX IF NOT EXISTS idx_links_target ON memory_links(target_id, relation);
 CREATE INDEX IF NOT EXISTS idx_links_source ON memory_links(source_id, relation);
+
+-- Relevance-ordered candidate selection, so a strong match is found because it
+-- matches rather than because it is recent. SQLite ships this; hand-rolling a
+-- ranker instead left an older record unreachable however well it matched.
+--
+-- tokenchars '.' keeps decimals whole: "2.1x" and "1.3" are the content of an
+-- observation, and the default tokenizer splits them.
+--
+-- An external-content table, kept in step by one insert trigger. That is all
+-- that is needed because records are append-only and their content is
+-- immutable: only status and superseded_by ever change, and neither is indexed.
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    content,
+    topic,
+    data_json,
+    content='memories',
+    content_rowid='sequence',
+    tokenize="unicode61 tokenchars '.'"
+);
+
+CREATE TRIGGER IF NOT EXISTS memories_fts_insert AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, content, topic, data_json)
+    VALUES (new.sequence, new.content, new.topic, new.data_json);
+END;
 """
 
 
@@ -66,7 +95,34 @@ def ensure_schema(database: SQLiteDatabase) -> None:
     """
     with database.connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
+
+
+#: Bumped when a change needs work doing to databases that already exist.
+SCHEMA_VERSION = 2
+
+
+def _migrate(conn: object) -> None:
+    """Bring an existing database up to the current schema version.
+
+    Version 2 added the search index. Records written before it need indexing
+    once, and the emptiness of the index cannot be used to detect that: an
+    external-content FTS table answers COUNT(*) from the content table, so it
+    always looks full. Hence an explicit version rather than an inference.
+    """
+    row = conn.execute("SELECT value FROM knowledge_meta WHERE key = 'schema_version'").fetchone()  # type: ignore[attr-defined]
+    current = int(row[0]) if row is not None else 1
+
+    if current < 2:
+        conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")  # type: ignore[attr-defined]
+
+    if current != SCHEMA_VERSION:
+        conn.execute(  # type: ignore[attr-defined]
+            "INSERT INTO knowledge_meta(key, value) VALUES('schema_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(SCHEMA_VERSION),),
+        )
 
 
 def next_sequence(conn: object, table: str) -> int:
