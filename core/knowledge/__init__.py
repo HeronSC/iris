@@ -15,6 +15,8 @@ from core.knowledge.links import (
     MemoryLink,
     MemoryRelation,
 )
+from core.knowledge.ranking import ScoredRecord, estimate_tokens, tokenize
+from core.knowledge.retrieval import KnowledgeQuery, KnowledgeRetriever, RetrievalResult
 from core.knowledge.models import (
     DEFAULT_STATUS,
     KnowledgeError,
@@ -29,19 +31,25 @@ from core.knowledge.schema import ensure_schema
 __all__ = [
     "DEFAULT_STATUS",
     "EVIDENCE_RELATIONS",
-    "GROUNDING_RELATIONS",
     "Evidence",
     "Explanation",
+    "GROUNDING_RELATIONS",
     "KnowledgeError",
     "KnowledgeGraph",
+    "KnowledgeQuery",
     "KnowledgeRepository",
+    "KnowledgeRetriever",
     "LinkRepository",
     "MemoryKind",
     "MemoryLink",
     "MemoryRecord",
     "MemoryRelation",
     "MemoryStatus",
+    "RetrievalResult",
+    "ScoredRecord",
     "ensure_schema",
+    "estimate_tokens",
     "render_explanation",
+    "tokenize",
     "utc_now_iso",
 ]
