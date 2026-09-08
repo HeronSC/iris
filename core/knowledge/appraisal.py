@@ -9,10 +9,10 @@ from enum import Enum
 
 from core.knowledge.graph import KnowledgeGraph
 from core.knowledge.links import MemoryLink, MemoryRelation
-from core.knowledge.models import KnowledgeError, MemoryKind, MemoryRecord
+from core.knowledge.models import KnowledgeError, MemoryKind, MemoryRecord, MemoryStatus
 from core.knowledge.retrieval import KnowledgeQuery, KnowledgeRetriever
 
-CONTRACT = "shadow-1"
+CONTRACT = "shadow-2"
 
 FAVOURABLE_KEY = "favourable"
 
@@ -26,6 +26,34 @@ POOL_LIMIT = 5000
 class Basis(str, Enum):
     NONE = "none"
     OBSERVATIONS = "observations"
+    HYPOTHESIS = "hypothesis"
+
+
+@dataclass(frozen=True)
+class AppliedRule:
+    hypothesis_id: str
+    content: str
+    supporting: int
+    contradicting: int
+    matched_on: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _Rule:
+    record: MemoryRecord
+    region: dict[str, tuple[float, float]]
+    supporting: int
+    contradicting: int
+
+    def applies_to(self, features: dict[str, float]) -> tuple[str, ...] | None:
+        shared = [name for name in self.region if name in features]
+        if not shared:
+            return None
+        for name in shared:
+            low, high = self.region[name]
+            if not low <= features[name] <= high:
+                return None
+        return tuple(sorted(shared))
 
 
 @dataclass(frozen=True)
@@ -41,6 +69,7 @@ class Appraisal:
     topic: str = ""
     source_ref: str | None = None
     method: str = METHOD_FEATURES
+    rules: tuple[AppliedRule, ...] = ()
 
     @property
     def binding(self) -> bool:
@@ -90,11 +119,15 @@ class Appraiser:
             records.append(found)
 
         pools: dict[str, _Pool] = {}
+        rules: dict[str, list[_Rule]] = {}
         for item in records:
             if item.topic not in pools:
                 pools[item.topic] = self._pool(item.topic)
+                rules[item.topic] = self._rules(item.topic)
 
-        appraisals = _ranked([self._appraise(item, pools[item.topic]) for item in records])
+        appraisals = _ranked(
+            [self._appraise(item, pools[item.topic], rules[item.topic]) for item in records]
+        )
         if record:
             self.record(appraisals)
         return appraisals
@@ -158,12 +191,67 @@ class Appraiser:
 
         return _Pool(rows=rows, scales=_scales(rows))
 
-    def _appraise(self, record: MemoryRecord, pool: _Pool) -> Appraisal:
+    def _rules(self, topic: str) -> list[_Rule]:
+        found: list[_Rule] = []
+        for record in self.graph.records.list_by_topic(
+            topic, kind=MemoryKind.HYPOTHESIS, limit=200
+        ):
+            if record.status is not MemoryStatus.ACCEPTED:
+                continue
+            evidence = self.graph.evidence_for(record.id)
+            region = _region(self._observations_behind([item for item, _ in evidence.supporting]))
+            if not region:
+                continue
+            found.append(
+                _Rule(
+                    record=record,
+                    region=region,
+                    supporting=len(evidence.supporting),
+                    contradicting=len(evidence.contradicting),
+                )
+            )
+        return found
+
+    def _observations_behind(self, records: Sequence[MemoryRecord]) -> list[MemoryRecord]:
+        found: list[MemoryRecord] = []
+        for record in records:
+            if record.kind is MemoryKind.OBSERVATION:
+                found.append(record)
+                continue
+            for link in self.graph.links.links_from(record.id, MemoryRelation.OUTCOME_OF):
+                behind = self.graph.records.get(link.target_id)
+                if behind is not None and behind.kind is MemoryKind.OBSERVATION:
+                    found.append(behind)
+        return found
+
+    def _applied(self, rules: Sequence[_Rule], features: dict[str, float]) -> tuple[AppliedRule, ...]:
+        applied: list[AppliedRule] = []
+        for rule in rules:
+            matched = rule.applies_to(features)
+            if matched is None:
+                continue
+            applied.append(
+                AppliedRule(
+                    hypothesis_id=rule.record.id,
+                    content=rule.record.content,
+                    supporting=rule.supporting,
+                    contradicting=rule.contradicting,
+                    matched_on=matched,
+                )
+            )
+        return tuple(applied)
+
+    def _appraise(
+        self, record: MemoryRecord, pool: _Pool, rules: Sequence[_Rule]
+    ) -> Appraisal:
         features = numeric_features(record.data)
+        applied = self._applied(rules, features) if features else ()
         shared = [name for name in features if name in pool.scales]
         if pool and shared:
-            return self._by_features(record, pool, features, shared)
-        return self._by_text(record)
+            base = self._by_features(record, pool, features, shared)
+        else:
+            base = self._by_text(record)
+        return _with_rules(base, applied)
 
     def _by_features(
         self, record: MemoryRecord, pool: _Pool, features: dict[str, float], shared: list[str]
@@ -343,6 +431,41 @@ def _scales(rows: list[tuple[str, dict[str, float], bool]]) -> dict[str, float]:
     return scales
 
 
+def _region(observations: Sequence[MemoryRecord]) -> dict[str, tuple[float, float]]:
+    columns: dict[str, list[float]] = {}
+    for record in observations:
+        for name, value in numeric_features(record.data).items():
+            columns.setdefault(name, []).append(value)
+    return {
+        name: (min(values), max(values))
+        for name, values in columns.items()
+        if len(values) >= 2 and max(values) > min(values)
+    }
+
+
+def _with_rules(appraisal: Appraisal, applied: tuple[AppliedRule, ...]) -> Appraisal:
+    if not applied:
+        return appraisal
+    names = "; ".join(item.content.rstrip(".") for item in applied)
+    return Appraisal(
+        record_id=appraisal.record_id,
+        basis=Basis.HYPOTHESIS,
+        sample=appraisal.sample,
+        favourable=appraisal.favourable,
+        unfavourable=appraisal.unfavourable,
+        score=appraisal.score,
+        rationale=(
+            f"{appraisal.rationale} Covered by an approved rule: {names}. "
+            "The rate above is still counted from outcomes, not from the rule."
+        ),
+        rank=appraisal.rank,
+        topic=appraisal.topic,
+        source_ref=appraisal.source_ref,
+        method=appraisal.method,
+        rules=applied,
+    )
+
+
 def _nothing_to_go_on(similar: int, closed: int, unlabelled: int) -> str:
     if closed == 0:
         return f"{similar} comparable observations, none of them closed by an outcome yet."
@@ -371,12 +494,14 @@ def _ranked(appraisals: list[Appraisal]) -> list[Appraisal]:
             topic=item.topic,
             source_ref=item.source_ref,
             method=item.method,
+            rules=item.rules,
         )
         for item in appraisals
     ]
 
 
 __all__ = [
+    "AppliedRule",
     "Appraisal",
     "Appraiser",
     "Basis",

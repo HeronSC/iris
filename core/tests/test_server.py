@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from core.audit.logger import AuditLogger
-from core.knowledge import KnowledgeGraph, KnowledgeRetriever, MemoryKind, MemoryRecord
+from core.knowledge import KnowledgeGraph, KnowledgeRetriever, MemoryKind, MemoryRecord, MemoryStatus
 from core.knowledge.hypotheses import HypothesisTracker
 from core.knowledge.review import KnowledgeReviewWorkflow
 from core.server.app import create_app
@@ -58,7 +58,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
         self.assertEqual(response.json()["records"], 0)
-        self.assertEqual(response.json()["contract"], "shadow-1")
+        self.assertEqual(response.json()["contract"], "shadow-2")
 
     def test_a_batch_of_candidates_is_accepted(self) -> None:
         response = self.client.post("/observations", json=self._batch(500))
@@ -362,7 +362,7 @@ class AssessmentContractTests(unittest.TestCase):
 
         body = self.client.post("/assess", json={"ids": ids}).json()
 
-        self.assertEqual(body["contract"], "shadow-1")
+        self.assertEqual(body["contract"], "shadow-2")
         self.assertFalse(body["binding"])
         self.assertEqual(body["ranked"], 0)
         self.assertEqual(body["appraisals"][0]["assessment"]["basis"], "none")
@@ -382,7 +382,7 @@ class AssessmentContractTests(unittest.TestCase):
         body = self.client.post("/assess", json={"ids": ids}).json()
 
         self.assertTrue(all(item["binding"] is False for item in body["appraisals"]))
-        self.assertTrue(all(item["contract"] == "shadow-1" for item in body["appraisals"]))
+        self.assertTrue(all(item["contract"] == "shadow-2" for item in body["appraisals"]))
 
     def test_similar_but_unresolved_observations_are_still_no_basis(self) -> None:
         self._post([f"widget alpha spike number {i}" for i in range(10)], topic="lab/widgets")
@@ -556,7 +556,7 @@ class HitRateComparisonTests(unittest.TestCase):
         body = self.client.post("/compare", json={"cohort": "2026-09-07", "top_n": 10}).json()
 
         sources = {item["source"] for item in body["rankers"]}
-        self.assertIn("iris:shadow-1", sources)
+        self.assertIn("iris:shadow-2", sources)
         self.assertIn("bot:evaluator", sources)
 
     def test_an_unrecorded_assessment_takes_no_part(self) -> None:
@@ -586,7 +586,7 @@ class HitRateComparisonTests(unittest.TestCase):
         decisions = self.service.knowledge.decisions_for([ids[0]])[ids[0]]
 
         sources = {item.source for item in decisions}
-        self.assertEqual(sources, {"bot:evaluator", "iris:shadow-1"})
+        self.assertEqual(sources, {"bot:evaluator", "iris:shadow-2"})
 
     def test_ties_at_the_cut_are_reported_not_hidden(self) -> None:
         self._morning("flat", [(0.5, index % 2 == 0) for index in range(20)])
@@ -637,3 +637,144 @@ class HitRateComparisonTests(unittest.TestCase):
         self.assertIn("20 candidates", summary)
         self.assertIn("Base rate 50.0%", summary)
         self.assertIn("bot:evaluator", summary)
+
+
+class ApprovedRuleTests(unittest.TestCase):
+    """An accepted hypothesis is defined by the observations it was proven on."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.service = _Service(Path(self._tmp.name))
+        self.client = TestClient(create_app(self.service))
+        self.tracker = self.service.knowledge_review.tracker
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _observe(self, rel_vol: float, favourable: bool, source_ref: str = "history") -> str:
+        ids = self.client.post(
+            "/observations",
+            json={
+                "topic": TOPIC,
+                "source": "bot:scanner",
+                "source_ref": source_ref,
+                "observations": [
+                    {"content": f"SYM rel vol {rel_vol}", "data": {"rel_vol": rel_vol}}
+                ],
+            },
+        ).json()["ids"]
+        self.client.post(
+            "/outcomes",
+            json={
+                "source": "bot:broker",
+                "outcomes": [
+                    {"observation_id": ids[0], "content": "closed", "favourable": favourable}
+                ],
+            },
+        )
+        return ids[0]
+
+    def _accepted_rule(self, band: list[float]):
+        hypothesis = self.tracker.propose(
+            "High relative volume predicts outperformance.", topic=TOPIC, source="analysis"
+        )
+        for rel_vol in band:
+            observation_id = self._observe(rel_vol, True)
+            outcome = self.service.knowledge.outcomes_for([observation_id])[observation_id]
+            self.service.knowledge.add_evidence(hypothesis.id, outcome, supports=True)
+        self.service.knowledge_review.refresh()
+        self.service.knowledge_review.approve(hypothesis.id, approved_by="henry")
+        return hypothesis
+
+    def _assess(self, rel_vol: float) -> dict:
+        ids = self.client.post(
+            "/observations",
+            json={
+                "topic": TOPIC,
+                "source": "bot:scanner",
+                "observations": [
+                    {"content": f"CAND rel vol {rel_vol}", "data": {"rel_vol": rel_vol}}
+                ],
+            },
+        ).json()["ids"]
+        return self.client.post("/assess", json={"ids": ids}).json()["appraisals"][0]
+
+    def test_a_candidate_inside_the_proven_range_is_covered_by_the_rule(self) -> None:
+        self._accepted_rule([3.0, 3.5, 4.0, 4.5, 5.0])
+
+        assessment = self._assess(4.0)["assessment"]
+
+        self.assertEqual(assessment["basis"], "hypothesis")
+        self.assertEqual(len(assessment["rules"]), 1)
+        self.assertEqual(assessment["rules"][0]["matched_on"], ["rel_vol"])
+        self.assertIn("High relative volume", assessment["rules"][0]["content"])
+
+    def test_a_candidate_outside_the_proven_range_is_not(self) -> None:
+        self._accepted_rule([3.0, 3.5, 4.0, 4.5, 5.0])
+
+        assessment = self._assess(1.1)["assessment"]
+
+        self.assertNotEqual(assessment["basis"], "hypothesis")
+        self.assertEqual(assessment["rules"], [])
+
+    def test_the_rule_carries_the_evidence_that_earned_it(self) -> None:
+        self._accepted_rule([3.0, 3.5, 4.0, 4.5, 5.0])
+
+        rule = self._assess(4.0)["assessment"]["rules"][0]
+
+        self.assertEqual(rule["supporting"], 5)
+        self.assertEqual(rule["contradicting"], 0)
+
+    def test_an_unapproved_hypothesis_covers_nothing(self) -> None:
+        """Only accepted rules apply; supported is not approved."""
+        hypothesis = self.tracker.propose("An idea.", topic=TOPIC, source="analysis")
+        for rel_vol in (3.0, 3.5, 4.0, 4.5, 5.0):
+            observation_id = self._observe(rel_vol, True)
+            outcome = self.service.knowledge.outcomes_for([observation_id])[observation_id]
+            self.service.knowledge.add_evidence(hypothesis.id, outcome, supports=True)
+        self.service.knowledge_review.refresh()
+
+        assessment = self._assess(4.0)["assessment"]
+
+        self.assertEqual(self.service.knowledge.records.get(hypothesis.id).status,
+                         MemoryStatus.SUPPORTED)
+        self.assertEqual(assessment["rules"], [])
+
+    def test_the_rule_never_supplies_the_number(self) -> None:
+        """The score stays counted from outcomes; a rule is rationale, not arithmetic."""
+        self._accessed = self._accepted_rule([3.0, 3.5, 4.0, 4.5, 5.0])
+        for rel_vol in (3.1, 3.6, 4.1, 4.6, 4.9):
+            self._observe(rel_vol, False)
+
+        assessment = self._assess(4.0)["assessment"]
+
+        self.assertEqual(assessment["basis"], "hypothesis")
+        self.assertLess(assessment["score"], 1.0, "contradicting outcomes must still pull it down")
+        self.assertIn("counted from outcomes, not from the rule", assessment["rationale"])
+
+    def test_coverage_does_not_make_it_binding(self) -> None:
+        self._accepted_rule([3.0, 3.5, 4.0, 4.5, 5.0])
+
+        appraisal = self._assess(4.0)
+
+        self.assertFalse(appraisal["binding"])
+        self.assertEqual(appraisal["contract"], "shadow-2")
+
+    def test_a_rule_with_no_numeric_evidence_is_skipped(self) -> None:
+        hypothesis = self.tracker.propose("Vague idea.", topic=TOPIC, source="analysis")
+        for index in range(5):
+            record = self.service.knowledge.records.add(
+                MemoryRecord(kind=MemoryKind.OUTCOME, topic=TOPIC, source="x", content=f"o{index}")
+            )
+            self.service.knowledge.add_evidence(hypothesis.id, record, supports=True)
+        self.service.knowledge_review.refresh()
+        self.service.knowledge_review.approve(hypothesis.id, approved_by="henry")
+
+        self.assertEqual(self._assess(4.0)["assessment"]["rules"], [])
+
+    def test_the_method_is_reported_so_appraisals_can_be_told_apart(self) -> None:
+        self._observe(2.0, True)
+
+        assessment = self._assess(2.0)["assessment"]
+
+        self.assertIn(assessment["method"], {"feature-knn", "text-similarity"})

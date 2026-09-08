@@ -15,7 +15,7 @@ Delivered in ten commits, `a48b09d` through the hypothesis route. 395 tests pass
 | §2 Provenance | Done | `MemoryRecord` — source is required, not optional |
 | §3 Retrieval, no prompt stuffing | Done | `retrieval.py`, token-budgeted |
 | §4 Topic / working state | Pre-existing, reused | `core/conversation/persistent_memory/` |
-| §5 Learning loop | Done, driven by hand | `hypotheses.py`, `/knowledge` — see Open Questions |
+| §5 Learning loop | Done, and it now feeds the ranking | `hypotheses.py`, `appraisal.py` |
 | §6 Never auto-promote | Done, enforced in code | `HypothesisTracker.promote` |
 | §7 Generalised, not trading-specific | Done | nothing in `core/knowledge/` mentions trading |
 | §8 Orchestrator can reach it | Done | `core/assistant/knowledge_provider.py` |
@@ -210,6 +210,25 @@ right shape but slower for a query that matches everything.
 
 ## 5. Known limits
 
+**An approved rule is defined by what it was proven on.** A hypothesis is free
+text, and core cannot read it. It does not need to: an accepted hypothesis is
+`SUPPORTED_BY` particular outcomes, and those outcomes close particular
+observations, so the observations behind its evidence are the region of feature
+space it earned its approval in. A candidate whose features fall inside that
+region is one the rule speaks to, and the appraisal says which rule, what it was
+matched on, and how much evidence stands behind it. No condition language, no
+new schema, nothing parsed.
+
+Only `accepted` counts. Supported is not approved, and a test drives a
+hypothesis to supported and asserts it covers nothing.
+
+**A rule is rationale, never arithmetic.** Coverage moves `basis` to
+`hypothesis` and names the rule; it does not touch the number. The score stays
+the counted rate over neighbours, so contradicting outcomes still pull a covered
+candidate down, and a person approving a rule cannot quietly become a person
+raising a score. That keeps §6's line where it was: the approval decides what
+Iris may reason with, not what the evidence says.
+
 **Comparability is a question about features, not prose.** The first appraiser
 found comparable observations through the text index. It was measured and it was
 wrong: neighbour sets for different candidates overlapped 80% on average, because
@@ -315,7 +334,7 @@ are:
    one transaction, all or nothing: a half-written morning is worse than a
    failed one that can be retried. Ids that clash, inside the batch or against
    what is stored, are refused before anything is written.
-3. ~~**A ranking output contract.**~~ Shipped as `shadow-1`, live and inert.
+3. ~~**A ranking output contract.**~~ Shipped as `shadow-2`, live and inert.
    `POST /assess` returns, per record, a basis, the counts behind it, an
    observed rate, a rationale, and `binding: false`. The bot logs it beside its
    own number and acts on neither. Trusting it later is itself a hypothesis,

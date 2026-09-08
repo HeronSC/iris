@@ -27,6 +27,7 @@ from core.server.models import (
     RecallOut,
     RankerOut,
     RecordOut,
+    RuleOut,
     ScoredOut,
     Written,
 )
@@ -60,6 +61,17 @@ def _appraisal_out(appraisal: Appraisal) -> AppraisalOut:
             unfavourable=appraisal.unfavourable,
             score=appraisal.score,
             rationale=appraisal.rationale,
+            method=appraisal.method,
+            rules=[
+                RuleOut(
+                    hypothesis_id=rule.hypothesis_id,
+                    content=rule.content,
+                    supporting=rule.supporting,
+                    contradicting=rule.contradicting,
+                    matched_on=list(rule.matched_on),
+                )
+                for rule in appraisal.rules
+            ],
         ),
         binding=appraisal.binding,
         contract=CONTRACT,

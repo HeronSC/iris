@@ -107,6 +107,14 @@ class AssessIn(BaseModel):
     record: bool = False
 
 
+class RuleOut(BaseModel):
+    hypothesis_id: str
+    content: str
+    supporting: int
+    contradicting: int
+    matched_on: list[str]
+
+
 class AssessmentOut(BaseModel):
     basis: str
     sample: int
@@ -114,6 +122,8 @@ class AssessmentOut(BaseModel):
     unfavourable: int
     score: float | None
     rationale: str
+    method: str
+    rules: list[RuleOut] = Field(default_factory=list)
 
 
 class AppraisalOut(BaseModel):
