@@ -210,21 +210,38 @@ right shape but slower for a query that matches everything.
 
 ## 5. Known limits
 
-**Similarity is the weak link, and it is measured.** `Appraiser` finds
-comparable observations through the same text index retrieval uses. On seeded
-data where the favourable rate genuinely ran from 0.416 to 0.871 by one
-structured field, the appraisals came back spanning 0.489 to 0.612 -- about a
-quarter of the available signal. The cause is not subtle: every candidate's
-content is close to the same sentence, and what actually separates them lives in
-`data`, which BM25 barely sees. Shipping it anyway is the point of shadow mode,
-since "what counts as comparable" is the question a season of real data answers
-and argument does not. It is also why nothing may act on the number yet.
+**Comparability is a question about features, not prose.** The first appraiser
+found comparable observations through the text index. It was measured and it was
+wrong: neighbour sets for different candidates overlapped 80% on average, because
+every candidate's content is close to the same sentence. Every candidate was
+therefore scored against nearly the same neighbours, which converged every score
+on the base rate and collided them into each other. The weak signal and the ties
+were one fault, not two.
 
-**Iris's scores are too coarse to order a morning.** The comparison reports how
-many candidates sit tied at the cut, and for Iris that ran from 18 to 77 out of
-150. Its score is a favourable rate over a neighbour set, so many candidates
-land on identical values and which of them makes the top N is close to
-arbitrary. Granularity, not just accuracy, is what the ranking lacks.
+Neighbours are now the nearest observations by the numeric fields in `data`,
+each field scaled by its own interquartile spread so no unit dominates, and the
+rate leans on the closest of them. Core still knows nothing about what any field
+means; it only knows which values are numbers. Text similarity remains the
+fallback for records with no numeric features, and the wire contract is
+unchanged.
+
+| On the same seeded data | text similarity | feature neighbours |
+|---|---|---|
+| score spread (true spread 0.416-0.871) | 0.489-0.612 | **0.300-0.961** |
+| mean score, lowest decile of the signal | - | **0.401** |
+| mean score, highest decile | - | **0.892** |
+| distinct scores in 150 candidates | few | **129** |
+| candidates tied at the cut | 18-77 | **2-5** |
+| mean lift over seven mornings | +2.6% | **+20.9%** |
+| `POST /assess`, 200 records | 1316 ms | **188 ms** |
+
+The last row is a side effect worth naming: the pool of resolved observations is
+now read once per topic per batch instead of one retrieval per record.
+
+That result is on generated data whose favourable rate is a clean function of one
+field, which is the friendliest case there is, and the bot it drew level with was
+scoring the same field. It says the method can recover a signal that is there. It
+does not say a real morning has one.
 
 **A comparison is only honest if the assessment was recorded when it was made.**
 Re-appraising a cohort after its outcomes are in would let Iris grade itself with
@@ -270,9 +287,11 @@ or the bot's feedback can drive the same code when there is one.
 **Is Iris's ranking worth trusting?** Now a measurable question rather than an
 argument. `POST /compare` gathers a cohort by `source_ref`, takes each ranker's
 top N, and reports the hit rate against the base rate. Lift is the number that
-matters: beating a 100% base rate is not skill. On seven simulated mornings the
-bot led every one at +23.0% mean lift against Iris's +2.6%, which is the answer
-the metric exists to give and the reason nothing acts on Iris yet.
+matters: beating a 100% base rate is not skill. It is what caught the first
+appraiser: the bot led all seven simulated mornings at +23.0% mean lift against
+Iris's +2.6%. With neighbours chosen by feature rather than by prose, Iris takes
+three of the seven at +20.9% against +23.4%. Neither number licenses anything;
+they are what the metric is for.
 
 **Does recall answer real questions well?** Candidates now come from SQLite's
 search index, but the re-ranking weights and the relevance floor are still
