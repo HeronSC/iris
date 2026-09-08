@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -118,15 +119,34 @@ class Appraiser:
                 raise KnowledgeError(f"No such memory: {record_id}")
             records.append(found)
 
-        pools: dict[str, _Pool] = {}
+        boundaries: dict[tuple[str, str | None], datetime | None] = {}
+        for item in records:
+            group = (item.topic, item.source_ref)
+            seen = _moment(item.occurred_at)
+            if group not in boundaries:
+                boundaries[group] = seen
+            elif seen is not None and (boundaries[group] is None or seen < boundaries[group]):
+                boundaries[group] = seen
+
+        pools: dict[tuple[str, str | None], _Pool] = {}
         rules: dict[str, list[_Rule]] = {}
         for item in records:
-            if item.topic not in pools:
-                pools[item.topic] = self._pool(item.topic)
+            group = (item.topic, item.source_ref)
+            if group not in pools:
+                pools[group] = self._pool(item.topic, item.source_ref, boundaries[group])
+            if item.topic not in rules:
                 rules[item.topic] = self._rules(item.topic)
 
         appraisals = _ranked(
-            [self._appraise(item, pools[item.topic], rules[item.topic]) for item in records]
+            [
+                self._appraise(
+                    item,
+                    pools[(item.topic, item.source_ref)],
+                    rules[item.topic],
+                    boundaries[(item.topic, item.source_ref)],
+                )
+                for item in records
+            ]
         )
         if record:
             self.record(appraisals)
@@ -170,22 +190,36 @@ class Appraiser:
         )
         return decisions
 
-    def _pool(self, topic: str) -> _Pool:
+    def _pool(
+        self, topic: str, cohort: str | None = None, before: datetime | None = None
+    ) -> _Pool:
         rows: list[tuple[str, dict[str, float], bool]] = []
+        parameters: list[object] = [
+            MemoryRelation.OUTCOME_OF.value,
+            topic,
+            MemoryKind.OBSERVATION.value,
+        ]
+        withheld = ""
+        if cohort:
+            withheld = "AND (m.source_ref IS NULL OR m.source_ref <> ?) "
+            parameters.append(cohort)
+        parameters.append(POOL_LIMIT)
+
         with self.graph.records.database.connect() as conn:
             found = conn.execute(
-                "SELECT m.id, m.data_json, o.data_json AS outcome_json "
+                "SELECT m.id, m.data_json, m.occurred_at, o.data_json AS outcome_json "
                 "FROM memories m "
                 "JOIN memory_links l ON l.target_id = m.id AND l.relation = ? "
                 "JOIN memories o ON o.id = l.source_id "
-                "WHERE m.topic = ? AND m.kind = ? "
-                "ORDER BY m.sequence DESC LIMIT ?",
-                (MemoryRelation.OUTCOME_OF.value, topic, MemoryKind.OBSERVATION.value, POOL_LIMIT),
+                "WHERE m.topic = ? AND m.kind = ? " + withheld + "ORDER BY m.sequence DESC LIMIT ?",
+                tuple(parameters),
             ).fetchall()
 
         for row in found:
             verdict = _json(row["outcome_json"]).get(FAVOURABLE_KEY)
             if not isinstance(verdict, bool):
+                continue
+            if not _precedes(row["occurred_at"], before):
                 continue
             rows.append((str(row["id"]), numeric_features(_json(row["data_json"])), verdict))
 
@@ -242,7 +276,11 @@ class Appraiser:
         return tuple(applied)
 
     def _appraise(
-        self, record: MemoryRecord, pool: _Pool, rules: Sequence[_Rule]
+        self,
+        record: MemoryRecord,
+        pool: _Pool,
+        rules: Sequence[_Rule],
+        before: datetime | None = None,
     ) -> Appraisal:
         features = numeric_features(record.data)
         applied = self._applied(rules, features) if features else ()
@@ -250,7 +288,7 @@ class Appraiser:
         if pool and shared:
             base = self._by_features(record, pool, features, shared)
         else:
-            base = self._by_text(record)
+            base = self._by_text(record, before)
         return _with_rules(base, applied)
 
     def _by_features(
@@ -313,8 +351,8 @@ class Appraiser:
             source_ref=record.source_ref,
         )
 
-    def _by_text(self, record: MemoryRecord) -> Appraisal:
-        similar = self._similar(record)
+    def _by_text(self, record: MemoryRecord, before: datetime | None = None) -> Appraisal:
+        similar = self._similar(record, before)
         if not similar:
             return Appraisal(
                 record_id=record.id,
@@ -323,7 +361,7 @@ class Appraiser:
                 favourable=0,
                 unfavourable=0,
                 score=None,
-                rationale="Nothing resembling this has been seen before.",
+                rationale=_nothing_comparable(record, before),
                 topic=record.topic,
                 source_ref=record.source_ref,
                 method=METHOD_TEXT,
@@ -390,7 +428,9 @@ class Appraiser:
             method=METHOD_TEXT,
         )
 
-    def _similar(self, record: MemoryRecord) -> list[MemoryRecord]:
+    def _similar(
+        self, record: MemoryRecord, before: datetime | None = None
+    ) -> list[MemoryRecord]:
         result = self.retriever.retrieve(
             KnowledgeQuery(
                 text=record.content,
@@ -400,7 +440,13 @@ class Appraiser:
                 candidate_limit=max(self.neighbours * 4, 200),
             )
         )
-        return [item.record for item in result.records if item.record.id != record.id]
+        return [
+            item.record
+            for item in result.records
+            if item.record.id != record.id
+            and not _same_cohort(record, item.record)
+            and _precedes(item.record.occurred_at, before)
+        ]
 
 
 def _json(raw: object) -> dict:
@@ -464,6 +510,44 @@ def _with_rules(appraisal: Appraisal, applied: tuple[AppliedRule, ...]) -> Appra
         method=appraisal.method,
         rules=applied,
     )
+
+
+def _same_cohort(record: MemoryRecord, other: MemoryRecord) -> bool:
+    return bool(record.source_ref) and other.source_ref == record.source_ref
+
+
+def _moment(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _precedes(occurred_at: str | None, before: datetime | None) -> bool:
+    if before is None:
+        return True
+    seen = _moment(occurred_at)
+    if seen is None:
+        return False
+    if (seen.tzinfo is None) != (before.tzinfo is None):
+        return False
+    return seen < before
+
+
+def _nothing_comparable(record: MemoryRecord, before: datetime | None = None) -> str:
+    if before is not None:
+        return (
+            f"Nothing recorded before {before.isoformat()} resembles this. A cohort cannot score "
+            "itself, and nothing later can score it either, so there is no basis for this one yet."
+        )
+    if record.source_ref:
+        return (
+            f"Nothing outside cohort {record.source_ref} resembles this. A cohort cannot score "
+            "itself, so there is no basis for this one yet."
+        )
+    return "Nothing resembling this has been seen before."
 
 
 def _nothing_to_go_on(similar: int, closed: int, unlabelled: int) -> str:

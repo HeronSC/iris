@@ -268,6 +268,7 @@ def create_app(app_service: Any) -> FastAPI:
                     hit_rate=item.hit_rate,
                     lift=item.lift,
                     tied_at_the_cut=item.tied_at_the_cut,
+                    distinct_scores=item.distinct_scores,
                 )
                 for item in result.rankers
             ],

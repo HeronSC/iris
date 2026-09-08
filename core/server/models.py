@@ -155,6 +155,7 @@ class RankerOut(BaseModel):
     hit_rate: float
     lift: float
     tied_at_the_cut: int
+    distinct_scores: int
 
 
 class CompareOut(BaseModel):

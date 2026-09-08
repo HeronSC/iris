@@ -451,6 +451,136 @@ class AssessmentContractTests(unittest.TestCase):
 
         self.assertEqual(assessment["score"], 0.0, "six confident buys that all went badly score zero")
 
+    def _cohort(self, cohort: str, rows: list[tuple[float, bool | None]], topic: str = TOPIC) -> list[str]:
+        ids = self.client.post(
+            "/observations",
+            json={
+                "topic": topic,
+                "source": "bot:scanner",
+                "source_ref": cohort,
+                "observations": [
+                    {"content": f"widget spike at {level}", "data": {"level": level}}
+                    for level, _ in rows
+                ],
+            },
+        ).json()["ids"]
+        closed = [(item, good) for item, (_, good) in zip(ids, rows) if good is not None]
+        if closed:
+            self._close(closed)
+        return ids
+
+    def test_a_cohort_cannot_score_itself(self) -> None:
+        """Its own morning is the one pool that was not knowable when the morning ran."""
+        ids = self._cohort("2026-09-02", [(float(i), i % 2 == 0) for i in range(20)])
+
+        body = self.client.post("/assess", json={"ids": ids}).json()
+
+        self.assertEqual(body["ranked"], 0, "a cohort alone has no basis, so nothing is ranked")
+        assessment = body["appraisals"][0]["assessment"]
+        self.assertEqual(assessment["basis"], "none")
+        self.assertIsNone(assessment["score"])
+        self.assertIn("2026-09-02", assessment["rationale"])
+        self.assertIn("cannot score itself", assessment["rationale"])
+
+    def test_an_earlier_cohort_is_what_scores_a_morning(self) -> None:
+        self._cohort("2026-09-02", [(float(i), i < 8) for i in range(20)])
+        ids = self._cohort("2026-09-04", [(1.0, None)])
+
+        assessment = self.client.post("/assess", json={"ids": ids}).json()["appraisals"][0][
+            "assessment"
+        ]
+
+        self.assertEqual(assessment["basis"], "observations")
+        self.assertEqual(assessment["sample"], 20, "the earlier morning, all of it")
+        self.assertIsNotNone(assessment["score"])
+
+    def test_a_later_cohort_does_not_dilute_an_earlier_one(self) -> None:
+        """Scoring is per cohort, so two mornings in one batch do not share a pool."""
+        self._cohort("2026-09-02", [(float(i), i < 8) for i in range(20)])
+        second = self._cohort("2026-09-04", [(float(i), i % 2 == 0) for i in range(20)])
+        third = self._cohort("2026-09-05", [(1.0, None)])
+
+        body = self.client.post("/assess", json={"ids": second + third}).json()
+
+        samples = {item["id"]: item["assessment"]["sample"] for item in body["appraisals"]}
+        self.assertEqual(samples[second[0]], 20, "the Sep 2 morning only")
+        self.assertEqual(samples[third[0]], 40, "both earlier mornings")
+
+    def _timed_cohort(
+        self, cohort: str, seen_at: str, rows: list[tuple[float, bool | None]]
+    ) -> list[str]:
+        ids = self.client.post(
+            "/observations",
+            json={
+                "topic": TOPIC,
+                "source": "bot:scanner",
+                "source_ref": cohort,
+                "observations": [
+                    {
+                        "content": f"widget spike at {level}",
+                        "data": {"level": level},
+                        "occurred_at": seen_at,
+                    }
+                    for level, _ in rows
+                ],
+            },
+        ).json()["ids"]
+        closed = [(item, good) for item, (_, good) in zip(ids, rows) if good is not None]
+        if closed:
+            self._close(closed)
+        return ids
+
+    def test_a_later_morning_cannot_score_an_earlier_one(self) -> None:
+        """Re-assessing history must not reach forward into mornings that had not happened."""
+        self._timed_cohort(
+            "2026-09-04", "2026-09-04T13:30:00+00:00", [(float(i), i < 8) for i in range(20)]
+        )
+        earlier = self._timed_cohort("2026-09-02", "2026-09-02T13:30:00+00:00", [(1.0, None)])
+
+        body = self.client.post("/assess", json={"ids": earlier}).json()
+
+        assessment = body["appraisals"][0]["assessment"]
+        self.assertEqual(assessment["basis"], "none")
+        self.assertIsNone(assessment["score"])
+        self.assertIn("nothing later can score it", assessment["rationale"])
+
+    def test_a_morning_is_scored_on_what_came_before_it(self) -> None:
+        self._timed_cohort(
+            "2026-09-02", "2026-09-02T13:30:00+00:00", [(float(i), i < 8) for i in range(20)]
+        )
+        later = self._timed_cohort("2026-09-04", "2026-09-04T13:30:00+00:00", [(1.0, None)])
+
+        assessment = self.client.post("/assess", json={"ids": later}).json()["appraisals"][0][
+            "assessment"
+        ]
+
+        self.assertEqual(assessment["basis"], "observations")
+        self.assertEqual(assessment["sample"], 20)
+
+    def test_evidence_that_cannot_be_placed_in_time_is_not_used(self) -> None:
+        """A record with no occurred_at cannot be shown to predate the morning, so it sits out."""
+        self._cohort("undated", [(float(i), i < 8) for i in range(20)])
+        later = self._timed_cohort("2026-09-04", "2026-09-04T13:30:00+00:00", [(1.0, None)])
+
+        assessment = self.client.post("/assess", json={"ids": later}).json()["appraisals"][0][
+            "assessment"
+        ]
+
+        self.assertEqual(assessment["basis"], "none")
+        self.assertIsNone(assessment["score"])
+
+    def test_an_observation_with_no_cohort_keeps_the_whole_pool(self) -> None:
+        """Withholding a cohort is not withholding everything; a loose record is unaffected."""
+        self._cohort("2026-09-02", [(float(i), i < 8) for i in range(20)])
+        ids = self._post(["widget spike at 1.0"], topic=TOPIC)
+
+        assessment = self.client.post("/assess", json={"ids": ids}).json()["appraisals"][0][
+            "assessment"
+        ]
+
+        self.assertEqual(assessment["basis"], "observations")
+        self.assertEqual(assessment["sample"], 20)
+
     def test_an_unknown_id_is_reported(self) -> None:
         response = self.client.post("/assess", json={"ids": ["no-such-record"]})
 
@@ -550,6 +680,7 @@ class HitRateComparisonTests(unittest.TestCase):
 
     def test_iris_is_compared_only_on_what_it_recorded_at_the_time(self) -> None:
         """Recording is what stops the comparison grading Iris with the answers."""
+        self._morning("2026-09-06", [(0.5, index % 2 == 0) for index in range(10)])
         ids = self._perfect_and_useless()
         self.client.post("/assess", json={"ids": ids, "record": True})
 
@@ -587,6 +718,103 @@ class HitRateComparisonTests(unittest.TestCase):
 
         sources = {item.source for item in decisions}
         self.assertEqual(sources, {"bot:evaluator", "iris:shadow-2"})
+
+    def test_a_ranker_that_gave_one_score_expressed_no_order(self) -> None:
+        """A flat score is not a ranking, so it cannot lead and its top N is a slice."""
+        self._morning("flat", [(0.5, index % 2 == 0) for index in range(20)])
+
+        body = self.client.post("/compare", json={"cohort": "flat", "top_n": 5}).json()
+
+        bot = [item for item in body["rankers"] if item["source"] == "bot:evaluator"][0]
+        self.assertEqual(bot["distinct_scores"], 1)
+        self.assertIsNone(body["leader"], "no order means no leader, whatever the hit rate")
+        self.assertTrue(any("expressed no order" in note for note in body["notes"]))
+
+    def test_coarse_scores_are_reported_against_what_was_scored(self) -> None:
+        """Two values over forty candidates orders almost nothing, however it scores."""
+        rows = [(0.9, index % 3 == 0) for index in range(20)]
+        rows += [(0.1, index % 3 == 0) for index in range(20)]
+        self._morning("coarse", rows)
+
+        body = self.client.post("/compare", json={"cohort": "coarse", "top_n": 10}).json()
+
+        bot = [item for item in body["rankers"] if item["source"] == "bot:evaluator"][0]
+        self.assertEqual(bot["scored"], 40)
+        self.assertEqual(bot["distinct_scores"], 2)
+        self.assertTrue(any("only 2 distinct scores" in note for note in body["notes"]))
+
+    def _featured_morning(self, cohort: str, rows: list[tuple[float, float, bool]]) -> list[str]:
+        ids = self.client.post(
+            "/observations",
+            json={
+                "topic": TOPIC,
+                "source": "bot:scanner",
+                "source_ref": cohort,
+                "observations": [
+                    {
+                        "content": f"candidate at level {level}",
+                        "data": {"level": level},
+                        "decision": {
+                            "content": f"bot confidence {own}",
+                            "source": "bot:evaluator",
+                            "score": own,
+                        },
+                    }
+                    for level, own, _ in rows
+                ],
+            },
+        ).json()["ids"]
+        self.client.post(
+            "/outcomes",
+            json={
+                "source": "bot:broker",
+                "outcomes": [
+                    {"observation_id": item, "content": "closed", "favourable": good}
+                    for item, (_, _, good) in zip(ids, rows)
+                ],
+            },
+        )
+        return ids
+
+    def test_a_lead_inside_the_noise_names_no_leader(self) -> None:
+        """The first real morning put the two a few hits apart on fifty. That is not a win."""
+        self._featured_morning(
+            "2026-09-02",
+            [(float(index), index / 20.0, index % 3 == 0) for index in range(20)],
+        )
+        ids = self._featured_morning(
+            "2026-09-04",
+            [(float(index), index / 60.0, index % 4 == 0) for index in range(60)],
+        )
+        self.client.post("/assess", json={"ids": ids, "record": True})
+
+        body = self.client.post("/compare", json={"cohort": "2026-09-04", "top_n": 50}).json()
+
+        self.assertEqual(len(body["rankers"]), 2, "both rankers took part")
+        self.assertIsNone(body["leader"])
+        self.assertTrue(any("does not name a leader" in note for note in body["notes"]))
+        self.assertIn("No leader", body["summary"])
+
+    def test_topping_a_field_of_one_is_not_leading(self) -> None:
+        """A sole ranker below the base rate has beaten nothing, least of all the coin."""
+        self._morning("2026-09-02", [(index / 20.0, index % 3 == 0) for index in range(20)])
+
+        body = self.client.post("/compare", json={"cohort": "2026-09-02", "top_n": 10}).json()
+
+        bot = [item for item in body["rankers"] if item["source"] == "bot:evaluator"][0]
+        self.assertLessEqual(bot["lift"], 0.0)
+        self.assertIsNone(body["leader"])
+        self.assertTrue(any("does not clear the" in note for note in body["notes"]))
+
+    def test_a_clear_win_is_still_called(self) -> None:
+        """Withholding a leader on noise must not withhold one on a real gap."""
+        self._morning("2026-09-02", [(0.5, index % 2 == 0) for index in range(20)])
+        self._perfect_and_useless()
+
+        body = self.client.post("/compare", json={"cohort": "2026-09-07", "top_n": 10}).json()
+
+        self.assertEqual(body["leader"], "bot:evaluator")
+        self.assertIn("Leader: bot:evaluator", body["summary"])
 
     def test_ties_at_the_cut_are_reported_not_hidden(self) -> None:
         self._morning("flat", [(0.5, index % 2 == 0) for index in range(20)])
