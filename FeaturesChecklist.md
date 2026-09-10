@@ -43,6 +43,7 @@ Written down so the unchecked boxes below read as "not yet" rather than "nothing
 | Desktop UI | PySide6 desktop app | `ui/main.py` |
 | HTTP surface | FastAPI | `serve.py`, `core/server/` |
 | Voice | Empty package, nothing built | `core/voice/` |
+| Trading bot integration | Built: bot posts observations, calls `/assess`; Iris scores and compares | `core/server/app.py`, bot's `bot/api/iris/client.py` |
 | Generic tool/plugin registry | Not built (the package is empty) | `core/tools/` |
 
 ---
@@ -528,6 +529,23 @@ Rendering only. *What* gets rendered is defined in 2.7.
 	passed over: a second TypeScript codebase for a phone view that 11 does not ask for yet. The
 	result contract (2.7) keeps that door open without touching core.
 
+### 6.1 Voice and Interaction Modes
+
+`core/voice/` exists as an empty package, so this was intended; it had no section. Local-only (1)
+rules out every hosted speech API, which leaves a short, good list.
+
+- [ ] Push-to-talk first; a wake word only if hands-free use is actually wanted.
+- [ ] Speech to text on this machine.
+- [ ] Text to speech on this machine, for replies and for notifications (8.2) read aloud.
+- [ ] Voice is another client of the same core — the result contract (2.7) decides what a spoken
+	answer contains; the voice layer only renders it.
+- [ ] Barge-in: speaking over Iris stops the reply.
+- [ ] Options — STT: `faster-whisper` (CTranslate2, runs on the 4060 Ti, best accuracy per second),
+	`whisper.cpp` (CPU-friendly), Windows Speech Recognition (built in, weakest). TTS: `Piper`
+	(fast, local, natural enough), Windows SAPI via `pywin32` (built in, robotic), `Kokoro`
+	(higher quality, heavier). Wake word: `openWakeWord`. Audio I/O: `sounddevice`.
+	Nothing here is decided; the VRAM budget in 2.4 has to include whichever STT model is chosen.
+
 ---
 
 ## 7. System, Network, and Infrastructure
@@ -709,6 +727,10 @@ need; this section decides what is allowed.
 - [ ] Keep credentials and secrets separate from model reasoning: never in `config.json`, never in
 	a prompt, never in a log.
 - [ ] Rate-limit and cap physical-world and outbound actions: email, messages, devices.
+- [ ] Authenticate the HTTP surface. `serve.py` binds `127.0.0.1:8765` with no credential at all —
+	acceptable while only this PC's own processes reach it, not once a Windows service (11) hosts it
+	and the trading bot (13), Blue Iris, or Home Assistant call in. A per-client token from
+	Credential Manager, checked on every request; still loopback-only until a remote client exists.
 - [ ] Provide a global stop that halts running tools, workflows, and watchers at once.
 - [ ] Nothing leaves the machine by default — decided 2026-09-10. There is no cloud AI (1, 2.4);
 	any non-AI outbound call (search, Graph, notifications) names what it sends, and memory,
@@ -776,6 +798,38 @@ eval is a saved-requests fixture plus a scoring script in the same suite.
 
 ---
 
+## 13. Applications Built on Iris
+
+Systems that consume Iris rather than extend it. They enter through the HTTP surface and the
+knowledge layer (2.1, 2.2), never through a private path. This section existed only as "deferred"
+in Appendix A, which understated it: the first application is already wired.
+
+### 13.1 Trading Bot
+
+`E:\VS\Zuraw\StandardTradingBot` — `bot/api/iris/client.py` posts observations and calls
+`/assess`, raising `IrisUnavailable` cleanly when Iris is down. PhaseStatus §7 records the Iris
+side: batch observations, outcomes, recall, assess, compare.
+
+- [x] Inbound path: the bot sends candidates as observations and closes them with outcomes.
+- [x] Iris scores a cohort (`/assess`, recorded at the time so it cannot grade itself later).
+- [x] Comparison: hit rate at top N, Iris against the bot, lift over base rate (`/compare`).
+- [ ] Iris as the decision layer — the bot *acts* on Iris's assessment rather than logging it
+	beside its own. Gated on the comparison showing sustained lift on real mornings, not seeded
+	data; PhaseStatus is explicit that nothing has met real data yet.
+- [ ] Re-evaluate hypotheses on a schedule (APScheduler, 8.2) instead of only when a person files
+	evidence.
+- [ ] Trading monitoring (8.2): candidate-list health, outcome latency, an assessment that stops
+	arriving.
+- [ ] Authenticate the bot's calls (10).
+
+### 13.2 Later Applications
+
+Anything else that wants Iris's memory and judgment — a BC assistant surfaced inside VS Code (4.2),
+Home Assistant automations that ask Iris before acting (9.2) — follows the same shape: HTTP or MCP
+in, result contract out, permissions in 10.
+
+---
+
 ## Appendix A. Open Questions
 
 Collected from the sections above. Each one changes the shape of the work that follows it.
@@ -795,5 +849,5 @@ Collected from the sections above. Each one changes the shape of the work that f
 8. **Home automation** (9.2) — Home Assistant is the aggregator (decided; not yet running). Still
 	open: which devices are in the house — discovery will answer it.
 9. **Reach** (11) — single machine only, or phone and remote access?
-10. **Trading** (8.2) — Iris as the decision layer for the bot is deferred. When it returns, it
-	enters through 2.1 and 2.2 as an application, per `PhaseDesign.md`.
+10. **Trading** (13.1) — the integration is built and scoring; Iris as the *decision* layer waits
+	on sustained lift over real mornings. The gate is measured, not argued.
