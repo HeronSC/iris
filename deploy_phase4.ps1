@@ -103,7 +103,7 @@ if (-not (Test-Path $venvPython)) {
 
 Write-Host "Installing dependencies..."
 & $venvPython -m pip install --upgrade pip
-& $venvPython -m pip install -r (Join-Path $appRoot "core\requirements.txt")
+& $venvPython -m pip install -r (Join-Path $appRoot "requirements.txt")
 
 $configPath = Join-Path $appRoot "core\config.json"
 if (-not (Test-Path $configPath)) {

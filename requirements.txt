@@ -1,3 +1,32 @@
+# Iris — single requirements file for dev (.venv) and release (Runtime\venv).
+# Decisions recorded in FeaturesChecklist.md, 2026-09-10.
+
+# UI and HTTP surface
 PySide6>=6.7.0
 fastapi>=0.115
 uvicorn>=0.30
+
+# Models and tools
+ollama>=0.4
+mcp>=2.0
+sqlite-vec>=0.1.6
+
+# Documents and web
+pypdf>=4.0.0
+pymupdf>=1.24
+openpyxl>=3.1
+python-docx>=1.1
+winocr>=0.0.10
+trafilatura>=2.0
+
+# Runtime services
+apscheduler>=3.10
+watchdog>=4.0
+structlog>=24.0
+psutil>=6.0
+windows-toasts>=1.1
+paho-mqtt>=2.0
+keyring>=25.0
+
+# Windows integration (Excel COM, service host, foreground window) — pinned rather than left transitive
+pywin32>=306

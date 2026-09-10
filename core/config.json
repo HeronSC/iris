@@ -5,8 +5,8 @@
   "proposal_path": "E:\\AI\\Iris\\Data\\Proposals",
   "audit_path": "E:\\AI\\Iris\\Data\\Audit",
   "model": "qwen3:8b",
-  "image_server": "http://localhost:8188",
-  "llm_server": "http://localhost:11434",
+  "image_server": "http://127.0.0.1:8188",
+  "llm_server": "http://127.0.0.1:11434",
   "llm_timeout_seconds": 180,
   "conversation": {
     "recent_message_limit": 16,
