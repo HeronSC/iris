@@ -575,8 +575,10 @@ Rendering only. *What* gets rendered is defined in 2.7.
 	endpoints for sites, devices, and clients. In-house over `httpx`. Passed over unless the
 	official API proves too thin: `aiounifi` (the unofficial controller API wrapper Home Assistant
 	uses), SSH, SNMP, syslog.
-- [ ] **Open:** NAS vendor not yet stated. Synology (DSM API) and QNAP (QTS API) each have an
-	official HTTP API; anything else falls back to SNMP and SSH.
+- [ ] **Decided 2026-09-10:** the NAS is a Synology, so device health comes from the official DSM
+	Web API — login, `SYNO.Core.System` for volumes and temperature, `SYNO.Storage.CGI.Storage` for
+	disks and SMART, backup task status. In-house over `httpx`; credentials in Credential Manager
+	(10). SNMP and SSH stay as fallbacks. File access is unchanged: UNC path through `pathlib` (2.6).
 
 ---
 
