@@ -17,8 +17,6 @@ from core.assistant.conversation_synonyms import ConversationSynonymStore
 from core.assistant.intent_example_store import IntentExampleStore
 from core.assistant.llm_client import LLMClient
 from core.assistant.output import OutputSink, emit_output
-from core.llm.models import LLMRequest
-from core.llm.ollama_client import OllamaClientError
 from core.tools.models import ToolArgumentError, ToolDefinition, ToolKind
 from core.tools.registry import ToolRegistry
 
@@ -27,14 +25,6 @@ class IndexScanArguments(BaseModel):
     root: str = Field(default="", description="Optional folder group to index, such as 'documents'; empty for all configured roots")
 
 
-INTENT_SYSTEM_PROMPT = (
-    "You are the intent layer of Iris, a local desktop assistant. "
-    "Decide whether the user's message asks for an action that one of the available tools performs. "
-    "If it does, call exactly one tool, taking its arguments from the message. "
-    "If the message is ordinary conversation, a question, or asks for something no tool covers, "
-    "reply with a short sentence and call no tool. "
-    "Never invent paths, names, or values the user did not give."
-)
 
 
 @dataclass(frozen=True)
@@ -181,60 +171,6 @@ class IntentRouter:
         self._emit(result.message)
         return result
 
-    def _looks_actionable(self, text: str) -> bool:
-        lowered = text.lower()
-        keywords = [
-            "index",
-            "scan",
-            "profile",
-            "memory",
-            "config",
-            "settings",
-            "setting",
-            "model",
-            "assistant name",
-            "application",
-            "app",
-            "shortcut",
-            "document root",
-            "search root",
-            "change",
-            "update",
-            "set",
-            "stop indexing",
-            "remove",
-            "delete",
-            "open",
-            "launch",
-        ]
-        if any(token in lowered for token in keywords):
-            return True
-        return any(re.search(pattern, lowered) for pattern in self._registry_keyword_patterns())
-
-    _KEYWORD_STOPWORDS = frozenset({"set", "add", "get", "the", "url", "to", "of", "for", "and"})
-
-    def _registry_keywords(self) -> set[str]:
-        words: set[str] = set()
-        for name in self.tool_registry.names():
-            definition = self.tool_registry.get(name)
-            if definition is None or not definition.expose_to_model or not self.tool_registry.is_enabled(name):
-                continue
-            for token in re.split(r"[_\W]+", definition.name.lower()):
-                if len(token) >= 3 and token not in self._KEYWORD_STOPWORDS:
-                    words.add(token)
-            for phrase in definition.keywords:
-                cleaned = " ".join(phrase.lower().split())
-                if cleaned:
-                    words.add(cleaned)
-        return words
-
-    def _registry_keyword_patterns(self) -> list[str]:
-        patterns: list[str] = []
-        for word in self._registry_keywords():
-            stem = word[:-1] if word.endswith("s") and len(word) > 3 else word
-            patterns.append(rf"\b{re.escape(stem)}(?:s|es)?\b")
-        return patterns
-
     def _resolve_intent(self, text: str) -> StructuredIntent | None:
         normalized_text = self._normalize_action_text(text)
 
@@ -251,18 +187,7 @@ class IntentRouter:
         if direct_index_root is not None:
             return StructuredIntent(intent="scan_document_root", arguments={"root": direct_index_root}, source="heuristic")
 
-        if not self._looks_actionable(text) and not self._looks_actionable(normalized_text):
-            return None
-
-        parsed = self._classify(normalized_text)
-        if parsed is None:
-            return None
-
-        intent_name = str(parsed.get("intent", "none")).strip().lower()
-        arguments = parsed.get("arguments", {})
-        if intent_name == "none" or not isinstance(arguments, dict):
-            return None
-        return StructuredIntent(intent=intent_name, arguments=arguments, source="llm")
+        return None
 
     def _normalize_action_text(self, text: str) -> str:
         normalized = text.strip()
@@ -563,30 +488,3 @@ class IntentRouter:
 
     def _emit(self, text: str) -> None:
         emit_output(self.output, text)
-
-    def _classify(self, text: str) -> dict[str, Any] | None:
-        tools = self.tool_registry.model_tools()
-        if not tools:
-            return None
-
-        system_prompt = INTENT_SYSTEM_PROMPT
-        learned_examples = self.example_store.render_examples_for_prompt()
-        if learned_examples:
-            system_prompt = (
-                system_prompt
-                + "\nPast requests and the tool call each one mapped to (intent = tool name):\n"
-                + learned_examples
-            )
-
-        request = LLMRequest.from_prompts(system_prompt, text, tools=tools, think=False, task="intent")
-        try:
-            response = self.llm_client.chat(request)
-        except OllamaClientError:
-            return None
-
-        for call in response.tool_calls:
-            definition = self.tool_registry.get(call.name)
-            if definition is None or not definition.expose_to_model or not self.tool_registry.is_enabled(call.name):
-                continue
-            return {"intent": call.name, "arguments": dict(call.arguments)}
-        return None

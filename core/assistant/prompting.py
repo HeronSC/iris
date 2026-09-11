@@ -1,3 +1,5 @@
+# File: core/assistant/prompting.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,6 +9,8 @@ from enum import Enum
 class PromptType(str, Enum):
     YES_NO_CANCEL = "yes_no_cancel"
     TEXT = "text"
+    CHOICE = "choice"
+    FILE = "file"
 
 
 PROMPT_CANCEL_TOKEN = "__iris_prompt_cancel__"

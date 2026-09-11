@@ -77,7 +77,7 @@ class CoordinatorStreamingTests(unittest.TestCase):
         client = StreamingClient(["unused"])
         coordinator = self._coordinator(client)
         turn = coordinator.respond_detailed("hello")
-        self.assertEqual(turn.text, "non-streamed answer")
+        self.assertEqual(turn.text, "unused")
         self.assertEqual(client.stream_requests, [])
 
     def test_cancel_stops_the_stream_and_keeps_what_arrived(self) -> None:

@@ -14,6 +14,7 @@ from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QFileDialog,
     QHeaderView,
     QHBoxLayout,
     QInputDialog,
@@ -548,6 +549,12 @@ class IrisWindow(QMainWindow):
                 response_text = "no"
             else:
                 response_text = PROMPT_CANCEL_TOKEN
+        elif request.prompt_type == PromptType.CHOICE and request.choices:
+            chosen, accepted = QInputDialog.getItem(self, "Iris Prompt", request.text, list(request.choices), 0, False)
+            response_text = chosen if accepted else PROMPT_CANCEL_TOKEN
+        elif request.prompt_type == PromptType.FILE:
+            selected, _filter = QFileDialog.getOpenFileName(self, request.text, "", "Programs (*.exe);;All files (*.*)")
+            response_text = selected if selected else PROMPT_CANCEL_TOKEN
         else:
             dialog = QInputDialog(self)
             dialog.setInputMode(QInputDialog.InputMode.TextInput)

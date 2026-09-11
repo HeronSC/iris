@@ -97,7 +97,8 @@ single feature is what made those features look larger than they are.
 - [ ] Export and back up memory in a readable format (11).
 - [x] **Decided and built 2026-09-10:** add embedding retrieval beside FTS5, not instead of it.
 	-> `core/knowledge/embeddings.py`; fused in `retrieval.py`; `/knowledge embeddings` shows status.
-	Embeddings from `nomic-embed-text` via Ollama; vectors stored in `knowledge.db` with `sqlite-vec`,
+	Embeddings from `nomic-embed-text` via Ollama; vectors stored beside `knowledge.db` (`usearch`
+	since 2026-09-11, see the load-test line; `sqlite-vec` before that),
 	so they share the store's transactions and backup. FTS5 and vector KNN are fused, then the
 	existing scorer (recency, prior, diagnostics) applies unchanged. `core/knowledge/` otherwise stays.
 	Considered and passed over: LanceDB (pyarrow), Chroma (onnxruntime, separate directory),
@@ -115,12 +116,20 @@ single feature is what made those features look larger than they are.
 	records are excluded from the index, so the practical volume is human-written records — 827
 	today, growing by hundreds a year, not hundreds of thousands; (2) sqlite-vec 0.1.9 segfaults
 	intermittently on insert on this machine (about one crash per 50k-100k rows, any batch size),
-	so vector writes run in a child interpreter (`core/knowledge/vec_writer.py`) and a crash is a
-	failed pass to retry, not a dead Iris. A 0.1.10 pre-release exists; not adopted without a yes.
+	so vector writes ran in a child interpreter for a day. Replaced 2026-09-11 by `usearch`
+	(single-file HNSW index beside the database, `core/storage/vector_table.py`), which removed
+	the crash-isolation machinery; keys stay in step with SQLite the same way as before.
 	sqlite-vec is brute-force KNN with no ANN index; this is where that either holds or does not.
-- [ ] Evaluate memory/orchestration frameworks before extending custom code:
+- [x] Evaluate memory/orchestration frameworks before extending custom code:
 	Mem0, Letta, Zep, Graphiti, Semantic Kernel, LangGraph, AutoGen, LlamaIndex, Haystack.
 	(2.2 references this list rather than repeating it.)
+	**Evaluated 2026-09-11, each against local-only, in-process, few moving parts:** Mem0 (generic
+	conversational memory, PostHog on by default; not better than ours), Letta (a Postgres server;
+	no), Zep (cloud only since April 2025; no), Graphiti (temporal graph, shaky on small local
+	models; revisit), Semantic Kernel and AutoGen (retired into Microsoft Agent Framework), Agent
+	Framework (viable, Ollama connector still beta; runner-up), LangGraph (adopted for the loop,
+	see 2.3), LlamaIndex and Haystack (retrieval frameworks; ours is built), plus Cognee and txtai
+	(same verdicts). Adopted the same day: LangGraph for the decision loop, usearch for vectors.
 
 ### 2.2 Decision-Making and Learning
 
@@ -166,8 +175,14 @@ single feature is what made those features look larger than they are.
 - [x] **Decided and built 2026-09-10:** adopt the official `mcp` Python SDK as a *client*. MCP servers register
 	into the same registry and pass through the same validate → preview → confirm → audit spine in
 	`core/actions/executor.py`, which stays. Node 22 and `uv` are installed for launching servers.
-	Passed over: LangGraph, Semantic Kernel, pydantic-ai, smolagents — each wants to own the loop,
-	and Iris has an orchestrator.
+	Passed over on 2026-09-10: LangGraph, Semantic Kernel, pydantic-ai, smolagents — each wants to
+	own the loop. **Reversed 2026-09-11:** letting a framework own the loop is exactly the point, and
+	the hand-written loop is where the misroutes came from. LangGraph now owns it (`core/agent/`):
+	classify → plan (one model call with every registry and capability tool bound) → act (through
+	the executor; a confirmation is a LangGraph interrupt, resumed by the user's yes or no) → answer.
+	Session state is checkpointed to `Data\Sessionsgent_checkpoints.db`, so a pending confirmation
+	survives a restart. Iris keeps the model seam, tools, memory, and prompts; `orchestrator.py` is
+	gone and the intent router keeps only its deterministic fast paths.
 - [ ] Later, once the client side works: expose Iris as an MCP *server*, so Claude Code and VS Code
 	can call recall/observe/hypothesize directly. Cheapest route to 4.2.
 
@@ -311,6 +326,13 @@ this; they now consume it.
 
 ### 3.2 Coding and Development Assistant (Start with BC/AL)
 
+- [~] **Routing fixed 2026-09-11** after a real session: a greeting was answered with the weather (the
+	orchestrator picked a capability for small talk) and a request for a Business Central function became a
+	file search for the word "to" (the deterministic parser treated any sentence containing lookup/list/show
+	as a filename search). Now: small talk and code requests skip the orchestrator, a file search needs a
+	file word, a filename, a path, or an imperative "find X"; code requests route to the `code` task
+	(qwen2.5-coder) with guidance that Business Central means AL. -> `core/assistant/request_kinds.py`.
+
 Git-specific items moved to 3.3.
 
 - [ ] Begin with read-only repository access.
@@ -378,6 +400,14 @@ Git-specific items moved to 3.3.
 ## 4. Application Integration Layer
 
 Goal: build adapters on top of existing automation APIs, not replacement applications.
+
+- [x] **Built 2026-09-11 from a real session:** launching an unknown program no longer asks for a bare
+	executable path. Iris scans the Start Menu shortcuts and the App Paths registry (cached, under a
+	second), offers the matches as a choice, and falls back to a file picker. "Open <name>" now
+	checks whether the name is a known folder (VS Code's recent workspaces, subfolders of the document
+	roots) and offers to open it in VS Code, with a choice when several match. `launch_application`
+	takes an optional target path. -> `core/system/applications.py`, `core/system/places.py`,
+	prompt types CHOICE and FILE in `core/assistant/prompting.py`.
 
 Every adapter follows the same shape, so a new app is a plugin (2.3) rather than a redesign:
 
@@ -541,11 +571,16 @@ Presentation moved to 2.7 and 6. This section is about getting good information.
 	no separate installer), with `qwen2.5vl:7b` — already pulled — as the local vision fallback for
 	what OCR cannot read. Tesseract passed over as one more installer to maintain.
 - [x] **Decided and built 2026-09-10:** document embeddings use the same `nomic-embed-text` as memory, in
-	their own `sqlite-vec` table inside `documents.db`. One model, two stores, each backed up with
+	their own vector index beside `documents.db` (`usearch`). One model, two stores, each backed up with
 	its own database. -> `core/documents/embeddings.py` over the shared `core/storage/vector_table.py`;
 	chunked (1,200 chars, overlapping), fused into `DocumentSearchService` as a meaning bonus with
 	the passage and page attached. `pypdf` can leave `requirements.txt` once the release venv is rebuilt.
 - [ ] Options still open: docling or unstructured for mixed corpora; python-pptx; extract-msg.
+	**Evaluated 2026-09-11:** Docling (IBM, local, real table and layout extraction, its own OCR,
+	PPTX/EML/EPUB) is the upgrade when complex PDFs matter; deferred because it pulls in torch and
+	models and PDF summaries are rare here. The other 2026-09-11 evaluations (Mem0, Letta, Zep,
+	Graphiti, Semantic Kernel, LangGraph, AutoGen, LlamaIndex, Haystack, Cognee, txtai) are
+	recorded on the 2.1 framework line and in 2.3.
 
 ---
 

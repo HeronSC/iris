@@ -35,8 +35,8 @@ class SystemAdapter:
     def show_in_explorer(self, path: str) -> None:
         subprocess.run(["explorer.exe", "/select,", path], check=False)
 
-    def launch_application(self, executable: str) -> None:
-        subprocess.Popen([executable])
+    def launch_application(self, executable: str, target: str | None = None) -> None:
+        subprocess.Popen([executable, target] if target else [executable])
 
     def open_url(self, url: str) -> None:
         webbrowser.open(url, new=2)

@@ -14,7 +14,8 @@ from typing import Any
 
 from core.assistant.general_knowledge_router import GeneralKnowledgeRouter
 from core.assistant.llm_client import LLMClient
-from core.assistant.orchestrator import AssistantOrchestrator, OrchestrationExecutionState
+from core.agent.graph import AgentResult, IrisAgent
+from core.assistant.request_kinds import is_code_request
 from core.conversation.context_builder import ContextBuilder
 from core.conversation.persistent_memory import PreparedMemoryContext, TopicMemoryService, diagnostics_to_text
 from core.conversation.request_pipeline import RequestPipeline, RequestPipelineResult
@@ -25,11 +26,18 @@ from core.conversation.session_manager import SessionManager
 from core.conversation.session_summarizer import SessionSummarizer
 from core.documents.models import DocumentSearchConfig, DocumentSearchRoot
 from core.application.contracts import ActionSuggestion
-from core.llm.models import LLMRequest, LLMResponse
+from core.llm.models import LLMResponse
 from core.llm.ollama_client import OllamaClientError
 
 
 logger = logging.getLogger(__name__)
+
+CODE_ANSWER_GUIDANCE = (
+    "This is a request for code. Answer with working code first, in a fenced block, in the language the request "
+    "implies: Business Central or NAV means AL (a codeunit or procedure with SetRange or SetFilter for filters); "
+    "otherwise use the language named or the one the surrounding context uses. Follow the code with a short "
+    "explanation of what it does and any assumption you made. Do not describe menu clicks when code was asked for."
+)
 
 
 def _platform_start_file(path: str) -> None:
@@ -47,6 +55,8 @@ class CoordinatorTurn:
     recalled_context: dict[str, Any] | None = None
     topic_id: str | None = None
     topic_title: str | None = None
+    awaiting_confirmation: bool = False
+    resolved_by: str = "model"
 
 
 class AssistantCoordinator:
@@ -77,18 +87,12 @@ class AssistantCoordinator:
         self._active_topic_title: str | None = None
         knowledge_config = self.config.get("general_knowledge", {}) if isinstance(self.config, dict) else {}
         self.general_knowledge_router = GeneralKnowledgeRouter(knowledge_config)
-        max_iterations = 2
-        if isinstance(knowledge_config, dict):
-            try:
-                max_iterations = max(1, int(knowledge_config.get("orchestrator_max_iterations", 2)))
-            except (TypeError, ValueError):
-                max_iterations = 2
-        self.orchestrator = AssistantOrchestrator(
-            self.ollama_client,
-            self.general_knowledge_router,
-            max_iterations=max_iterations,
-            orchestration_context_provider=self._tracked_orchestration_context,
-        )
+        self._tool_registry: Any | None = None
+        self._action_executor: Any | None = None
+        self._example_store: Any | None = None
+        self._checkpoint_path: Path | None = None
+        self._agent: IrisAgent | None = None
+        self._turn_cache: dict[str, Any] = {}
         audit_path = self.config.get("audit_path") if isinstance(self.config, dict) else None
         if isinstance(audit_path, str):
             audit_path = Path(audit_path)
@@ -105,163 +109,169 @@ class AssistantCoordinator:
         on_delta: Callable[[str], None] | None = None,
         cancel_event: threading.Event | None = None,
     ) -> CoordinatorTurn:
-        text = self._generate_response(user_message, project_id=project_id, on_delta=on_delta, cancel_event=cancel_event)
+        self._begin_turn()
+        try:
+            result = self.agent.run(
+                user_message,
+                session_id=self.current_session_id(),
+                project_id=project_id,
+                on_delta=on_delta,
+                cancel_event=cancel_event,
+            )
+        except Exception as error:
+            prepared = self._turn_cache.get("prepared")
+            if prepared is None:
+                prepared = {"record": self._turn_recorder(self._resolve_session())}
+                prepared["record"]("user", user_message)
+            self._record_generation_failure(prepared["record"], error)
+            raise
+        return self._turn_from_result(result)
+
+    def resume_confirmation(self, approved: bool, *, on_delta: Callable[[str], None] | None = None) -> CoordinatorTurn | None:
+        result = self.agent.resume(self.current_session_id(), approved, on_delta=on_delta)
+        if result is None:
+            return None
+        return self._turn_from_result(result)
+
+    def awaiting_confirmation(self) -> dict[str, Any] | None:
+        if self._agent is None:
+            return None
+        return self._agent.awaiting(self.current_session_id())
+
+    def attach_tools(
+        self,
+        *,
+        tool_registry: Any | None = None,
+        action_executor: Any | None = None,
+        example_store: Any | None = None,
+        checkpoint_path: str | Path | None = None,
+    ) -> None:
+        self._tool_registry = tool_registry
+        self._action_executor = action_executor
+        self._example_store = example_store
+        self._checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
+        if self._agent is not None:
+            self._agent.close()
+        self._agent = None
+
+    @property
+    def agent(self) -> IrisAgent:
+        if self._agent is None:
+            self._agent = IrisAgent(
+                self,
+                tool_registry=self._tool_registry,
+                action_executor=self._action_executor,
+                knowledge_router=self.general_knowledge_router,
+                checkpoint_path=self._checkpoint_path,
+                on_tool_success=self._remember_tool_success,
+            )
+        return self._agent
+
+    def current_session_id(self) -> str:
+        session = self._resolve_session()
+        return str(getattr(session, "id", None) or "default")
+
+    def code_guidance(self) -> str:
+        return CODE_ANSWER_GUIDANCE
+
+    def _begin_turn(self) -> None:
+        self._turn_cache = {}
+        self._last_recalled_public_context = None
+        self._last_general_knowledge_result = None
+        self._last_file_operations_payload = None
+
+    def _turn_from_result(self, result: AgentResult) -> CoordinatorTurn:
         return CoordinatorTurn(
-            text=text,
+            text=result.text,
             general_knowledge=self._last_general_knowledge_result,
             file_operations=self._last_file_operations_payload,
             recalled_context=self._last_recalled_public_context,
             topic_id=self._active_topic_id,
             topic_title=self._active_topic_title,
+            awaiting_confirmation=result.awaiting_confirmation,
+            resolved_by=result.resolved_by,
         )
 
-    def _generate_response(
-        self,
-        user_message: str,
-        project_id: str | None = None,
-        *,
-        on_delta: Callable[[str], None] | None = None,
-        cancel_event: threading.Event | None = None,
-    ) -> str:
+    def _remember_tool_success(self, user_message: str, tool_name: str, arguments: dict[str, Any]) -> None:
+        store = self._example_store
+        if store is None:
+            return
+        try:
+            store.save_example(user_message, tool_name, dict(arguments), source="successful:agent")
+        except Exception as error:
+            logger.warning("Could not save a tool example: %s", error)
+
+    def parse_request(self, user_message: str) -> dict[str, Any]:
         session = self._resolve_session()
-        self._last_recalled_public_context = None
-        self._last_general_knowledge_result = None
-        self._last_file_operations_payload = None
         set_active_provider = getattr(self.general_knowledge_router, "set_active_provider", None)
         if callable(set_active_provider):
             set_active_provider(session.metadata.get("active_capability") if hasattr(session, "metadata") else None)
-        state = {"project_id": project_id, "session": session}
-        request = self.request_pipeline.build_request(user_message, state=state)
-        prepared_memory: PreparedMemoryContext | None = None
-        trace_payload = {
+        request = self.request_pipeline.build_request(user_message, state={"session": session})
+        return {
+            "intent": request.intent,
+            "requires_tool": request.requires_tool,
+            "response_allowed": request.response_allowed,
+            "target": request.target,
+            "scope": request.scope,
+            "filters": request.filters,
+        }
+
+    def is_help_request(self, user_message: str) -> bool:
+        return user_message.strip().lower() == "/help"
+
+    def _new_trace_payload(self, user_message: str, parser: dict[str, Any]) -> dict[str, Any]:
+        session = self._resolve_session()
+        return {
             "request_id": current_request_id(),
             "conversation_id": getattr(session, "id", None),
             "session_id": getattr(session, "id", None),
             "raw_user_message": user_message,
             "previous_message_count": len(session.get_messages()),
             "pending_interaction": session.pending_interaction,
-            "deterministic_parser_result": {
-                "intent": request.intent,
-                "requires_tool": request.requires_tool,
-                "response_allowed": request.response_allowed,
-                "target": request.target,
-                "scope": request.scope,
-                "filters": request.filters,
-            },
+            "deterministic_parser_result": dict(parser),
             "tracked_data_context": self._tracked_orchestration_context(session),
         }
 
+    def handle_file_operation(self, user_message: str, parser: dict[str, Any], project_id: str | None) -> str | None:
+        session = self._resolve_session()
+        request = self.request_pipeline.build_request(user_message, state={"project_id": project_id, "session": session})
+        trace_payload = self._new_trace_payload(user_message, parser)
         handled = self._handle_read_file(request, user_message, project_id, trace_payload)
         if handled is not None:
             return handled
-
         handled = self._handle_count_files(request, user_message, trace_payload)
         if handled is not None:
             return handled
-
         handled = self._handle_find_files(request, user_message, session, trace_payload)
         if handled is not None:
             return handled
-
         handled = self._handle_select_pending_result(request, user_message, session, project_id, trace_payload)
         if handled is not None:
             return handled
-
         handled = self._handle_help(user_message, trace_payload)
         if handled is not None:
             return handled
-
         if request.requires_tool and not request.response_allowed:
-            response = f"Tool routing failed: unsupported intent {request.intent}"
             return self._trace_and_persist(
                 trace_payload,
                 user_message,
-                response,
+                f"Tool routing failed: unsupported intent {request.intent}",
                 selected_tool=None,
                 tool_arguments={},
                 tool_result={"status": "error", "reason": "unsupported_intent"},
             )
+        return None
 
-        self.orchestrator.router = self.general_knowledge_router
+    def prepare_turn(self, user_message: str, project_id: str | None, *, for_tools: bool = False) -> dict[str, Any]:
+        cached = self._turn_cache.get("prepared")
+        if cached is not None and cached.get("user_message") == user_message:
+            return cached
+        session = self._resolve_session()
         self._apply_router_defaults()
-        try:
-            orchestration_outcome = self.orchestrator.orchestrate(
-                user_message,
-                session=session,
-            )
-        except Exception as error:
-            record = self._turn_recorder(session)
-            record("user", user_message)
-            self._record_generation_failure(record, error)
-            raise
-        trace_payload["orchestration"] = orchestration_outcome.trace_payload()
-
-        if orchestration_outcome.state == OrchestrationExecutionState.AWAITING_CLARIFICATION and orchestration_outcome.chat_response:
-            return self._trace_and_persist(
-                trace_payload,
-                user_message,
-                orchestration_outcome.chat_response,
-                selected_tool=None,
-                tool_arguments={},
-                tool_result={"status": "clarification_required"},
-            )
-
-        if orchestration_outcome.state == OrchestrationExecutionState.FAILED and orchestration_outcome.chat_response:
-            return self._trace_and_persist(
-                trace_payload,
-                user_message,
-                orchestration_outcome.chat_response,
-                selected_tool=None,
-                tool_arguments={},
-                tool_result={"status": "failed"},
-            )
-
-        if orchestration_outcome.state == OrchestrationExecutionState.PARTIALLY_COMPLETED and orchestration_outcome.chat_response:
-            return self._trace_and_persist(
-                trace_payload,
-                user_message,
-                orchestration_outcome.chat_response,
-                selected_tool=orchestration_outcome.selected_capability,
-                tool_arguments={},
-                tool_result={"status": "partial"},
-            )
-
-        route_result = orchestration_outcome.route_result
-        selected_tool: str | None = None
-        tool_arguments: dict[str, Any] = {}
-        tool_result: dict[str, Any] = {"status": "skipped"}
-        if route_result is not None:
-            selected_tool = route_result.provider
-            if route_result.response is not None:
-                if hasattr(session, "metadata"):
-                    session.metadata["active_capability"] = route_result.provider
-                self._last_general_knowledge_result = {
-                    "provider": route_result.provider,
-                    "detail_type": getattr(route_result, "detail_type", "text"),
-                    "detail_title": getattr(route_result, "detail_title", None),
-                    "detail_content": getattr(route_result, "detail_content", None),
-                    "metadata": getattr(route_result, "metadata", None) or {},
-                }
-                capability_response = self._summary_from_capability_facts(for_chat_summary=False)
-                if not capability_response:
-                    capability_response = str(route_result.response).strip()
-                return self._trace_and_persist(
-                    trace_payload,
-                    user_message,
-                    capability_response,
-                    selected_tool=selected_tool,
-                    tool_arguments=tool_arguments,
-                    tool_result={"status": "success"},
-                )
-            if route_result.fallback_notice is not None:
-                tool_result = {"status": "fallback", "reason": route_result.fallback_notice}
-
+        parser = self.parse_request(user_message)
+        trace_payload = self._new_trace_payload(user_message, parser)
         active_session = self.session_manager.get_active_session() if self.session_manager is not None else None
-        history = active_session.get_messages() if active_session is not None else session.get_messages()
-        recent_limit = self._recent_message_limit()
-        recent_history = history[-recent_limit:] if recent_limit > 0 else []
-        session_summary = active_session.summary if active_session is not None else None
-
+        prepared_memory: PreparedMemoryContext | None = None
         persistent_memory_context = ""
         memory_diagnostics: dict[str, Any] | None = None
         try:
@@ -280,79 +290,85 @@ class AssistantCoordinator:
                 self._log_memory_diagnostics(memory_diagnostics)
         except Exception as error:
             logger.warning("Persistent memory prepare failed: %s", error)
-
         llm_user_message = self._prepare_user_message_for_llm(user_message)
-        system_prompt = self._build_system_prompt(
-            llm_user_message,
-            project_id,
-            persistent_memory_context=persistent_memory_context,
-        )
-
+        system_prompt = self._build_system_prompt(llm_user_message, project_id, persistent_memory_context=persistent_memory_context)
         record = self._turn_recorder(session)
         record("user", user_message)
-        try:
-            response = self._generate_answer(system_prompt, llm_user_message, on_delta=on_delta, cancel_event=cancel_event)
-        except Exception as error:
-            self._record_generation_failure(record, error)
-            raise
+        prepared = {
+            "user_message": user_message,
+            "user_prompt": llm_user_message,
+            "system_prompt": system_prompt,
+            "context_block": self._tool_context_block(session, trace_payload.get("tracked_data_context") or {}),
+            "prepared_memory": prepared_memory,
+            "memory_diagnostics": memory_diagnostics,
+            "record": record,
+            "trace_payload": trace_payload,
+            "active_session": active_session,
+        }
+        self._turn_cache["prepared"] = prepared
+        return prepared
+
+    def _tool_context_block(self, session: ConversationSession, tracked: dict[str, Any]) -> str:
+        known_defaults = tracked.get("known_defaults") if isinstance(tracked.get("known_defaults"), dict) else {}
+        known_entities = tracked.get("known_entities") if isinstance(tracked.get("known_entities"), dict) else {}
+        metadata = session.metadata if hasattr(session, "metadata") and isinstance(session.metadata, dict) else {}
+        active_capability = str(metadata.get("active_capability", "") or "").strip()
+        active_topic = str(metadata.get("active_topic", "") or "").strip()
+        lines = [
+            "Current context:",
+            f"- active_topic: {active_topic or 'none'}",
+            f"- active_capability: {active_capability or 'none'}",
+            "Known defaults and entities (use a matching default when a tool argument is missing rather than asking):",
+            f"- known_defaults: {json.dumps(known_defaults, ensure_ascii=True) if known_defaults else '{}'}",
+            f"- known_entities: {json.dumps(known_entities, ensure_ascii=True) if known_entities else '{}'}",
+        ]
+        return "\n".join(lines)
+
+    def complete_turn(
+        self,
+        prepared: dict[str, Any],
+        text: str,
+        *,
+        selected_tool: str | None,
+        tool_arguments: dict[str, Any],
+        tool_status: dict[str, Any],
+        capability: dict[str, Any] | None = None,
+    ) -> str:
+        session = self._resolve_session()
+        response = text
+        if capability is not None:
+            if hasattr(session, "metadata"):
+                session.metadata["active_capability"] = capability.get("provider")
+            self._last_general_knowledge_result = dict(capability)
+            rendered = self._summary_from_capability_facts(for_chat_summary=False)
+            if rendered:
+                response = rendered
+        record = prepared["record"]
         record("assistant", response)
-        generation = getattr(self.ollama_client, "last_response", None)
-        self._finalize_topic_memory(prepared_memory, user_message, response)
-        if active_session is not None:
+        self._finalize_topic_memory(prepared.get("prepared_memory"), prepared["user_message"], response)
+        if prepared.get("active_session") is not None:
             self._maybe_update_session_summary()
+        trace_payload = prepared["trace_payload"]
         trace_payload.update(
             {
                 "selected_tool": selected_tool,
                 "tool_arguments": tool_arguments,
-                "tool_result": tool_result,
+                "tool_result": tool_status,
                 "final_response": response,
             }
         )
-        if generation is not None:
-            usage = getattr(generation, "usage", None)
-            trace_payload["model"] = getattr(generation, "model", None)
+        generation = getattr(self.ollama_client, "last_response", None)
+        if isinstance(generation, LLMResponse):
+            trace_payload["model"] = generation.model
             trace_payload["usage"] = {
-                "prompt_tokens": getattr(usage, "prompt_tokens", 0),
-                "completion_tokens": getattr(usage, "completion_tokens", 0),
-                "total_duration_ms": getattr(usage, "total_duration_ms", 0.0),
+                "prompt_tokens": generation.usage.prompt_tokens,
+                "completion_tokens": generation.usage.completion_tokens,
+                "total_duration_ms": generation.usage.total_duration_ms,
             }
-        if memory_diagnostics is not None:
-            trace_payload["persistent_memory"] = memory_diagnostics
+        if prepared.get("memory_diagnostics") is not None:
+            trace_payload["persistent_memory"] = prepared["memory_diagnostics"]
         self.trace_logger.log(trace_payload)
         return response
-
-    def _generate_answer(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        *,
-        on_delta: Callable[[str], None] | None,
-        cancel_event: threading.Event | None,
-    ) -> str:
-        stream = getattr(self.ollama_client, "chat_stream", None)
-        if on_delta is None or not callable(stream):
-            return self.ollama_client.generate(system_prompt, user_prompt, task="chat")
-        parts: list[str] = []
-        final: LLMResponse | None = None
-        iterator = stream(LLMRequest.from_prompts(system_prompt, user_prompt, task="chat"))
-        try:
-            for item in iterator:
-                if isinstance(item, str):
-                    if item:
-                        parts.append(item)
-                        on_delta(item)
-                    if cancel_event is not None and cancel_event.is_set():
-                        break
-                else:
-                    final = item
-        finally:
-            close = getattr(iterator, "close", None)
-            if callable(close):
-                close()
-        text = (final.content if final is not None and final.content.strip() else "".join(parts)).strip()
-        if not text:
-            raise OllamaClientError("Ollama response did not contain usable content")
-        return text
 
     def summarize_for_chat(self, user_message: str, detailed_response: str, project_id: str | None = None) -> str:
         _ = project_id

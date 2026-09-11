@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/assistant/action_commands.py
+
+from __future__ import annotations
 
 import re
 from collections.abc import Callable
@@ -20,12 +22,16 @@ class ActionCommandHandler:
         search_context: SearchResultContext,
         output: OutputSink | None = None,
         prompt_provider: Callable[[PromptRequest | str], str] | None = None,
+        application_catalog: Any | None = None,
+        folder_finder: Callable[[str], list[Any]] | None = None,
     ) -> None:
         self.executor = executor
         self.audit_logger = audit_logger
         self.search_context = search_context
         self.output = output
         self.prompt_provider = prompt_provider
+        self.application_catalog = application_catalog
+        self.folder_finder = folder_finder
 
     def handle(self, user_input: str, state: dict[str, Any]) -> bool:
         stripped = user_input.strip()
@@ -175,6 +181,8 @@ class ActionCommandHandler:
                 )
             )
             if result.status == "failed" and result.error == "Unknown application":
+                if lowered.startswith("open") and self._open_known_folder(candidate):
+                    return True
                 return self._launch_with_optional_config_prompt(
                     app_name=candidate,
                     source="natural-language",
@@ -268,31 +276,55 @@ class ActionCommandHandler:
             self._emit("Launch cancelled.")
             return True
 
-        executable = self._ask(
-            PromptRequest(
-                prompt_id="application-executable-path",
-                prompt_type=PromptType.TEXT,
-                text=f"Executable path for '{app_name}':",
-            )
-        ).strip()
-        if executable.lower() in {PROMPT_CANCEL_TOKEN, "cancel"}:
-            self._emit("Launch cancelled.")
-            return True
+        suggested_name = ""
+        executable = ""
+        candidates = self._discover_applications(app_name)
+        if candidates:
+            browse = "Browse for the program..."
+            choices = tuple(item.label for item in candidates) + (browse,)
+            picked = self._ask(
+                PromptRequest(
+                    prompt_id="application-candidate",
+                    prompt_type=PromptType.CHOICE,
+                    text=f"Which program is '{app_name}'?",
+                    choices=choices,
+                )
+            ).strip()
+            if picked.lower() in {PROMPT_CANCEL_TOKEN, "cancel"}:
+                self._emit("Launch cancelled.")
+                return True
+            match = next((item for item in candidates if picked in {item.label, item.name, item.executable}), None)
+            if match is not None:
+                executable = match.executable
+                suggested_name = match.name
+            elif picked != browse and picked.lower().endswith(".exe"):
+                executable = picked
         if not executable:
-            self._emit("Launch cancelled: executable path is required.")
-            return True
+            executable = self._ask(
+                PromptRequest(
+                    prompt_id="application-executable-path",
+                    prompt_type=PromptType.FILE,
+                    text=f"Executable path for '{app_name}':",
+                )
+            ).strip()
+            if executable.lower() in {PROMPT_CANCEL_TOKEN, "cancel"}:
+                self._emit("Launch cancelled.")
+                return True
+            if not executable:
+                self._emit("Launch cancelled: executable path is required.")
+                return True
 
         display_name = self._ask(
             PromptRequest(
                 prompt_id="application-display-name",
                 prompt_type=PromptType.TEXT,
-                text=f"Display name [{app_name}]:",
+                text=f"Display name [{suggested_name or app_name}]:",
             )
         ).strip()
         if display_name.lower() in {PROMPT_CANCEL_TOKEN, "cancel"}:
             self._emit("Launch cancelled.")
             return True
-        display_name = display_name or app_name
+        display_name = display_name or suggested_name or app_name
         aliases_input = self._ask(
             PromptRequest(
                 prompt_id="application-aliases",
@@ -394,6 +426,67 @@ class ActionCommandHandler:
         )
         self._emit(retry.message)
         return True
+
+    def _discover_applications(self, app_name: str) -> list[Any]:
+        catalog = self.application_catalog
+        if catalog is None:
+            return []
+        try:
+            return list(catalog.find(app_name, limit=5))
+        except Exception as error:
+            self._emit(f"Could not scan installed programs: {error}")
+            return []
+
+    def _open_known_folder(self, name: str) -> bool:
+        finder = self.folder_finder
+        if finder is None:
+            return False
+        try:
+            folders = list(finder(name))
+        except Exception:
+            return False
+        if not folders:
+            return False
+        none_of_these = "None of these"
+        choices = tuple(item.label for item in folders) + (none_of_these,)
+        app_id = self._folder_application()
+        app_label = self.executor.context.applications[app_id].display_name if app_id else "Explorer"
+        picked = self._ask(
+            PromptRequest(
+                prompt_id="open-known-folder",
+                prompt_type=PromptType.CHOICE,
+                text=f"'{name}' looks like a folder. Open which one in {app_label}?",
+                choices=choices,
+            )
+        ).strip()
+        if picked.lower() in {PROMPT_CANCEL_TOKEN, "cancel"}:
+            self._emit("Open cancelled.")
+            return True
+        match = next((item for item in folders if picked in {item.label, item.path}), None)
+        if match is None:
+            return False
+        if app_id:
+            result = self.executor.execute(
+                ActionRequest(
+                    action="launch_application",
+                    arguments={"app_name": app_id, "target": match.path},
+                    source="natural-language",
+                    reason=f"Open folder '{name}' in {app_label}",
+                )
+            )
+            self._emit(result.message)
+            return True
+        self.executor.context.system.open_folder(match.path)
+        self._emit(f"Opened {match.path}")
+        return True
+
+    def _folder_application(self) -> str | None:
+        applications = self.executor.context.applications
+        for app_id, app in applications.items():
+            haystack = " ".join([app_id, app.display_name, *app.aliases]).lower()
+            if "code" in haystack:
+                return app_id
+        return None
 
     def _apply_config_update(self, arguments: dict[str, Any], reason: str):
         result = self.executor.execute(

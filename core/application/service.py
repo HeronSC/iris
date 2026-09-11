@@ -100,6 +100,8 @@ from core.profile.update_service import MemoryUpdateService
 from core.profile.writer import MemoryWriter
 from core.state.search_result_context import SearchResultContext
 from core.storage.sqlite_database import SQLiteDatabase
+from core.system.applications import ApplicationCatalog
+from core.system.places import KnownFolder, find_folders, root_subfolders, vscode_folders
 from core.tools.mcp_client import McpManager, load_server_configs
 from core.tools.models import PermissionLevel, ToolDefinition, ToolKind
 from core.tools.registry import ToolRegistry
@@ -413,12 +415,21 @@ class IrisApplication:
                 document_scanner=scanner,
             ),
         )
+        self.application_catalog = ApplicationCatalog()
+        document_roots = document_config.root_paths()
+
+        def _find_known_folders(name: str) -> list[KnownFolder]:
+            candidates = vscode_folders() + root_subfolders(document_roots)
+            return find_folders(name, candidates)
+
         self.action_handler = ActionCommandHandler(
             self.action_executor,
             action_audit,
             search_context,
             output=self._sink,
             prompt_provider=self._prompt,
+            application_catalog=self.application_catalog,
+            folder_finder=_find_known_folders,
         )
         conversation_synonyms = ConversationSynonymStore(self.config["memory_path"].parent / "Configuration" / "conversation_synonyms.json")
         self.pending_action_manager = PendingActionManager(
@@ -439,6 +450,12 @@ class IrisApplication:
             tool_registry=self.tool_registry,
         )
         self._register_capability_tools()
+        self.coordinator.attach_tools(
+            tool_registry=self.tool_registry,
+            action_executor=self.action_executor,
+            example_store=intent_example_store,
+            checkpoint_path=Path(self.config.get("session_path") or Path(self.config["memory_path"]).parent / "Sessions") / "agent_checkpoints.db",
+        )
         self.mcp_manager = McpManager(
             load_server_configs(self.config.get("mcp_servers") if isinstance(self.config, dict) else None),
             action_registry,
@@ -546,6 +563,26 @@ class IrisApplication:
         self.state["cancel_event"] = cancel_event
 
         try:
+            awaiting_method = getattr(getattr(self, "coordinator", None), "awaiting_confirmation", None)
+            awaiting = awaiting_method() if callable(awaiting_method) else None
+            if awaiting is not None:
+                mapped = self.pending_action_manager._resolve_pending_response(stripped)
+                if mapped in {"confirm", "cancel"}:
+                    self._turn_route = "confirmation"
+                    turn = self.coordinator.resume_confirmation(mapped == "confirm", on_delta=self._emit_delta if self._active_event_handler is not None else None)
+                    if turn is not None:
+                        self._emit_message(MessageRole.ASSISTANT, turn.text)
+                        return self._build_response(IrisStatus.COMPLETE, cancel_event)
+                elif not self.pending_action_manager._looks_like_modification(stripped):
+                    self._emit_message(
+                        MessageRole.CONFIRMATION,
+                        "You still have an action awaiting confirmation:\n\n"
+                        f"{awaiting.get('summary') or awaiting.get('message') or 'An action is awaiting confirmation.'}\n\n"
+                        "Reply naturally to confirm or cancel, or tell me what to change.",
+                    )
+                    return self._build_response(IrisStatus.AWAITING_CONFIRMATION, cancel_event)
+                else:
+                    self.coordinator.resume_confirmation(False)
             if self.pending_action_manager.handle(stripped):
                 return self._build_response(status, cancel_event)
             if stripped == "/conversations":

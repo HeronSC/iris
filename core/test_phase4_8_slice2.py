@@ -1,7 +1,10 @@
 # File: core/test_phase4_8_slice2.py
 
 import tempfile
+import json
 import unittest
+
+from core.llm.models import LLMResponse, ToolCall
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,7 +28,29 @@ class MemoryStoreStub:
         return []
 
 
-class FakeLLM:
+
+MARKER = "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps."
+
+
+class _DecisionStubBase:
+    def chat(self, request):
+        system_prompt = next((m.content for m in request.messages if m.role == "system"), "")
+        user_prompt = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+        if not request.tools:
+            return LLMResponse(content=self.generate(system_prompt, user_prompt, task=request.task))
+        probe = f"{system_prompt}\n\nUser message:\n{user_prompt}\n\n{MARKER}"
+        raw = self.generate(system_prompt, probe, task="decision")
+        try:
+            decision = json.loads(raw)
+        except (TypeError, ValueError):
+            decision = None
+        if isinstance(decision, dict) and decision.get("decision") == "tool" and decision.get("capability"):
+            return LLMResponse(content="", tool_calls=(ToolCall(name=str(decision["capability"]), arguments=dict(decision.get("arguments") or {})),))
+        if isinstance(decision, dict) and decision.get("decision") == "clarify" and decision.get("question"):
+            return LLMResponse(content=str(decision["question"]))
+        return LLMResponse(content=self.generate(system_prompt, user_prompt, task=request.task))
+
+class FakeLLM(_DecisionStubBase):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
@@ -34,7 +59,7 @@ class FakeLLM:
         return "summary-ready"
 
 
-class WeatherIntentLLM:
+class WeatherIntentLLM(_DecisionStubBase):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
@@ -45,7 +70,7 @@ class WeatherIntentLLM:
         return "summary-ready"
 
 
-class StockIntentLLM:
+class StockIntentLLM(_DecisionStubBase):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
@@ -56,7 +81,7 @@ class StockIntentLLM:
         return "summary-ready"
 
 
-class RespondIntentLLM:
+class RespondIntentLLM(_DecisionStubBase):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
@@ -67,7 +92,7 @@ class RespondIntentLLM:
         return "summary-ready"
 
 
-class CrossTopicIntentLLM:
+class CrossTopicIntentLLM(_DecisionStubBase):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
@@ -82,7 +107,7 @@ class CrossTopicIntentLLM:
         return '{"decision":"tool","capability":"weather","arguments":{"location":"Anderson, SC","range_name":"tomorrow","granularity":"daily"},"confidence":0.94}'
 
 
-class PhaseAcceptanceIntentLLM:
+class PhaseAcceptanceIntentLLM(_DecisionStubBase):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
@@ -125,7 +150,7 @@ class PhaseAcceptanceIntentLLM:
         return '{"decision":"respond","confidence":0.60}'
 
 
-class NeedsDefaultsWeatherLLM:
+class NeedsDefaultsWeatherLLM(_DecisionStubBase):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
@@ -138,7 +163,7 @@ class NeedsDefaultsWeatherLLM:
         return '{"decision":"clarify","question":"Could you specify location and time period?","confidence":0.40}'
 
 
-class WeeklyWeatherIntentLLM:
+class WeeklyWeatherIntentLLM(_DecisionStubBase):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
@@ -149,7 +174,7 @@ class WeeklyWeatherIntentLLM:
         return "summary-ready"
 
 
-class NextWeekWeatherIntentLLM:
+class NextWeekWeatherIntentLLM(_DecisionStubBase):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
@@ -1081,7 +1106,7 @@ class PhaseFourPointEightSliceTwoTests(unittest.TestCase):
 
             self.assertEqual(builder.calls, 1)
 
-    def test_coordinator_clarifies_when_decision_output_is_not_json(self) -> None:
+    def test_coordinator_answers_directly_when_model_output_is_prose(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_llm = FakeLLM()
             session = ConversationSession(max_messages=4)
@@ -1098,12 +1123,12 @@ class PhaseFourPointEightSliceTwoTests(unittest.TestCase):
 
             response = coordinator.respond("how about the rest of the week?")
 
-            self.assertIn("could not determine the right capability", response)
-            self.assertEqual(len(fake_llm.calls), 1)
+            self.assertEqual(response, "summary-ready")
+            self.assertGreaterEqual(len(fake_llm.calls), 1)
             self.assertEqual(weather_router.route_provider_calls, [])
             self.assertEqual(session.metadata.get("active_capability"), "weather")
 
-    def test_coordinator_clarifies_when_decision_is_unavailable(self) -> None:
+    def test_coordinator_answers_directly_when_no_tool_is_chosen(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_llm = FakeLLM()
             session = ConversationSession(max_messages=4)
@@ -1129,7 +1154,7 @@ class PhaseFourPointEightSliceTwoTests(unittest.TestCase):
 
             response = coordinator.respond("how about the rest of the week?")
 
-            self.assertIn("could not determine the right capability", response)
+            self.assertEqual(response, "summary-ready")
             self.assertEqual(router_stub.route_provider_calls, [])
 
     def test_active_weather_capability_persists_after_non_tool_turn(self) -> None:

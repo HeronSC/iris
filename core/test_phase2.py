@@ -340,8 +340,7 @@ class CoordinatorSummaryTriggerTests(unittest.TestCase):
                 }
             )
             client = Mock(spec=LLMClient)
-            # Let the orchestrator decision succeed so the failure lands on generation.
-            client.generate.side_effect = ['{"decision": "respond"}', OllamaClientError("Connection refused")]
+            client.generate.side_effect = OllamaClientError("Connection refused")
             coordinator = AssistantCoordinator(
                 "Iris",
                 store,
@@ -351,13 +350,13 @@ class CoordinatorSummaryTriggerTests(unittest.TestCase):
             )
 
             with self.assertRaises(OllamaClientError):
-                coordinator.respond("hello")
+                coordinator.respond("what should I work on next?")
 
             active = manager.get_active_session()
             self.assertIsNotNone(active)
             messages = active.get_messages()
             self.assertEqual(messages[0]["role"], "user")
-            self.assertEqual(messages[0]["content"], "hello")
+            self.assertEqual(messages[0]["content"], "what should I work on next?")
             self.assertEqual(messages[1]["role"], "system")
             self.assertEqual(messages[1]["content"], "Assistant response failed.")
             self.assertEqual(messages[1].get("metadata", {}).get("error_type"), "OllamaClientError")

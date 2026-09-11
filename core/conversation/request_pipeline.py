@@ -1,3 +1,5 @@
+# File: core/conversation/request_pipeline.py
+
 from __future__ import annotations
 
 import os
@@ -91,6 +93,8 @@ class RequestPipeline:
             filename_lookup = self._extract_file_name_clause_lookup(text)
         if filename_lookup is None:
             filename_lookup = self._extract_filename_lookup(text)
+        if filename_lookup is not None and not self._is_file_search(text, filename_lookup):
+            filename_lookup = None
         if filename_lookup is not None:
             return RequestPipelineResult(
                 intent="find_files",
@@ -129,6 +133,29 @@ class RequestPipeline:
     def _is_summarize_request(self, text: str) -> bool:
         lowered = text.lower()
         return "summarize" in lowered or "summary" in lowered
+
+    _FILE_WORDS = re.compile(
+        r"\b(?:files?|folders?|directory|directories|documents?|indexed|pdfs?|spreadsheets?|paths?|filename)\b",
+        re.IGNORECASE,
+    )
+    _FILENAME_LIKE = re.compile(r"[A-Za-z0-9_.-]+\.(?:md|txt|pdf|xlsx|xls|docx|csv|json|py|ps1|cs|al|jsonl|yml|yaml|xml|toml|log)\b", re.IGNORECASE)
+    _NOISE_QUERIES = frozenset({"to", "a", "an", "the", "me", "it", "up", "on", "in", "of", "for", "at", "and", "or", "my", "your"})
+
+    _IMPERATIVE_FIND = re.compile(r"^\s*(?:please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+)?(?:find|locate|search(?:\s+for)?)\b", re.IGNORECASE)
+    _QUESTION_WORDS = frozenset({"how", "what", "why", "when", "where", "which", "who", "whether"})
+
+    def _is_file_search(self, text: str, query: str) -> bool:
+        normalized = query.strip().lower()
+        if len(normalized) < 2 or normalized in self._NOISE_QUERIES:
+            return False
+        if self._FILE_WORDS.search(text) or self._FILENAME_LIKE.search(text):
+            return True
+        if self._extract_explicit_path(text) is not None:
+            return True
+        words = normalized.split()
+        if self._IMPERATIVE_FIND.match(text) and len(words) <= 4 and words[0] not in self._QUESTION_WORDS:
+            return True
+        return False
 
     def _has_file_command_verb(self, lowered: str) -> bool:
         return any(token in lowered for token in ("find", "locate", "lookup", "search", "list", "show", "display"))

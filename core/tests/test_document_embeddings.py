@@ -99,7 +99,7 @@ class VectorTableTests(unittest.TestCase):
     def test_store_search_delete_and_rebuild_on_model_change(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             database = SQLiteDatabase(Path(tmp) / "v.db")
-            table = VectorTable(database, "things_vec", DIMS, model_stamp="m1:4", isolate_writes=False)
+            table = VectorTable(database, "things_vec", DIMS, model_stamp="m1:4")
             self.assertTrue(table.available)
             self.assertTrue(table.ensure_schema())
             table.store([(1, _unit((1, 0, 0, 0))), (2, _unit((0, 1, 0, 0)))])

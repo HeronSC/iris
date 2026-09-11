@@ -248,30 +248,3 @@ class ScorerSemanticTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class IsolatedWriterTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.database = SQLiteDatabase(Path(self._tmp.name) / "knowledge.db")
-        self.records = KnowledgeRepository(self.database)
-        self.embedder = FakeEmbedder()
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-
-    def test_in_process_writes_still_work_when_isolation_is_off(self) -> None:
-        index = MemoryEmbeddingIndex(self.database, self.embedder, EmbeddingConfig(model="fake", dimensions=DIMS, isolate_writes=False))
-        self.records.add(_record("revenue grew"))
-        self.assertEqual(index.index_pending(), 1)
-        self.assertEqual(index.count(), 1)
-        self.assertGreater(index.search("sales increased", k=1)[0][1], 0.9)
-
-    def test_a_failing_writer_is_reported_not_raised(self) -> None:
-        index = MemoryEmbeddingIndex(self.database, self.embedder, EmbeddingConfig(model="fake", dimensions=DIMS))
-        self.records.add(_record("revenue grew"))
-        # Vectors of the wrong size make the child fail; the pass stops and says why.
-        self.embedder.embed = lambda texts, model=None: [[0.1, 0.2] for _ in texts]  # type: ignore[method-assign]
-        self.assertEqual(index.index_pending(), 0)
-        self.assertIn("vector writer failed", index.last_error or "")
-        self.assertEqual(index.count(), 0)

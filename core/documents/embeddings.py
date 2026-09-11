@@ -27,8 +27,6 @@ class DocumentEmbeddingConfig:
     max_chunks_per_document: int = 40
     similarity_floor: float = 0.5
     similarity_ceiling: float = 0.8
-    isolate_writes: bool = True
-    write_timeout_seconds: float = 120.0
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "DocumentEmbeddingConfig":
@@ -46,8 +44,6 @@ class DocumentEmbeddingConfig:
             max_chunks_per_document=max(1, int(section.get("max_chunks_per_document", cls.max_chunks_per_document))),
             similarity_floor=float(section.get("similarity_floor", cls.similarity_floor)),
             similarity_ceiling=float(section.get("similarity_ceiling", cls.similarity_ceiling)),
-            isolate_writes=bool(section.get("isolate_writes", cls.isolate_writes)),
-            write_timeout_seconds=float(section.get("write_timeout_seconds", cls.write_timeout_seconds)),
         )
 
     def relevance(self, similarity: float) -> float:
@@ -112,8 +108,6 @@ class DocumentEmbeddingIndex:
             self.config.dimensions,
             model_stamp=f"{self.config.model}:{self.config.dimensions}",
             key_column="chunk_id",
-            isolate_writes=self.config.isolate_writes,
-            write_timeout_seconds=self.config.write_timeout_seconds,
         )
         if self.available:
             self.ensure_schema()

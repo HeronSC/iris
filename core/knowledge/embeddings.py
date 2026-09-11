@@ -31,8 +31,6 @@ class EmbeddingConfig:
     similarity_floor: float = 0.5
     similarity_ceiling: float = 0.8
     refresh_seconds: float = 120.0
-    isolate_writes: bool = True
-    write_timeout_seconds: float = 120.0
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "EmbeddingConfig":
@@ -51,8 +49,6 @@ class EmbeddingConfig:
             similarity_floor=float(section.get("similarity_floor", cls.similarity_floor)),
             similarity_ceiling=float(section.get("similarity_ceiling", cls.similarity_ceiling)),
             refresh_seconds=float(section.get("refresh_seconds", cls.refresh_seconds)),
-            isolate_writes=bool(section.get("isolate_writes", cls.isolate_writes)),
-            write_timeout_seconds=float(section.get("write_timeout_seconds", cls.write_timeout_seconds)),
         )
 
     def relevance(self, similarity: float) -> float:
@@ -78,8 +74,6 @@ class MemoryEmbeddingIndex:
             self.config.dimensions,
             model_stamp=f"{self.config.model}:{self.config.dimensions}",
             key_column="sequence",
-            isolate_writes=self.config.isolate_writes,
-            write_timeout_seconds=self.config.write_timeout_seconds,
         )
         if self.available:
             self.ensure_schema()
@@ -102,26 +96,22 @@ class MemoryEmbeddingIndex:
     def pending(self, limit: int | None = None) -> list[tuple[int, str]]:
         if not self.available:
             return []
-        clauses = ["v.sequence IS NULL"]
+        clauses = ["1 = 1"]
         params: list[Any] = []
         for prefix in self.config.skip_sources:
             clauses.append("m.source NOT LIKE ? ESCAPE '\\'")
             escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             params.append(escaped + "%")
-        sql = (
-            "SELECT m.sequence, m.topic, m.content FROM memories m "
-            "LEFT JOIN memories_vec v ON v.sequence = m.sequence "
-            f"WHERE {' AND '.join(clauses)} ORDER BY m.sequence"
-        )
-        if limit is not None:
-            sql += " LIMIT ?"
-            params.append(int(limit))
-        with self.vectors.connect() as conn:
+        sql = f"SELECT m.sequence, m.topic, m.content FROM memories m WHERE {' AND '.join(clauses)} ORDER BY m.sequence"
+        with self.database.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-        return [
+        done = self.vectors.keys()
+        pending = [
             (int(row[0]), embedding_text(MemoryRecord(kind=MemoryKind.FACT, topic=str(row[1]), content=str(row[2]))))
             for row in rows
+            if int(row[0]) not in done
         ]
+        return pending[: int(limit)] if limit is not None else pending
 
     def index_pending(self, limit: int | None = None) -> int:
         if not self.available or self.embedder is None:
