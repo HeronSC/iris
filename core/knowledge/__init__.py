@@ -11,6 +11,7 @@ Distinct from the two older memory namespaces, which this does not replace:
 
 from core.knowledge.appraisal import Appraisal, Appraiser, Basis
 from core.knowledge.comparison import Comparison, RankerScore, compare_rankers, render_comparison
+from core.knowledge.embeddings import EmbeddingConfig, MemoryEmbeddingIndex
 from core.knowledge.graph import Evidence, Explanation, KnowledgeGraph, render_explanation
 from core.knowledge.hypotheses import Assessment, HypothesisPolicy, HypothesisTracker
 from core.knowledge.links import (
@@ -35,6 +36,8 @@ from core.knowledge.schema import ensure_schema
 
 __all__ = [
     "Appraisal",
+    "EmbeddingConfig",
+    "MemoryEmbeddingIndex",
     "Appraiser",
     "Assessment",
     "Basis",

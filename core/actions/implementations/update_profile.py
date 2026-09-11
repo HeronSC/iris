@@ -1,15 +1,43 @@
+# File: core/actions/implementations/update_profile.py
+
 from __future__ import annotations
+
+from typing import Any
 
 import json
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from core.actions.executor import ActionExecutionContext
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
 from core.config.document_search_mutations import build_confirmation_preview
+from core.tools.models import PermissionLevel, ToolDefinition
+
+
+class UpdateProfileArguments(BaseModel):
+    updates: dict[str, Any] = Field(description="Profile fields to set, for example {'display_name': 'Henry'}")
 
 
 class UpdateProfileAction:
     name = "update_profile"
+    definition = ToolDefinition(
+        name="update_profile",
+        description="Update fields in the user's profile.",
+        arguments=UpdateProfileArguments,
+        permission=PermissionLevel.WRITE,
+        requires_confirmation=True,
+        expose_to_model=False,
+    )
+    facets = (
+        ToolDefinition(
+            name="profile_update",
+            description="Update the user's profile, such as their display name or preferences.",
+            arguments=UpdateProfileArguments,
+            permission=PermissionLevel.WRITE,
+            requires_confirmation=True,
+        ),
+    )
 
     def validate(self, request: ActionRequest, context: ActionExecutionContext) -> ValidationResult:
         if context.memory_path is None:

@@ -1,21 +1,39 @@
-﻿from __future__ import annotations
+# File: core/documents/search_service.py
 
+from __future__ import annotations
+
+import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from core.documents.catalog import DocumentCatalog
 from core.documents.models import FileRecord, RankedSearchResult
 from core.documents.query_parser import FileSearchQueryParser
 
+logger = logging.getLogger(__name__)
+
+_SEMANTIC_WEIGHT = 40.0
+
 
 class DocumentSearchService:
-    def __init__(self, catalog: DocumentCatalog, query_parser: FileSearchQueryParser) -> None:
+    def __init__(self, catalog: DocumentCatalog, query_parser: FileSearchQueryParser, embeddings: Any | None = None) -> None:
         self.catalog = catalog
         self.query_parser = query_parser
+        self.embeddings = embeddings
 
     def search(self, query_text: str, limit: int = 5) -> list[RankedSearchResult]:
         query = self.query_parser.parse(query_text)
         candidates = self.catalog.search_candidates(query, limit=500)
-        scored = [self._score_record(record, query.text_terms, query.extensions) for record in candidates]
+        hits = self._semantic_hits(query_text) if query.text_terms else {}
+        if hits:
+            known = {record.path for record in candidates}
+            for path in hits:
+                if path in known:
+                    continue
+                record = self.catalog.get_by_path(path)
+                if record is not None:
+                    candidates.append(record)
+        scored = [self._score_record(record, query.text_terms, query.extensions, hits.get(record.path)) for record in candidates]
         scored.sort(key=lambda item: item.score, reverse=True)
         return scored[:limit]
 
@@ -26,7 +44,17 @@ class DocumentSearchService:
     def get_record(self, record_id: str) -> FileRecord | None:
         return self.catalog.get_by_id(record_id)
 
-    def _score_record(self, record: FileRecord, terms: list[str], query_extensions: list[str]) -> RankedSearchResult:
+    def _semantic_hits(self, query_text: str) -> dict[str, Any]:
+        index = self.embeddings
+        if index is None or not getattr(index, "available", False):
+            return {}
+        try:
+            return {hit.path: hit for hit in index.search(query_text, k=50)}
+        except Exception as error:
+            logger.warning("Semantic document search unavailable: %s", error)
+            return {}
+
+    def _score_record(self, record: FileRecord, terms: list[str], query_extensions: list[str], hit: Any | None = None) -> RankedSearchResult:
         score = 0.0
         reasons: list[str] = []
         name_lower = record.name.lower()
@@ -59,6 +87,17 @@ class DocumentSearchService:
                 score = score + 20.0
                 reasons.append("matches all query terms")
 
+        snippet: str | None = None
+        location: str | None = None
+        if hit is not None and self.embeddings is not None:
+            strength = self.embeddings.config.relevance(hit.similarity)
+            if strength > 0.0:
+                score = score + _SEMANTIC_WEIGHT * strength
+                where = f", page {hit.page}" if hit.page else ""
+                reasons.append(f"a passage matches by meaning ({hit.similarity:.2f}{where})")
+                snippet = " ".join(record.extracted_text[hit.start : hit.end].split())[:240] or None
+                location = f"page {hit.page}" if hit.page else f"chars {hit.start}-{hit.end}"
+
         modified = self._parse_datetime(record.modified_at)
         if modified is not None and modified >= datetime.now(timezone.utc) - timedelta(days=30):
             score = score + 5.0
@@ -66,11 +105,10 @@ class DocumentSearchService:
 
         if not reasons:
             reasons.append("metadata proximity match")
-        return RankedSearchResult(record=record, score=score, reasons=reasons)
+        return RankedSearchResult(record=record, score=score, reasons=reasons, snippet=snippet, location=location)
 
     def _parse_datetime(self, value: str) -> datetime | None:
         try:
             return datetime.fromisoformat(value)
         except ValueError:
             return None
-

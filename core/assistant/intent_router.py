@@ -1,10 +1,13 @@
+# File: core/assistant/intent_router.py
+
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, Field
 
 from core.actions.executor import ActionExecutor
 from core.actions.models import ActionRequest, ActionResult
@@ -12,8 +15,26 @@ from core.assistant.action_planner import ActionPlanner
 from core.assistant.command_handler import CommandHandler
 from core.assistant.conversation_synonyms import ConversationSynonymStore
 from core.assistant.intent_example_store import IntentExampleStore
+from core.assistant.llm_client import LLMClient
 from core.assistant.output import OutputSink, emit_output
-from core.llm.ollama_client import OllamaClient, OllamaClientError
+from core.llm.models import LLMRequest
+from core.llm.ollama_client import OllamaClientError
+from core.tools.models import ToolArgumentError, ToolDefinition, ToolKind
+from core.tools.registry import ToolRegistry
+
+
+class IndexScanArguments(BaseModel):
+    root: str = Field(default="", description="Optional folder group to index, such as 'documents'; empty for all configured roots")
+
+
+INTENT_SYSTEM_PROMPT = (
+    "You are the intent layer of Iris, a local desktop assistant. "
+    "Decide whether the user's message asks for an action that one of the available tools performs. "
+    "If it does, call exactly one tool, taking its arguments from the message. "
+    "If the message is ordinary conversation, a question, or asks for something no tool covers, "
+    "reply with a short sentence and call no tool. "
+    "Never invent paths, names, or values the user did not give."
+)
 
 
 @dataclass(frozen=True)
@@ -38,13 +59,14 @@ class PendingPhraseCapture:
 class IntentRouter:
     def __init__(
         self,
-        llm_client: OllamaClient,
+        llm_client: LLMClient,
         index_handler: CommandHandler,
         memory_handler: CommandHandler,
         action_executor: ActionExecutor,
         example_store: IntentExampleStore,
         conversation_synonyms: ConversationSynonymStore | None = None,
         output: OutputSink | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self.llm_client = llm_client
         self.index_handler = index_handler
@@ -54,6 +76,11 @@ class IntentRouter:
         self.conversation_synonyms = conversation_synonyms
         self.output = output
         self.action_planner = ActionPlanner(action_executor.context)
+        if tool_registry is None:
+            action_registry = getattr(action_executor, "registry", None)
+            tool_registry = getattr(action_registry, "tools", None) or ToolRegistry()
+        self.tool_registry = tool_registry
+        self._register_command_tools()
         self._last_resolution: tuple[str, StructuredIntent] | None = None
         self._pending_correction_source: str | None = None
         self._pending_correction_resolution: StructuredIntent | None = None
@@ -101,6 +128,42 @@ class IntentRouter:
 
         return self._dispatch_intent(text, resolved, state)
 
+    def _register_command_tools(self) -> None:
+        definitions = (
+            ToolDefinition(
+                name="index_scan",
+                description="Re-index the user's configured document folders, or one named folder group such as 'documents'.",
+                arguments=IndexScanArguments,
+                kind=ToolKind.COMMAND,
+                handler=self._run_index_scan,
+            ),
+            ToolDefinition(
+                name="memory_scan",
+                description="Scan the recent conversation for new facts worth remembering.",
+                kind=ToolKind.COMMAND,
+                handler=self._run_memory_scan,
+            ),
+            ToolDefinition(
+                name="memory_review",
+                description="Review the memory proposals waiting for the user's approval.",
+                kind=ToolKind.COMMAND,
+                handler=self._run_memory_review,
+            ),
+        )
+        for definition in definitions:
+            self.tool_registry.register(definition, replace=True)
+
+    def _run_index_scan(self, arguments: dict[str, Any], state: dict[str, Any]) -> bool:
+        root = str(arguments.get("root", "")).strip()
+        command = "/index scan" if not root else f"/index scan {root}"
+        return self.index_handler.handle(command, state)
+
+    def _run_memory_scan(self, arguments: dict[str, Any], state: dict[str, Any]) -> bool:
+        return self.memory_handler.handle("/memory scan", state)
+
+    def _run_memory_review(self, arguments: dict[str, Any], state: dict[str, Any]) -> bool:
+        return self.memory_handler.handle("/memory review", state)
+
     def _execute_action(self, action: str, arguments: dict[str, Any], source: str, reason: str) -> ActionResult:
         result = self.action_executor.execute(
             ActionRequest(
@@ -144,7 +207,33 @@ class IntentRouter:
             "open",
             "launch",
         ]
-        return any(token in lowered for token in keywords)
+        if any(token in lowered for token in keywords):
+            return True
+        return any(re.search(pattern, lowered) for pattern in self._registry_keyword_patterns())
+
+    _KEYWORD_STOPWORDS = frozenset({"set", "add", "get", "the", "url", "to", "of", "for", "and"})
+
+    def _registry_keywords(self) -> set[str]:
+        words: set[str] = set()
+        for name in self.tool_registry.names():
+            definition = self.tool_registry.get(name)
+            if definition is None or not definition.expose_to_model or not self.tool_registry.is_enabled(name):
+                continue
+            for token in re.split(r"[_\W]+", definition.name.lower()):
+                if len(token) >= 3 and token not in self._KEYWORD_STOPWORDS:
+                    words.add(token)
+            for phrase in definition.keywords:
+                cleaned = " ".join(phrase.lower().split())
+                if cleaned:
+                    words.add(cleaned)
+        return words
+
+    def _registry_keyword_patterns(self) -> list[str]:
+        patterns: list[str] = []
+        for word in self._registry_keywords():
+            stem = word[:-1] if word.endswith("s") and len(word) > 3 else word
+            patterns.append(rf"\b{re.escape(stem)}(?:s|es)?\b")
+        return patterns
 
     def _resolve_intent(self, text: str) -> StructuredIntent | None:
         normalized_text = self._normalize_action_text(text)
@@ -255,9 +344,45 @@ class IntentRouter:
         ]
         return any(marker in lowered for marker in removal_markers)
 
+    PATH_ARGUMENTS: dict[str, tuple[str, ...]] = {
+        "scan_document_root": ("root",),
+        "config_remove_document_root": ("root",),
+        "config_set_document_roots": ("roots",),
+    }
+
+    def _ungrounded_paths(self, text: str, intent_name: str, args: dict[str, Any]) -> list[str]:
+        fields = self.PATH_ARGUMENTS.get(intent_name)
+        if not fields:
+            return []
+        haystack = self._normalize_path_text(text)
+        missing: list[str] = []
+        for field in fields:
+            value = args.get(field)
+            candidates = value if isinstance(value, list) else [value]
+            for candidate in candidates:
+                needle = self._normalize_path_text(str(candidate or ""))
+                if needle and needle not in haystack:
+                    missing.append(str(candidate))
+        return missing
+
+    @staticmethod
+    def _normalize_path_text(value: str) -> str:
+        collapsed = re.sub(r"\s+", " ", value.strip().lower())
+        return collapsed.replace("/", "\\").rstrip("\\")
+
     def _dispatch_intent(self, text: str, resolved: StructuredIntent, state: dict[str, Any]) -> bool:
         intent_name = resolved.intent
         args = resolved.arguments
+
+        if resolved.source == "llm":
+            invented = self._ungrounded_paths(text, intent_name, args)
+            if invented:
+                if intent_name == "scan_document_root":
+                    fallback = StructuredIntent(intent="index_scan", arguments={"root": ""}, source=resolved.source)
+                    return self._dispatch_intent(text, fallback, state)
+                self._last_resolution = (text, resolved)
+                self._emit("Which folder? I did not see a folder path in your message.")
+                return True
 
         if intent_name == "scan_document_root":
             root = str(args.get("root", "")).strip()
@@ -269,111 +394,38 @@ class IntentRouter:
                 self._save_successful_resolution(text, resolved)
             return True
 
-        if intent_name == "index_scan":
-            root = str(args.get("root", "")).strip()
-            command = "/index scan" if not root else f"/index scan {root}"
-            self._last_resolution = (text, resolved)
-            handled = self.index_handler.handle(command, state)
-            if handled:
-                self._save_successful_resolution(text, resolved)
-            return handled
-
-        if intent_name == "memory_scan":
-            self._last_resolution = (text, resolved)
-            handled = self.memory_handler.handle("/memory scan", state)
-            if handled:
-                self._save_successful_resolution(text, resolved)
-            return handled
-
-        if intent_name == "memory_review":
-            self._last_resolution = (text, resolved)
-            handled = self.memory_handler.handle("/memory review", state)
-            if handled:
-                self._save_successful_resolution(text, resolved)
-            return handled
-
-        if intent_name == "launch_application":
-            self._last_resolution = (text, resolved)
-            result = self._execute_action(
-                action="launch_application",
-                arguments={"app_name": args.get("app_name", "")},
-                source=resolved.source,
-                reason="Intent router: launch application",
-            )
-            if self._should_learn_from_result(result):
-                self._save_successful_resolution(text, resolved)
-            return True
-
-        if intent_name == "open_url_shortcut":
-            self._last_resolution = (text, resolved)
-            result = self._execute_action(
-                action="open_url",
-                arguments={"shortcut": args.get("shortcut", "")},
-                source=resolved.source,
-                reason="Intent router: open URL shortcut",
-            )
-            if self._should_learn_from_result(result):
-                self._save_successful_resolution(text, resolved)
-            return True
-
-        mapping = {
-            "config_add_application": (
-                "update_config",
-                {
-                    "operation": "add_application",
-                    "app_id": args.get("app_id", ""),
-                    "display_name": args.get("display_name", ""),
-                    "executable": args.get("executable", ""),
-                    "aliases": args.get("aliases", []),
-                },
-                "Intent router: add application to config",
-            ),
-            "config_set_document_roots": (
-                "update_config",
-                {"operation": "set_document_roots", "roots": args.get("roots", [])},
-                "Intent router: update document search roots",
-            ),
-            "config_remove_document_root": (
-                "update_config",
-                {"operation": "remove_document_root", "root": args.get("root", "")},
-                "Intent router: stop indexing a document root",
-            ),
-            "config_set_web_shortcut": (
-                "update_config",
-                {"operation": "set_web_shortcut", "name": args.get("name", ""), "url": args.get("url", "")},
-                "Intent router: update web shortcut",
-            ),
-            "config_remove_web_shortcut": (
-                "update_config",
-                {"operation": "remove_web_shortcut", "name": args.get("name", "")},
-                "Intent router: remove web shortcut",
-            ),
-            "config_remove_application": (
-                "update_config",
-                {"operation": "remove_application", "app_id": args.get("app_id", "")},
-                "Intent router: remove application",
-            ),
-            "config_set_value": (
-                "update_config",
-                {"operation": "set_value", "key": args.get("key", ""), "value": args.get("value")},
-                "Intent router: set config value",
-            ),
-            "profile_update": (
-                "update_profile",
-                {"updates": args.get("updates", {})},
-                "Intent router: update user profile",
-            ),
-        }
-        details = mapping.get(intent_name)
-        if details is None:
+        definition = self.tool_registry.get(intent_name)
+        if definition is None or not self.tool_registry.is_enabled(intent_name):
             return False
 
-        self._last_resolution = (text, resolved)
-        action_name, arguments, reason = details
-        result = self._execute_action(action=action_name, arguments=arguments, source=resolved.source, reason=reason)
-        if self._should_learn_from_result(result):
-            self._save_successful_resolution(text, resolved)
-        return True
+        if definition.kind == ToolKind.COMMAND:
+            handler = definition.handler
+            if handler is None:
+                return False
+            try:
+                arguments = definition.validate_arguments(args)
+            except ToolArgumentError as error:
+                self._emit(f"I could not run {intent_name}: {error}")
+                return True
+            self._last_resolution = (text, resolved)
+            handled = bool(handler(arguments, state))
+            if handled:
+                self._save_successful_resolution(text, resolved)
+            return handled
+
+        if definition.kind == ToolKind.ACTION:
+            self._last_resolution = (text, resolved)
+            result = self._execute_action(
+                action=intent_name,
+                arguments=dict(args),
+                source=resolved.source,
+                reason=f"Intent router: {intent_name}",
+            )
+            if self._should_learn_from_result(result):
+                self._save_successful_resolution(text, resolved)
+            return True
+
+        return False
 
     def _dispatch_scan_document_root(self, root: str) -> ActionResult:
         plan = self.action_planner.plan_make_directory_searchable(root)
@@ -513,90 +565,28 @@ class IntentRouter:
         emit_output(self.output, text)
 
     def _classify(self, text: str) -> dict[str, Any] | None:
-        learned_examples = self.example_store.render_examples_for_prompt()
-        system_prompt = (
-            "You are an intent classifier for a local assistant. "
-            "Return JSON only with keys: intent and arguments. "
-            "Supported intents: none, index_scan, memory_scan, memory_review, "
-            "scan_document_root, launch_application, open_url_shortcut, "
-            "config_add_application, config_set_document_roots, config_remove_document_root, "
-            "config_set_web_shortcut, config_remove_web_shortcut, config_remove_application, "
-            "config_set_value, profile_update. "
-            "Use intent none when request is ordinary chat.\n"
-            "Examples:\n"
-            "- 'index my documents folder' -> {\"intent\":\"index_scan\",\"arguments\":{\"root\":\"documents\"}}\n"
-            "- 'index D:\\\\HenryZuraw\\\\Documents' -> {\"intent\":\"scan_document_root\",\"arguments\":{\"root\":\"D:\\\\HenryZuraw\\\\Documents\"}}\n"
-            "- 'scan memory updates' -> {\"intent\":\"memory_scan\",\"arguments\":{}}\n"
-            "- 'review memory proposals' -> {\"intent\":\"memory_review\",\"arguments\":{}}\n"
-            "- 'launch visual studio code' -> {\"intent\":\"launch_application\",\"arguments\":{\"app_name\":\"visual studio code\"}}\n"
-            "- 'open bc-sandbox' -> {\"intent\":\"open_url_shortcut\",\"arguments\":{\"shortcut\":\"bc-sandbox\"}}\n"
-            "- 'add application excel at C:\\\\Program Files\\\\...\\\\EXCEL.EXE aliases excel' -> "
-            "{\"intent\":\"config_add_application\",\"arguments\":{\"app_id\":\"excel\",\"display_name\":\"Excel\",\"executable\":\"C:\\\\Program Files\\\\...\\\\EXCEL.EXE\",\"aliases\":[\"excel\"]}}\n"
-            "- 'set document roots to E:\\\\Docs and C:\\\\Users\\\\me\\\\Documents' -> "
-            "{\"intent\":\"config_set_document_roots\",\"arguments\":{\"roots\":[\"E:\\\\Docs\",\"C:\\\\Users\\\\me\\\\Documents\"]}}\n"
-            "- 'would you please stop indexing this folder D:\\\\Docs' -> "
-            "{\"intent\":\"config_remove_document_root\",\"arguments\":{\"root\":\"D:\\\\Docs\"}}\n"
-            "- 'add web shortcut github to https://github.com' -> "
-            "{\"intent\":\"config_set_web_shortcut\",\"arguments\":{\"name\":\"github\",\"url\":\"https://github.com\"}}\n"
-            "- 'remove web shortcut github' -> "
-            "{\"intent\":\"config_remove_web_shortcut\",\"arguments\":{\"name\":\"github\"}}\n"
-            "- 'delete application vscode' -> "
-            "{\"intent\":\"config_remove_application\",\"arguments\":{\"app_id\":\"vscode\"}}\n"
-            "- 'set model to qwen3:8b' -> "
-            "{\"intent\":\"config_set_value\",\"arguments\":{\"key\":\"model\",\"value\":\"qwen3:8b\"}}\n"
-            "- 'update my profile display_name to Henry' -> "
-            "{\"intent\":\"profile_update\",\"arguments\":{\"updates\":{\"display_name\":\"Henry\"}}}"
-        )
-        if learned_examples:
-            system_prompt = system_prompt + "\nLearned examples:\n" + learned_examples
+        tools = self.tool_registry.model_tools()
+        if not tools:
+            return None
 
+        system_prompt = INTENT_SYSTEM_PROMPT
+        learned_examples = self.example_store.render_examples_for_prompt()
+        if learned_examples:
+            system_prompt = (
+                system_prompt
+                + "\nPast requests and the tool call each one mapped to (intent = tool name):\n"
+                + learned_examples
+            )
+
+        request = LLMRequest.from_prompts(system_prompt, text, tools=tools, think=False, task="intent")
         try:
-            raw = self.llm_client.generate(system_prompt, text)
+            response = self.llm_client.chat(request)
         except OllamaClientError:
             return None
 
-        parsed = self._parse_json(raw)
-        if parsed is None:
-            return None
-
-        intent_name = str(parsed.get("intent", "none")).strip().lower()
-        allowed = {
-            "none",
-            "index_scan",
-            "scan_document_root",
-            "memory_scan",
-            "memory_review",
-            "launch_application",
-            "open_url_shortcut",
-            "config_add_application",
-            "config_set_document_roots",
-            "config_remove_document_root",
-            "config_set_web_shortcut",
-            "config_remove_web_shortcut",
-            "config_remove_application",
-            "config_set_value",
-            "profile_update",
-        }
-        if intent_name not in allowed:
-            return None
-
-        return parsed
-
-    def _parse_json(self, content: str) -> dict[str, Any] | None:
-        body = content.strip()
-        if body.startswith("```"):
-            body = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", body)
-            body = re.sub(r"\s*```$", "", body)
-            body = body.strip()
-        start = body.find("{")
-        end = body.rfind("}")
-        if start < 0 or end < 0 or end <= start:
-            return None
-        snippet = body[start : end + 1]
-        try:
-            parsed = json.loads(snippet)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(parsed, dict):
-            return None
-        return parsed
+        for call in response.tool_calls:
+            definition = self.tool_registry.get(call.name)
+            if definition is None or not definition.expose_to_model or not self.tool_registry.is_enabled(call.name):
+                continue
+            return {"intent": call.name, "arguments": dict(call.arguments)}
+        return None

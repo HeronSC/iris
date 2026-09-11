@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/application/contracts.py
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -90,6 +92,7 @@ class IrisEvent:
     message: IrisMessage | None = None
     progress_current: int | None = None
     progress_total: int | None = None
+    delta: str | None = None
 
 
 @dataclass(frozen=True)

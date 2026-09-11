@@ -1,14 +1,43 @@
-﻿from __future__ import annotations
+# File: core/actions/implementations/open_url.py
+
+from __future__ import annotations
 
 from urllib.parse import urlparse
+
+from pydantic import BaseModel, Field
 
 from core.actions.executor import ActionExecutionContext
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
 from core.config.document_search_mutations import build_confirmation_preview
+from core.tools.models import PermissionLevel, ToolDefinition
+
+
+class OpenUrlArguments(BaseModel):
+    shortcut: str | None = Field(default=None, description="Name of a saved web shortcut")
+    url: str | None = Field(default=None, description="Full https URL to open when no shortcut applies")
+
+
+class OpenUrlShortcutArguments(BaseModel):
+    shortcut: str = Field(description="Name of a saved web shortcut, for example 'azure-portal'")
 
 
 class OpenUrlAction:
     name = "open_url"
+    definition = ToolDefinition(
+        name="open_url",
+        description="Open a saved web shortcut or an explicit URL in the browser.",
+        arguments=OpenUrlArguments,
+        permission=PermissionLevel.EXECUTE,
+        expose_to_model=False,
+    )
+    facets = (
+        ToolDefinition(
+            name="open_url_shortcut",
+            description="Open one of the user's saved web shortcuts in the browser.",
+            arguments=OpenUrlShortcutArguments,
+            permission=PermissionLevel.EXECUTE,
+        ),
+    )
 
     def validate(self, request: ActionRequest, context: ActionExecutionContext) -> ValidationResult:
         shortcut = str(request.arguments.get("shortcut", "")).strip().lower()

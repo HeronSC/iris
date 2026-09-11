@@ -1,11 +1,27 @@
-﻿from __future__ import annotations
+# File: core/actions/implementations/clipboard.py
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
 
 from core.actions.executor import ActionExecutionContext
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
+from core.tools.models import PermissionLevel, ToolDefinition
+
+
+class ClipboardArguments(BaseModel):
+    text: str = Field(description="Text to place on the clipboard")
 
 
 class ClipboardAction:
     name = "copy_to_clipboard"
+    definition = ToolDefinition(
+        name="copy_to_clipboard",
+        description="Copy text to the Windows clipboard.",
+        arguments=ClipboardArguments,
+        permission=PermissionLevel.WRITE,
+        expose_to_model=False,
+    )
 
     def validate(self, request: ActionRequest, context: ActionExecutionContext) -> ValidationResult:
         text = request.arguments.get("text")

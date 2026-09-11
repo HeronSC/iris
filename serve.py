@@ -10,6 +10,7 @@ import uvicorn
 
 from core.application import IrisApplication
 from core.config.loader import ConfigError
+from core.observability import configure_logging, log_dir_for
 from core.profile.loader import AssistantMemoryError
 from core.server.app import DEFAULT_HOST, DEFAULT_PORT, create_app
 
@@ -20,6 +21,7 @@ DEFAULT_CONFIG = root / "core" / "config.json"
 
 
 def build(config_path: Path | None = None) -> tuple[object, IrisApplication]:
+    configure_logging(log_dir_for(None, config_path or DEFAULT_CONFIG))
     app_service = IrisApplication(config_path or DEFAULT_CONFIG)
     app_service.initialize()
     return create_app(app_service), app_service

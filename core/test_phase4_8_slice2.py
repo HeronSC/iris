@@ -1,4 +1,6 @@
-﻿import tempfile
+# File: core/test_phase4_8_slice2.py
+
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -27,7 +29,7 @@ class FakeLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         return "summary-ready"
 
@@ -36,7 +38,7 @@ class WeatherIntentLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         if "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps." in user_prompt:
             return '{"decision":"tool","capability":"weather","arguments":{"location":"Anderson, SC","range_name":"week","start":"today","granularity":"daily"},"confidence":0.91}'
@@ -47,7 +49,7 @@ class StockIntentLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         if "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps." in user_prompt:
             return '{"decision":"tool","capability":"stocks","arguments":{"ticker":"NVDA"},"confidence":0.87}'
@@ -58,7 +60,7 @@ class RespondIntentLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         if "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps." in user_prompt:
             return '{"decision":"respond","confidence":0.82}'
@@ -69,7 +71,7 @@ class CrossTopicIntentLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         if "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps." not in user_prompt:
             return "summary-ready"
@@ -84,7 +86,7 @@ class PhaseAcceptanceIntentLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         if "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps." not in user_prompt:
             return "summary-ready"
@@ -127,7 +129,7 @@ class NeedsDefaultsWeatherLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         if "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps." not in user_prompt:
             return "summary-ready"
@@ -140,7 +142,7 @@ class WeeklyWeatherIntentLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         if "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps." in user_prompt:
             return '{"decision":"tool","capability":"weather","arguments":{"location":"Anderson, SC","range_name":"week","granularity":"daily"},"confidence":0.93}'
@@ -151,7 +153,7 @@ class NextWeekWeatherIntentLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         if "Return JSON only as an object with keys decision, capability, arguments, question, confidence, and steps." in user_prompt:
             return '{"decision":"tool","capability":"weather","arguments":{"location":"Anderson, SC","range_name":"next_week","granularity":"daily"},"confidence":0.94}'

@@ -1,4 +1,4 @@
-﻿# File: ui/main.py
+# File: ui/main.py
 
 from __future__ import annotations
 
@@ -44,6 +44,8 @@ from core.application.contracts import ActionSuggestion, ConversationContent, De
 from core.assistant.prompting import PROMPT_CANCEL_TOKEN, PromptRequest, PromptType
 #! @allow-local-import
 from core.config.loader import ConfigError
+#! @allow-local-import
+from core.observability import configure_logging, log_dir_for
 #! @allow-local-import
 from core.profile.loader import AssistantMemoryError
 
@@ -438,6 +440,9 @@ class IrisWindow(QMainWindow):
         self.send_button.setEnabled(enabled)
 
     def _handle_event(self, event: IrisEvent) -> None:
+        if event.delta:
+            self._append_stream_delta(event.delta)
+            return
         status_text = event.status.value.replace("_", " ").title()
         if event.progress_current is not None and event.progress_total is not None:
             status_text = f"{status_text} {event.progress_current} / {event.progress_total}"
@@ -461,6 +466,8 @@ class IrisWindow(QMainWindow):
 
         self._append_message(MessageRole.USER, text)
         assistant_name = self.app_service.config.get("assistant_name", "Iris") if isinstance(self.app_service.config, dict) else "Iris"
+        self._placeholder_block = self.history.document().blockCount()
+        self._stream_text = ""
         self._append_message(MessageRole.ASSISTANT, "Thinking...", label=assistant_name)
         self.pending_text = text
         self._active_input_text = text
@@ -615,11 +622,36 @@ class IrisWindow(QMainWindow):
             self.file_ops_panel.update_index_progress(text)
             self._show_file_operations_panel("Indexing")
 
+    def _append_stream_delta(self, delta: str) -> None:
+        assistant_name = self.app_service.config.get("assistant_name", "Iris") if isinstance(self.app_service.config, dict) else "Iris"
+        self._stream_text = getattr(self, "_stream_text", "") + delta
+        self._rewrite_placeholder(assistant_name, self._stream_text)
+
+    def _rewrite_placeholder(self, label: str, text: str) -> None:
+        start_block = getattr(self, "_placeholder_block", None)
+        document = self.history.document()
+        if start_block is None or start_block >= document.blockCount():
+            self._append_message(MessageRole.ASSISTANT, text, label=label)
+            return
+        cursor = self.history.textCursor()
+        cursor.beginEditBlock()
+        cursor.setPosition(document.findBlockByNumber(start_block).position())
+        cursor.movePosition(cursor.MoveOperation.End, cursor.MoveMode.KeepAnchor)
+        cursor.removeSelectedText()
+        cursor.deletePreviousChar()
+        cursor.endEditBlock()
+        self._append_message(MessageRole.ASSISTANT, text, label=label)
+
     def _render_response(self, response) -> None:
         assistant_name = self.app_service.config.get("assistant_name", "Iris") if isinstance(self.app_service.config, dict) else "Iris"
         conversation = self._response_conversation(response)
+        streamed = bool(getattr(self, "_stream_text", ""))
+        self._stream_text = ""
         if conversation is not None and conversation.message.strip():
-            self._append_message(MessageRole.ASSISTANT, conversation.message.strip(), label=assistant_name)
+            if streamed:
+                self._rewrite_placeholder(assistant_name, conversation.message.strip())
+            else:
+                self._append_message(MessageRole.ASSISTANT, conversation.message.strip(), label=assistant_name)
         else:
             for message in response.messages:
                 if message.role == MessageRole.USER:
@@ -1178,6 +1210,7 @@ def _resolve_config_path(argv: list[str]) -> tuple[Path, list[str]]:
 def main() -> None:
     config_path, qt_argv = _resolve_config_path(sys.argv[1:])
     app = QApplication([sys.argv[0], *qt_argv])
+    configure_logging(log_dir_for(None, config_path))
     window = IrisWindow(config_path)
     if window._start_maximized:
         window.showMaximized()

@@ -1,9 +1,12 @@
+# File: core/knowledge/retrieval.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from core.knowledge.embeddings import MemoryEmbeddingIndex
 from core.knowledge.models import MemoryKind, MemoryRecord, MemoryStatus
 from core.knowledge.ranking import ScoredRecord, fit_to_budget, score, tokenize
 from core.knowledge.repository import MEMORY_COLUMNS, record_from_row
@@ -11,26 +14,11 @@ from core.knowledge.schema import ensure_schema
 from core.storage.sqlite_database import SQLiteDatabase
 
 
-#: Upper bound for a text range scan. Above every ordinary character, so
-#: "trading/" .. "trading/￿" spans exactly the topics beneath a prefix.
 _RANGE_END = "￿"
 
 
 @dataclass(frozen=True)
 class KnowledgeQuery:
-    """What to look for, and how much of it to bring back.
-
-    Retrieval runs in two stages. When ``text`` is given, SQLite's own search
-    index picks the candidates by relevance and BM25 orders them;
-    ``candidate_limit`` bounds how many reach Python, where the scorer re-ranks
-    them on recency and standing, which the index knows nothing about. With no
-    ``text`` it is a plain filtered browse, newest first.
-
-    Cost follows how many records the query matches rather than how many exist.
-    A question with any distinguishing term is a few milliseconds at 200,000
-    records; one whose every term appears in every record is the worst case,
-    since BM25 must then score them all: about 140ms at 200,000, 6ms at 2,000.
-    """
 
     text: str = ""
     topic: str | None = None
@@ -43,11 +31,6 @@ class KnowledgeQuery:
     candidate_limit: int = 400
     limit: int = 10
     max_tokens: int | None = None
-    #: Least text overlap a record may have and still be returned, applied only
-    #: when ``text`` is given. Without it, recency and standing alone keep a
-    #: record with nothing to do with the question, and anything handed to a
-    #: model as context is read as relevant to it. Set to 0.0 to keep everything
-    #: the filters matched, which is what a browse wants and a question does not.
     minimum_text_match: float = 0.01
 
 
@@ -60,30 +43,23 @@ class RetrievalResult:
         return [item.record for item in self.records]
 
     def as_context(self) -> str:
-        """The retrieved records as prompt text, most relevant first."""
         return "\n".join(f"- {item.record.content}" for item in self.records)
 
 
 class KnowledgeRetriever:
-    """Structured filtering in SQL, relevance ranking over what comes back.
 
-    Nothing here decides what is worth retrieving on the model's behalf: the
-    caller states the filters. What it does guarantee is that the cost is
-    bounded and that every result carries why it was chosen.
-    """
-
-    def __init__(self, database: SQLiteDatabase) -> None:
+    def __init__(self, database: SQLiteDatabase, embeddings: MemoryEmbeddingIndex | None = None) -> None:
         self.database = database
+        self.embeddings = embeddings
         ensure_schema(database)
 
     def retrieve(self, query: KnowledgeQuery, *, now: datetime | None = None) -> RetrievalResult:
         limit = max(1, int(query.candidate_limit))
         match = _match_expression(query.text)
+        semantic: dict[str, float] = {}
+        semantic_diagnostics: dict[str, Any] = {}
 
         if match:
-            # Candidates chosen by relevance, using SQLite's own index and BM25.
-            # Selecting them by recency instead left a strong older match
-            # unreachable no matter how well it matched.
             clauses, params = _filters(query, table="m")
             columns = ", ".join(f"m.{name.strip()}" for name in MEMORY_COLUMNS.split(","))
             sql = (
@@ -106,9 +82,12 @@ class KnowledgeRetriever:
             rows = conn.execute(sql, args).fetchall()
 
         candidates = [record_from_row(row) for row in rows]
+        if match and self.embeddings is not None and self.embeddings.available:
+            semantic, extra, semantic_diagnostics = self._semantic_candidates(query, limit, {item.id for item in candidates})
+            candidates.extend(extra)
         query_tokens = tokenize(query.text)
         scored = sorted(
-            (score(record, query_tokens, now=now) for record in candidates),
+            (score(record, query_tokens, now=now, semantic=semantic.get(record.id)) for record in candidates),
             key=lambda item: (-item.score, item.record.created_at),
         )
         relevant = scored
@@ -131,15 +110,48 @@ class KnowledgeRetriever:
                     {"id": item.record.id, "score": item.score, "reasons": item.reasons}
                     for item in kept
                 ],
+                **semantic_diagnostics,
             },
         )
 
-    def similar_to(self, record: MemoryRecord, *, limit: int = 5, **overrides: Any) -> RetrievalResult:
-        """Records resembling this one, in its own topic and of its own kind.
+    def _semantic_candidates(
+        self, query: KnowledgeQuery, limit: int, already: set[str]
+    ) -> tuple[dict[str, float], list[MemoryRecord], dict[str, Any]]:
+        assert self.embeddings is not None
+        try:
+            hits = self.embeddings.search(query.text, k=min(limit, 200))
+        except Exception as error:
+            return {}, [], {"semantic_candidates": 0, "semantic_error": str(error)}
+        if not hits:
+            return {}, [], {"semantic_candidates": 0}
+        by_sequence = {sequence: similarity for sequence, similarity in hits}
+        clauses, params = _filters(query, table="m")
+        placeholders = ", ".join("?" * len(by_sequence))
+        columns = ", ".join(f"m.{name.strip()}" for name in MEMORY_COLUMNS.split(","))
+        sql = (
+            f"SELECT m.sequence AS vec_sequence, {columns} FROM memories m "
+            f"WHERE m.sequence IN ({placeholders}) AND {' AND '.join(clauses)}"
+        )
+        with self.database.connect() as conn:
+            rows = conn.execute(sql, [*by_sequence.keys(), *params]).fetchall()
+        relevance: dict[str, float] = {}
+        extra: list[MemoryRecord] = []
+        for row in rows:
+            record = record_from_row(row)
+            similarity = by_sequence[int(row["vec_sequence"])]
+            mapped = self.embeddings.config.relevance(similarity)
+            if mapped <= 0.0:
+                continue
+            relevance[record.id] = mapped
+            if record.id not in already:
+                extra.append(record)
+        return relevance, extra, {
+            "semantic_candidates": len(relevance),
+            "semantic_added": len(extra),
+            "semantic_top_similarity": round(max(by_sequence.values()), 4),
+        }
 
-        Answers "what previous observations resemble this one" from the design
-        document. The record itself is excluded from its own results.
-        """
+    def similar_to(self, record: MemoryRecord, *, limit: int = 5, **overrides: Any) -> RetrievalResult:
         query = KnowledgeQuery(
             text=record.content,
             topic=record.topic,
@@ -153,20 +165,6 @@ class KnowledgeRetriever:
 
 
 def _match_expression(text: str) -> str:
-    """Turn a person's words into an FTS5 query that cannot be a syntax error.
-
-    Query text arrives as prose and FTS5 gives -, *, ", : and the bare words
-    AND, OR, NOT and NEAR their own meanings, so a question like
-    "what about the +3.4% result?" would not parse. Each term is quoted
-    instead, and they are joined with OR: matching broadly is right here,
-    because BM25 orders the candidates and the scorer then applies
-    minimum_text_match to drop the weak ones.
-
-    Terms come from the same tokenizer the scorer uses, so the filler in
-    "what did we see about volume" is dropped. That matters for more than
-    tidiness: a match is only as narrow as its commonest term, and the cost of
-    ranking grows with how many records match.
-    """
     terms = sorted(tokenize(text))
     if not terms:
         return ""
@@ -174,12 +172,6 @@ def _match_expression(text: str) -> str:
 
 
 def _filters(query: KnowledgeQuery, *, table: str = "") -> tuple[list[str], list[Any]]:
-    """The structured filters, with every column qualified for the caller's FROM.
-
-    ``table`` matters rather than being cosmetic: the search join brings a
-    second ``topic`` column into scope, so an unqualified name there is
-    ambiguous rather than merely untidy.
-    """
     at = f"{table}." if table else ""
     clauses: list[str] = []
     params: list[Any] = []
@@ -188,8 +180,6 @@ def _filters(query: KnowledgeQuery, *, table: str = "") -> tuple[list[str], list
         clauses.append(f"{at}topic = ?")
         params.append(query.topic)
     elif query.topic_prefix:
-        # A range rather than LIKE: LIKE is case-insensitive by default, which
-        # stops SQLite using the index on topic.
         clauses.append(f"{at}topic >= ? AND {at}topic < ?")
         params.extend([query.topic_prefix, query.topic_prefix + _RANGE_END])
 

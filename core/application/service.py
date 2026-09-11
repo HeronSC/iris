@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,8 @@ from core.actions.audit import ActionAuditLogger
 from core.actions.executor import ActionExecutionContext, ActionExecutor, SystemAdapter
 from core.actions.implementations.add_document_root import AddDocumentRootAction
 from core.actions.implementations.clipboard import ClipboardAction
+from core.actions.implementations.fetch_web_page import FetchWebPageAction
+from core.actions.implementations.system_info import SYSTEM_ACTIONS
 from core.actions.implementations.launch_application import LaunchApplicationAction
 from core.actions.implementations.open_file import OpenFileAction
 from core.actions.implementations.open_folder import OpenFolderAction, ShowInExplorerAction
@@ -46,12 +50,15 @@ from core.assistant.knowledge_provider import KnowledgeRecallProvider
 from core.assistant.intent_example_store import IntentExampleStore
 from core.assistant.intent_router import IntentRouter
 from core.assistant.memory_commands import MemoryCommandHandler
+from core.assistant.models_command import ModelsCommandHandler
 from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
 from core.assistant.proposal_commands import ProposalCommandHandler
 from core.assistant.save_command import SaveCommandHandler
 from core.assistant.search_commands import SearchCommandHandler
 from core.assistant.session_commands import SessionCommandHandler
+from core.assistant.tools_command import ToolsCommandHandler
+from core.assistant.watch_command import WatchCommandHandler
 from core.assistant.topic_commands import TopicCommandHandler
 from core.assistant.prompting import PROMPT_CANCEL_TOKEN, PromptRequest, PromptType
 from core.assistant.workflows import MemoryReviewWorkflow, SessionCloseWorkflow
@@ -69,13 +76,21 @@ from core.documents.extractors.excel_extractor import ExcelExtractor
 from core.documents.extractors.pdf_extractor import PdfExtractor
 from core.documents.extractors.text_extractor import TextExtractor
 from core.documents.models import DocumentSearchConfig
+from core.documents.embeddings import DocumentEmbeddingConfig, DocumentEmbeddingIndex
+from core.documents.ocr import OcrService, VisionOcr, WindowsOcr
 from core.documents.query_parser import FileSearchQueryParser, QueryParserConfig
 from core.documents.scanner import DocumentScanner
 from core.documents.search_service import DocumentSearchService
-from core.knowledge import KnowledgeGraph, KnowledgeRetriever
+from core.documents.watch import DocumentWatchService
+from core.knowledge import EmbeddingConfig, KnowledgeGraph, KnowledgeRetriever, MemoryEmbeddingIndex
 from core.knowledge.hypotheses import HypothesisTracker
 from core.knowledge.review import KnowledgeReviewWorkflow
+from core.llm.metrics import RequestMetricsStore
+from core.assistant.why_command import WhyCommandHandler
+from core.observability import bind_request, clear_request, current_request_id, log_dir_for
+from core.observability.logging_setup import LOG_FILE_NAME
 from core.llm.ollama_client import OllamaClient, OllamaClientError
+from core.llm.router import ModelRouter, ModelRoutes
 from core.profile.loader import AssistantMemoryError, MemoryLoader
 from core.profile.proposal_generator import MemoryProposalGenerator
 from core.profile.proposal_reviewer import MemoryProposalReviewer
@@ -85,6 +100,15 @@ from core.profile.update_service import MemoryUpdateService
 from core.profile.writer import MemoryWriter
 from core.state.search_result_context import SearchResultContext
 from core.storage.sqlite_database import SQLiteDatabase
+from core.tools.mcp_client import McpManager, load_server_configs
+from core.tools.models import PermissionLevel, ToolDefinition, ToolKind
+from core.tools.registry import ToolRegistry
+from core.watchers import InboxNotifier, LogNotifier, QuietHours, ToastNotifier, WatcherService
+from core.web.fetch import PageFetcher
+
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 EventHandler = Callable[[IrisEvent], None]
@@ -138,6 +162,11 @@ class IrisApplication:
         self.action_handler: CommandHandler = _NoopNaturalLanguageHandler()
         self.project_handler: CommandHandler = _NoopCommandHandler()
         self.knowledge_handler: CommandHandler = _NoopCommandHandler()
+        self.tools_handler: CommandHandler = _NoopCommandHandler()
+        self.models_handler: CommandHandler = _NoopCommandHandler()
+        self.why_handler: CommandHandler = _NoopCommandHandler()
+        self.watch_handler: CommandHandler = _NoopCommandHandler()
+        self.last_request_id: str | None = None
 
     def initialize(self, event_handler: EventHandler | None = None) -> None:
         self.event_handler = event_handler
@@ -154,11 +183,24 @@ class IrisApplication:
         self.store = MemoryStore(memory_data)
         self.writer = MemoryWriter(self.config["memory_path"])
         context_builder = ContextBuilder(self.config["assistant_name"], self.store)
-        self.ollama_client = OllamaClient(
+        ollama_client = OllamaClient(
             self.config["llm_server"],
             self.config["model"],
             timeout_seconds=self.config.get("llm_timeout_seconds", 30.0),
         )
+        metrics_path = self.config.get("metrics_path") or Path(self.config["memory_path"]).parent / "Metrics" / "metrics.db"
+        try:
+            self.request_metrics: RequestMetricsStore | None = RequestMetricsStore(SQLiteDatabase(metrics_path))
+        except Exception as error:
+            logger.warning("Model metrics disabled: %s", error)
+            self.request_metrics = None
+        self.model_router = ModelRouter(
+            ollama_client,
+            ModelRoutes.from_config(self.config),
+            metrics=self.request_metrics,
+            request_id_provider=current_request_id,
+        )
+        self.ollama_client = self.model_router
         session = ConversationSession(max_messages=8)
         self.session_repository = SessionRepository(
             self.config.get("session_path") or Path(__file__).resolve().parents[1] / "sessions",
@@ -200,7 +242,12 @@ class IrisApplication:
         knowledge_database = SQLiteDatabase(knowledge_path)
         self.knowledge = KnowledgeGraph(knowledge_database)
         self.hypotheses = HypothesisTracker(self.knowledge)
-        self.knowledge_retriever = KnowledgeRetriever(knowledge_database)
+        self.embedding_index = MemoryEmbeddingIndex(
+            knowledge_database,
+            self.model_router,
+            EmbeddingConfig.from_config(self.config),
+        )
+        self.knowledge_retriever = KnowledgeRetriever(knowledge_database, embeddings=self.embedding_index)
 
         knowledge_cfg = self.config.get("general_knowledge", {}) if isinstance(self.config, dict) else {}
         recall_enabled = bool((knowledge_cfg.get("enabled", {}) or {}).get("recall", True))
@@ -218,6 +265,7 @@ class IrisApplication:
             self.knowledge_review,
             output=self._sink,
             actor=str(self.config.get("assistant_user", "user")),
+            embeddings=self.embedding_index,
         )
         proposal_generator = MemoryProposalGenerator(self.ollama_client)
         reviewer = MemoryProposalReviewer()
@@ -277,17 +325,32 @@ class IrisApplication:
                 CsvExtractor(),
                 DocxExtractor(),
                 ExcelExtractor(),
-                PdfExtractor(),
+                PdfExtractor(ocr=self._build_ocr()),
             ],
         )
         parser = FileSearchQueryParser(QueryParserConfig(default_roots=document_config.root_paths()))
-        document_search_service = DocumentSearchService(document_catalog, parser)
+        self.document_embeddings = DocumentEmbeddingIndex(document_db, self.model_router, DocumentEmbeddingConfig.from_config(self.config))
+        document_search_service = DocumentSearchService(document_catalog, parser, embeddings=self.document_embeddings)
+        watch_cfg = document_cfg.get("watch", {}) if isinstance(document_cfg.get("watch"), dict) else {}
+        self.document_watch: DocumentWatchService | None = None
+        if bool(watch_cfg.get("enabled", True)) and DocumentWatchService.available():
+            self.document_watch = DocumentWatchService(
+                scanner,
+                debounce_seconds=float(watch_cfg.get("debounce_seconds", 2.0)),
+                rescan_interval_hours=float(watch_cfg.get("rescan_interval_hours", 24.0)),
+            )
+            try:
+                self.document_watch.start()
+            except Exception as error:
+                logger.warning("Document change watching could not start", error=str(error))
+                self.document_watch = None
         self.index_handler: CommandHandler = IndexCommandHandler(
             scanner,
             document_catalog,
             config_path=self.config_loader.config_path,
             output=self._sink,
             prompt_provider=self._prompt,
+            watch_service=self.document_watch,
         )
         search_context = SearchResultContext(ttl_minutes=30)
         self.search_handler = SearchCommandHandler(document_search_service, search_context=search_context, output=self._sink)
@@ -310,7 +373,8 @@ class IrisApplication:
             for alias in app.aliases:
                 alias_map[alias] = app_id
 
-        action_registry = ActionRegistry()
+        self.tool_registry = ToolRegistry()
+        action_registry = ActionRegistry(self.tool_registry)
         action_registry.register(OpenFileAction())
         action_registry.register(OpenFolderAction())
         action_registry.register(ShowInExplorerAction())
@@ -321,6 +385,16 @@ class IrisApplication:
         action_registry.register(ScanDocumentRootAction())
         action_registry.register(UpdateConfigAction())
         action_registry.register(UpdateProfileAction())
+        web_cfg = self.config.get("web", {}) if isinstance(self.config.get("web"), dict) else {}
+        self.page_fetcher = PageFetcher(
+            user_agent=str(web_cfg.get("user_agent") or (self.config.get("general_knowledge", {}) or {}).get("user_agent") or "Iris/1.0 (local desktop assistant)"),
+            timeout_seconds=float(web_cfg.get("timeout_seconds", 15.0)),
+            max_bytes=int(web_cfg.get("max_bytes", 3_000_000)),
+            cache_ttl_seconds=float(web_cfg.get("cache_ttl_seconds", 600.0)),
+        )
+        action_registry.register(FetchWebPageAction(self.page_fetcher))
+        for system_action in SYSTEM_ACTIONS:
+            action_registry.register(system_action())
 
         action_audit = ActionAuditLogger(self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit")
         self.action_executor = ActionExecutor(
@@ -362,7 +436,31 @@ class IrisApplication:
             example_store=intent_example_store,
             conversation_synonyms=conversation_synonyms,
             output=self._sink,
+            tool_registry=self.tool_registry,
         )
+        self._register_capability_tools()
+        self.mcp_manager = McpManager(
+            load_server_configs(self.config.get("mcp_servers") if isinstance(self.config, dict) else None),
+            action_registry,
+            on_event=lambda message: logger.warning(message),
+        )
+        self.mcp_manager.start(background=True)
+        self.tools_handler = ToolsCommandHandler(self.tool_registry, self.mcp_manager, output=self._sink)
+        self.models_handler = ModelsCommandHandler(self.model_router, self.request_metrics, output=self._sink)
+        self.watchers = self._build_watchers()
+        self.watch_handler = WatchCommandHandler(self.watchers, output=self._sink)
+        self.why_handler = WhyCommandHandler(
+            log_file=log_dir_for(self.config) / LOG_FILE_NAME,
+            trace_file=getattr(getattr(self.coordinator, "trace_logger", None), "path", None),
+            metrics=self.request_metrics,
+            action_audit=action_audit,
+            last_request_id=lambda: getattr(self, "last_request_id", None),
+            output=self._sink,
+        )
+        threading.Thread(target=self._report_model_route_warnings, name="model-route-check", daemon=True).start()
+        self._embedding_stop = threading.Event()
+        self._embedding_thread = threading.Thread(target=self._embedding_catch_up, name="embeddings", daemon=True)
+        self._embedding_thread.start()
 
         active_session = self.session_manager.get_active_session()
         active_project_id = active_session.project_id if active_session is not None else None
@@ -424,6 +522,9 @@ class IrisApplication:
         status = self._status_for_input(stripped)
         self._current_status = status
         self._emit_event(status)
+        self.last_request_id = bind_request()
+        self._turn_started = time.perf_counter()
+        self._turn_route = "coordinator"
 
         if stripped.lower() in {"exit", "quit"}:
             self.session_handler.handle("/session close", self.state)
@@ -465,6 +566,14 @@ class IrisApplication:
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.knowledge_handler, stripped, status, command_prefixes=("/knowledge",)):
                 return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.tools_handler, stripped, status, command_prefixes=("/tools",)):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.models_handler, stripped, status, command_prefixes=("/models",)):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.why_handler, stripped, status, command_prefixes=("/why",)):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.watch_handler, stripped, status, command_prefixes=("/watch",)):
+                return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)
             if self._handle_slash_command(self.search_handler, stripped, IrisStatus.SEARCHING, command_prefixes=("/search", "/file")):
@@ -492,10 +601,13 @@ class IrisApplication:
             if self._should_prefer_coordinator_routing(stripped):
                 return self._respond_with_coordinator(stripped, cancel_event)
             if self.intent_router.handle(stripped, self.state):
+                self._turn_route = "intent"
                 return self._build_response(status, cancel_event)
             if self.action_handler.handle_natural_language(stripped):
+                self._turn_route = "action"
                 return self._build_response(status, cancel_event)
             if self.search_handler.handle_natural_language(stripped):
+                self._turn_route = "search"
                 return self._build_response(IrisStatus.SEARCHING, cancel_event)
             if self._handle_slash_command(self.project_handler, stripped, status, command_prefixes=("/project",)):
                 return self._build_response(status, cancel_event)
@@ -505,6 +617,8 @@ class IrisApplication:
             self._emit_message(MessageRole.ERROR, f"Assistant error: {error}")
             return self._build_response(IrisStatus.ERROR, cancel_event)
         finally:
+            self._log_turn(stripped)
+            clear_request()
             self.state.pop("cancel_event", None)
             self._active_event_handler = None
             self._active_prompt_provider = None
@@ -516,6 +630,102 @@ class IrisApplication:
             self._detail_actions_override = []
             self._active_slash_command = None
 
+    def _log_turn(self, user_message: str) -> None:
+        try:
+            roles = self._message_role_counts()
+            logger.info(
+                "turn",
+                route=self._turn_route,
+                status=self._current_status.value,
+                elapsed_ms=round((time.perf_counter() - self._turn_started) * 1000, 1),
+                user_message=user_message[:200],
+                replies=int(roles.get(MessageRole.ASSISTANT, 0)),
+                errors=int(roles.get(MessageRole.ERROR, 0)),
+            )
+        except Exception:
+            pass
+
+    def _embedding_catch_up(self) -> None:
+        indexes = [self.embedding_index, self.document_embeddings]
+        interval = max(10.0, float(self.embedding_index.config.refresh_seconds))
+        first = True
+        while not self._embedding_stop.is_set():
+            for index in indexes:
+                if index.available:
+                    try:
+                        stored = index.index_pending()
+                        if stored:
+                            logger.info("embeddings", index=index.name, stored=stored, vectors=index.count())
+                    except Exception as error:
+                        logger.warning("Embedding pass failed", index=index.name, error=str(error))
+                elif first:
+                    logger.info("Embedding retrieval is off", index=index.name, status=index.status())
+            first = False
+            if self._embedding_stop.wait(interval):
+                break
+
+    def _build_watchers(self) -> WatcherService:
+        configuration = Path(self.config["memory_path"]).parent / "Configuration"
+        audit = Path(self.config.get("audit_path") or Path(self.config["memory_path"]).parent / "Audit")
+        notifications_cfg = self.config.get("notifications", {}) if isinstance(self.config.get("notifications"), dict) else {}
+        notifiers: dict[str, Any] = {"log": LogNotifier()}
+        if ToastNotifier.available():
+            notifiers["toast"] = ToastNotifier(str(self.config.get("assistant_name", "Iris")))
+        try:
+            quiet = QuietHours.parse(str(notifications_cfg.get("quiet_hours") or ""))
+        except ValueError as error:
+            logger.warning("Ignoring notifications.quiet_hours", error=str(error))
+            quiet = QuietHours()
+        service = WatcherService(
+            configuration / "watchers.json",
+            configuration / "watchers_state.json",
+            notifiers,
+            quiet_hours=quiet,
+            inbox=InboxNotifier(audit / "notifications.jsonl"),
+        )
+        if bool(notifications_cfg.get("enabled", True)):
+            try:
+                service.start()
+            except Exception as error:
+                logger.warning("Watchers could not start", error=str(error))
+        return service
+
+    def _build_ocr(self) -> OcrService | None:
+        readers: list[Any] = []
+        if WindowsOcr.available():
+            readers.append(WindowsOcr())
+        readers.append(VisionOcr(self.model_router))
+        service = OcrService(readers)
+        return service if service.available else None
+
+    def _report_model_route_warnings(self) -> None:
+        try:
+            for warning in self.model_router.check_routes():
+                logger.warning("Model routes: %s", warning)
+        except Exception as error:
+            logger.warning("Model route check failed: %s", error)
+
+    def _register_capability_tools(self) -> None:
+        router = getattr(self.coordinator, "general_knowledge_router", None)
+        if router is None:
+            return
+        for provider in getattr(router, "providers", []):
+            definition = provider.definition() if hasattr(provider, "definition") else None
+            if definition is None or definition.name in self.tool_registry:
+                continue
+            self.tool_registry.register(
+                ToolDefinition(
+                    name=definition.name,
+                    description=definition.description,
+                    parameters=dict(definition.request_schema),
+                    permission=PermissionLevel.READ,
+                    kind=ToolKind.CAPABILITY,
+                    expose_to_model=False,
+                    source="knowledge",
+                    handler=provider,
+                )
+            )
+
     def shutdown(self) -> None:
         if not self.initialized:
             return
@@ -523,6 +733,27 @@ class IrisApplication:
             self.session_handler.handle("/session close", self.state)
         except Exception:
             pass
+        stop = getattr(self, "_embedding_stop", None)
+        if stop is not None:
+            stop.set()
+        watchers = getattr(self, "watchers", None)
+        if watchers is not None:
+            try:
+                watchers.stop()
+            except Exception:
+                pass
+        document_watch = getattr(self, "document_watch", None)
+        if document_watch is not None:
+            try:
+                document_watch.stop()
+            except Exception:
+                pass
+        mcp_manager = getattr(self, "mcp_manager", None)
+        if mcp_manager is not None:
+            try:
+                mcp_manager.stop()
+            except Exception:
+                pass
         self.initialized = False
 
     def _status_for_input(self, user_input: str) -> IrisStatus:
@@ -554,6 +785,7 @@ class IrisApplication:
         if not handled:
             return False
 
+        self._turn_route = f"command:{command_name}"
         role_counts_after = self._message_role_counts()
         error_delta = role_counts_after.get(MessageRole.ERROR, 0) - role_counts_before.get(MessageRole.ERROR, 0)
         completion_text = f"{command_name} completed with errors." if error_delta > 0 else f"{command_name} complete."
@@ -639,8 +871,17 @@ class IrisApplication:
             return False
         return intent in {"find_files", "read_file", "count_files", "select_pending_result"}
 
+    def _emit_delta(self, text: str) -> None:
+        if self._active_event_handler is not None and text:
+            self._active_event_handler(IrisEvent(status=IrisStatus.THINKING, delta=text))
+
     def _respond_with_coordinator(self, stripped: str, cancel_event: threading.Event | None) -> IrisResponse:
-        turn = self.coordinator.respond_detailed(stripped, project_id=self.state.get("active_project_id"))
+        turn = self.coordinator.respond_detailed(
+            stripped,
+            project_id=self.state.get("active_project_id"),
+            on_delta=self._emit_delta if self._active_event_handler is not None else None,
+            cancel_event=cancel_event,
+        )
         self._last_coordinator_turn = turn
         response_text = turn.text
         self._detail_type_override = "markdown"

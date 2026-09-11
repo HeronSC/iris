@@ -1,13 +1,29 @@
-﻿from __future__ import annotations
+# File: core/actions/implementations/open_folder.py
+
+from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from core.actions.executor import ActionExecutionContext, path_is_allowed
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
+from core.tools.models import PermissionLevel, ToolDefinition
+
+
+class OpenFolderArguments(BaseModel):
+    file_id: str = Field(description="Catalog id of an indexed document whose folder should open")
 
 
 class OpenFolderAction:
     name = "open_folder"
+    definition = ToolDefinition(
+        name="open_folder",
+        description="Open the folder that contains an indexed document.",
+        arguments=OpenFolderArguments,
+        permission=PermissionLevel.EXECUTE,
+        expose_to_model=False,
+    )
 
     def validate(self, request: ActionRequest, context: ActionExecutionContext) -> ValidationResult:
         file_id = str(request.arguments.get("file_id", "")).strip()
@@ -41,6 +57,13 @@ class OpenFolderAction:
 
 class ShowInExplorerAction:
     name = "show_in_explorer"
+    definition = ToolDefinition(
+        name="show_in_explorer",
+        description="Reveal an indexed document in Windows Explorer.",
+        arguments=OpenFolderArguments,
+        permission=PermissionLevel.EXECUTE,
+        expose_to_model=False,
+    )
 
     def validate(self, request: ActionRequest, context: ActionExecutionContext) -> ValidationResult:
         file_id = str(request.arguments.get("file_id", "")).strip()

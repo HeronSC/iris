@@ -1,13 +1,28 @@
-﻿from __future__ import annotations
+# File: core/actions/implementations/launch_application.py
+
+from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from core.actions.executor import ActionExecutionContext
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
+from core.tools.models import PermissionLevel, ToolDefinition
+
+
+class LaunchApplicationArguments(BaseModel):
+    app_name: str = Field(description="Name or alias of an application configured in Iris, for example 'visual studio code'")
 
 
 class LaunchApplicationAction:
     name = "launch_application"
+    definition = ToolDefinition(
+        name="launch_application",
+        description="Launch an installed desktop application that Iris knows by name or alias.",
+        arguments=LaunchApplicationArguments,
+        permission=PermissionLevel.EXECUTE,
+    )
 
     def validate(self, request: ActionRequest, context: ActionExecutionContext) -> ValidationResult:
         app_id = str(request.arguments.get("app_id", "")).strip().lower()

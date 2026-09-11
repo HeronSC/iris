@@ -13,7 +13,7 @@ _USAGE = (
     "open [topic] | hypothesize <topic> <claim> | "
     "evidence <hypothesis> for|against <id> [note] | testing [topic] | "
     "pending | review | show <id> | why <id> | "
-    "approve <id> [note] | decline <id> <reason> | topics"
+    "approve <id> [note] | decline <id> <reason> | topics | embeddings [index]"
 )
 
 _TOPIC_NUDGE = (
@@ -28,10 +28,12 @@ class KnowledgeCommandHandler:
         workflow: KnowledgeReviewWorkflow,
         output: OutputSink | None = None,
         actor: str = "user",
+        embeddings: Any | None = None,
     ) -> None:
         self.workflow = workflow
         self.output = output
         self.actor = actor
+        self.embeddings = embeddings
 
     def handle(self, user_input: str, state: dict[str, Any]) -> bool:
         text = (user_input or "").strip()
@@ -78,8 +80,33 @@ class KnowledgeCommandHandler:
             return self._approve(argument, rest)
         if command == "decline":
             return self._decline(argument, rest)
+        if command == "embeddings":
+            return self._embeddings(argument)
 
         emit_output(self.output, _USAGE)
+        return True
+
+    def _embeddings(self, argument: str) -> bool:
+        if self.embeddings is None:
+            emit_output(self.output, "Embedding retrieval is not configured.")
+            return True
+        if argument.lower() == "index":
+            stored = self.embeddings.index_pending()
+            emit_output(self.output, f"Embedded {stored} records.")
+        status = self.embeddings.status()
+        if not status["available"]:
+            reason = "disabled in config" if not status["enabled"] else "sqlite-vec or the embedding model is unavailable"
+            emit_output(self.output, f"Embedding retrieval is off: {reason}.")
+            return True
+        lines = [
+            f"Embedding retrieval: on, {status['model']} ({status['dimensions']} dims)",
+            f"- {status['vectors']} vectors stored, {status['pending']} records waiting",
+        ]
+        if status["last_error"]:
+            lines.append(f"- last error: {status['last_error']}")
+        if status["pending"]:
+            lines.append("- run /knowledge embeddings index to embed them now")
+        emit_output(self.output, "\n".join(lines))
         return True
 
     def _observe(self, topic: str, content: str) -> bool:

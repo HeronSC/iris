@@ -1,4 +1,4 @@
-﻿# File: core/assistant/coordinator.py
+# File: core/assistant/coordinator.py
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,11 +19,13 @@ from core.conversation.context_builder import ContextBuilder
 from core.conversation.persistent_memory import PreparedMemoryContext, TopicMemoryService, diagnostics_to_text
 from core.conversation.request_pipeline import RequestPipeline, RequestPipelineResult
 from core.conversation.request_trace import RequestTraceLogger
+from core.observability.request_context import current_request_id
 from core.conversation.session import ConversationSession
 from core.conversation.session_manager import SessionManager
 from core.conversation.session_summarizer import SessionSummarizer
 from core.documents.models import DocumentSearchConfig, DocumentSearchRoot
 from core.application.contracts import ActionSuggestion
+from core.llm.models import LLMRequest, LLMResponse
 from core.llm.ollama_client import OllamaClientError
 
 
@@ -94,8 +97,15 @@ class AssistantCoordinator:
     def respond(self, user_message: str, project_id: str | None = None) -> str:
         return self.respond_detailed(user_message, project_id=project_id).text
 
-    def respond_detailed(self, user_message: str, project_id: str | None = None) -> CoordinatorTurn:
-        text = self._generate_response(user_message, project_id=project_id)
+    def respond_detailed(
+        self,
+        user_message: str,
+        project_id: str | None = None,
+        *,
+        on_delta: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> CoordinatorTurn:
+        text = self._generate_response(user_message, project_id=project_id, on_delta=on_delta, cancel_event=cancel_event)
         return CoordinatorTurn(
             text=text,
             general_knowledge=self._last_general_knowledge_result,
@@ -105,7 +115,14 @@ class AssistantCoordinator:
             topic_title=self._active_topic_title,
         )
 
-    def _generate_response(self, user_message: str, project_id: str | None = None) -> str:
+    def _generate_response(
+        self,
+        user_message: str,
+        project_id: str | None = None,
+        *,
+        on_delta: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> str:
         session = self._resolve_session()
         self._last_recalled_public_context = None
         self._last_general_knowledge_result = None
@@ -117,6 +134,7 @@ class AssistantCoordinator:
         request = self.request_pipeline.build_request(user_message, state=state)
         prepared_memory: PreparedMemoryContext | None = None
         trace_payload = {
+            "request_id": current_request_id(),
             "conversation_id": getattr(session, "id", None),
             "session_id": getattr(session, "id", None),
             "raw_user_message": user_message,
@@ -273,11 +291,12 @@ class AssistantCoordinator:
         record = self._turn_recorder(session)
         record("user", user_message)
         try:
-            response = self.ollama_client.generate(system_prompt, llm_user_message)
+            response = self._generate_answer(system_prompt, llm_user_message, on_delta=on_delta, cancel_event=cancel_event)
         except Exception as error:
             self._record_generation_failure(record, error)
             raise
         record("assistant", response)
+        generation = getattr(self.ollama_client, "last_response", None)
         self._finalize_topic_memory(prepared_memory, user_message, response)
         if active_session is not None:
             self._maybe_update_session_summary()
@@ -289,10 +308,51 @@ class AssistantCoordinator:
                 "final_response": response,
             }
         )
+        if generation is not None:
+            usage = getattr(generation, "usage", None)
+            trace_payload["model"] = getattr(generation, "model", None)
+            trace_payload["usage"] = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                "completion_tokens": getattr(usage, "completion_tokens", 0),
+                "total_duration_ms": getattr(usage, "total_duration_ms", 0.0),
+            }
         if memory_diagnostics is not None:
             trace_payload["persistent_memory"] = memory_diagnostics
         self.trace_logger.log(trace_payload)
         return response
+
+    def _generate_answer(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        on_delta: Callable[[str], None] | None,
+        cancel_event: threading.Event | None,
+    ) -> str:
+        stream = getattr(self.ollama_client, "chat_stream", None)
+        if on_delta is None or not callable(stream):
+            return self.ollama_client.generate(system_prompt, user_prompt, task="chat")
+        parts: list[str] = []
+        final: LLMResponse | None = None
+        iterator = stream(LLMRequest.from_prompts(system_prompt, user_prompt, task="chat"))
+        try:
+            for item in iterator:
+                if isinstance(item, str):
+                    if item:
+                        parts.append(item)
+                        on_delta(item)
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
+                else:
+                    final = item
+        finally:
+            close = getattr(iterator, "close", None)
+            if callable(close):
+                close()
+        text = (final.content if final is not None and final.content.strip() else "".join(parts)).strip()
+        if not text:
+            raise OllamaClientError("Ollama response did not contain usable content")
+        return text
 
     def summarize_for_chat(self, user_message: str, detailed_response: str, project_id: str | None = None) -> str:
         _ = project_id
@@ -318,7 +378,7 @@ class AssistantCoordinator:
         )
 
         try:
-            summary = self.ollama_client.generate(self._summary_system_prompt(), summary_prompt)
+            summary = self.ollama_client.generate(self._summary_system_prompt(), summary_prompt, task="summary")
         except (OllamaClientError, TimeoutError, OSError, ValueError) as error:
             logger.warning("Falling back to deterministic chat summary: %s", error)
             return self._fallback_chat_summary(raw)
@@ -479,7 +539,7 @@ class AssistantCoordinator:
             f"Detailed response:\n{raw}"
         )
         try:
-            payload = self.ollama_client.generate(self._follow_up_system_prompt(), prompt)
+            payload = self.ollama_client.generate(self._follow_up_system_prompt(), prompt, task="follow_up")
         except (OllamaClientError, TimeoutError, OSError, ValueError) as error:
             logger.warning("Failed to generate follow-up actions: %s", error)
             return []
@@ -538,7 +598,7 @@ class AssistantCoordinator:
         )
 
         try:
-            payload = self.ollama_client.generate(self._topic_patch_system_prompt(), prompt)
+            payload = self.ollama_client.generate(self._topic_patch_system_prompt(), prompt, task="topic_patch")
         except (OllamaClientError, TimeoutError, OSError, ValueError) as error:
             logger.warning("Topic patch generation failed: %s", error)
             return None
@@ -1393,7 +1453,7 @@ class AssistantCoordinator:
             f"File path: {resolved}\n\n"
             f"Content:\n{content}"
         )
-        return self.ollama_client.generate(self._build_system_prompt(user_message, project_id), prompt)
+        return self.ollama_client.generate(self._build_system_prompt(user_message, project_id), prompt, task="summary")
 
     def _open_path(self, path: Path) -> str:
         try:

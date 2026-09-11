@@ -1,11 +1,13 @@
-﻿from __future__ import annotations
+# File: core/documents/scanner.py
+
+from __future__ import annotations
 
 import hashlib
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Any
 
 from core.documents.catalog import DocumentCatalog
 from core.documents.extractors.base import DocumentExtractor
@@ -21,9 +23,6 @@ class ScanResult:
     error_files: int
 
 
-# Circuit breaker for a directory that fails systematically (permissions, a bad
-# mount). It must stay above 1 so that one unreadable file does not drop every
-# other file in its directory from the index.
 _MAX_DIRECTORY_ERRORS = 10
 
 
@@ -129,22 +128,7 @@ class DocumentScanner:
                         existing = self.catalog.get_by_path(absolute_path)
 
                         if stat.st_size > self.config.max_file_size_bytes:
-                            payload = {
-                                "id": existing.id if existing is not None else self._file_id(absolute_path),
-                                "path": absolute_path,
-                                "name": file_path.name,
-                                "extension": extension,
-                                "size": int(stat.st_size),
-                                "created_at": self._timestamp_iso(stat.st_ctime),
-                                "modified_at": self._timestamp_iso(stat.st_mtime),
-                                "indexed_at": self._utc_now_iso(),
-                                "content_hash": existing.content_hash if existing is not None else "",
-                                "content_status": "skipped_size_limit",
-                                "extracted_text": "",
-                                "extractor": "none",
-                                "error": f"Skipped due to size > {self.config.max_file_size_mb}MB",
-                            }
-                            self.catalog.upsert_document(payload)
+                            self._store_oversized(file_path, absolute_path, stat, existing)
                             if existing is None:
                                 indexed_files = indexed_files + 1
                             else:
@@ -152,31 +136,11 @@ class DocumentScanner:
                             continue
 
                         scanned_files = scanned_files + 1
-                        created_at = self._timestamp_iso(stat.st_ctime)
-                        modified_at = self._timestamp_iso(stat.st_mtime)
-
-                        if existing is not None and existing.size == stat.st_size and existing.modified_at == modified_at:
+                        if self._is_unchanged(existing, stat):
                             continue
 
                         try:
-                            extracted = self._extract(file_path)
-                            content_hash = self._sha256(file_path)
-                            payload = {
-                                "id": self._file_id(absolute_path),
-                                "path": absolute_path,
-                                "name": file_path.name,
-                                "extension": extension,
-                                "size": int(stat.st_size),
-                                "created_at": created_at,
-                                "modified_at": modified_at,
-                                "indexed_at": self._utc_now_iso(),
-                                "content_hash": content_hash,
-                                "content_status": extracted.content_status,
-                                "extracted_text": extracted.text,
-                                "extractor": extracted.extractor,
-                                "error": extracted.error,
-                            }
-                            self.catalog.upsert_document(payload)
+                            extracted = self._store_extracted(file_path, absolute_path, stat)
                         except Exception as error:
                             self.catalog.log_scan_error(absolute_path, str(error))
                             mark_directory_error(file_path.parent)
@@ -269,6 +233,121 @@ class DocumentScanner:
             return [DocumentSearchRoot(path=resolved_candidate)]
 
         raise ValueError(f"Unknown configured root or directory not found: {root_filter}")
+
+
+    def root_for(self, path: Path) -> DocumentSearchRoot | None:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        for root in self.config.roots:
+            root_config = coerce_document_search_root(root)
+            try:
+                resolved.relative_to(root_config.path.resolve())
+            except (ValueError, OSError):
+                continue
+            return root_config
+        return None
+
+    def is_indexable(self, path: Path) -> bool:
+        if path.suffix.lower() not in self.config.supported_extensions:
+            return False
+        root_config = self.root_for(path)
+        if root_config is None:
+            return False
+        try:
+            relative = path.resolve().relative_to(root_config.path.resolve())
+        except (ValueError, OSError):
+            return False
+        parents = list(relative.parents)[::-1][1:]
+        for ancestor in parents:
+            if self.config.is_excluded_directory(root_config, ancestor, ancestor.name):
+                return False
+        return True
+
+    def index_file(self, path: Path) -> str:
+        file_path = Path(path)
+        if not self.is_indexable(file_path):
+            return "ignored"
+        try:
+            stat = file_path.stat()
+        except OSError:
+            return "error"
+        if not file_path.is_file():
+            return "ignored"
+        absolute_path = str(file_path.resolve())
+        existing = self.catalog.get_by_path(absolute_path)
+        if stat.st_size > self.config.max_file_size_bytes:
+            self._store_oversized(file_path, absolute_path, stat, existing)
+            return "skipped"
+        if self._is_unchanged(existing, stat):
+            return "unchanged"
+        try:
+            extracted = self._store_extracted(file_path, absolute_path, stat)
+        except Exception as error:
+            self.catalog.log_scan_error(absolute_path, str(error))
+            return "error"
+        if extracted.content_status == "error":
+            self.catalog.log_scan_error(absolute_path, extracted.error or "Extraction failed")
+        return "indexed" if existing is None else "updated"
+
+    def remove_path(self, path: Path) -> int:
+        try:
+            absolute = str(Path(path).resolve())
+        except OSError:
+            absolute = str(path)
+        record = self.catalog.get_by_path(absolute)
+        if record is not None:
+            self.catalog.remove_paths([absolute])
+            return 1
+        under = self.catalog.list_paths_under_roots([Path(absolute)])
+        if under:
+            self.catalog.remove_paths(list(under))
+        return len(under)
+
+    def _is_unchanged(self, existing: Any, stat: os.stat_result) -> bool:
+        return existing is not None and existing.size == stat.st_size and existing.modified_at == self._timestamp_iso(stat.st_mtime)
+
+    def _store_oversized(self, file_path: Path, absolute_path: str, stat: os.stat_result, existing: Any) -> None:
+        self.catalog.upsert_document(
+            {
+                "id": existing.id if existing is not None else self._file_id(absolute_path),
+                "path": absolute_path,
+                "name": file_path.name,
+                "extension": file_path.suffix.lower(),
+                "size": int(stat.st_size),
+                "created_at": self._timestamp_iso(stat.st_ctime),
+                "modified_at": self._timestamp_iso(stat.st_mtime),
+                "indexed_at": self._utc_now_iso(),
+                "content_hash": existing.content_hash if existing is not None else "",
+                "content_status": "skipped_size_limit",
+                "extracted_text": "",
+                "extractor": "none",
+                "error": f"Skipped due to size > {self.config.max_file_size_mb}MB",
+            }
+        )
+
+    def _store_extracted(self, file_path: Path, absolute_path: str, stat: os.stat_result) -> ExtractedDocument:
+        extracted = self._extract(file_path)
+        content_hash = self._sha256(file_path)
+        self.catalog.upsert_document(
+            {
+                "id": self._file_id(absolute_path),
+                "path": absolute_path,
+                "name": file_path.name,
+                "extension": file_path.suffix.lower(),
+                "size": int(stat.st_size),
+                "created_at": self._timestamp_iso(stat.st_ctime),
+                "modified_at": self._timestamp_iso(stat.st_mtime),
+                "indexed_at": self._utc_now_iso(),
+                "content_hash": content_hash,
+                "content_status": extracted.content_status,
+                "extracted_text": extracted.text,
+                "extractor": extracted.extractor,
+                "error": extracted.error,
+            }
+        )
+        return extracted
 
     def _extract(self, file_path: Path) -> ExtractedDocument:
         for extractor in self.extractors:

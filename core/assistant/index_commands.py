@@ -1,4 +1,4 @@
-﻿# File: core/assistant/index_commands.py
+# File: core/assistant/index_commands.py
 
 from __future__ import annotations
 
@@ -26,12 +26,14 @@ class IndexCommandHandler:
         config_path: Path | None = None,
         output: OutputSink | None = None,
         prompt_provider: Callable[[PromptRequest | str], str] | None = None,
+        watch_service: Any | None = None,
     ) -> None:
         self.scanner = scanner
         self.catalog = catalog
         self.config_path = config_path
         self.output = output
         self.prompt_provider = prompt_provider
+        self.watch_service = watch_service
         self._progress_line_length = 0
         self._progress_last_update = 0.0
         self._active_progress_folder: str | None = None
@@ -46,7 +48,7 @@ class IndexCommandHandler:
 
         parts = user_input.strip().split()
         if len(parts) == 1:
-            emit_output(self.output, "Usage: /index status|scan|scan <root>|errors")
+            emit_output(self.output, "Usage: /index status|scan|scan <root>|errors|watch")
             return True
 
         command = parts[1].lower()
@@ -55,6 +57,24 @@ class IndexCommandHandler:
             last_scan = self.catalog.get_scan_state("last_scan_at") or "never"
             emit_output(self.output, f"Indexed documents: {count}")
             emit_output(self.output, f"Last scan: {last_scan}")
+            return True
+
+        if command == "watch":
+            if self.watch_service is None:
+                emit_output(self.output, "Change watching is not enabled.")
+                return True
+            status = self.watch_service.status()
+            lines = [
+                f"Change watching: {'running' if status['running'] else 'stopped'} on {len(status['roots'])} root(s); "
+                f"{status['events']} events seen, {status['indexed']} indexed, {status['updated']} updated, {status['removed']} removed, "
+                f"{status['errors']} errors, {status['pending']} pending"
+            ]
+            if status.get("last_change"):
+                lines.append(f"Last change applied: {status['last_change']}")
+            if status.get("last_error"):
+                lines.append(f"Last error: {status['last_error']}")
+            lines.append(f"Safety-net rescan every {status['rescan_interval_hours']:g} h")
+            emit_output(self.output, "\n".join(lines))
             return True
 
         if command == "scan":

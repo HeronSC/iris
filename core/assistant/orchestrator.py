@@ -1,3 +1,5 @@
+# File: core/assistant/orchestrator.py
+
 from __future__ import annotations
 
 import json
@@ -223,10 +225,7 @@ class AssistantOrchestrator:
             "Do not answer the user's question directly."
         )
 
-        # A transport failure is an error, not an ambiguous user message: let it
-        # propagate so the application layer can report it. Only an unusable
-        # decision payload falls through to the clarification path below.
-        payload = self.llm_client.generate(self._decision_system_prompt(), prompt)
+        payload = self.llm_client.generate(self._decision_system_prompt(), prompt, task="decision")
 
         parsed = self._parse_json_object(payload)
         if not isinstance(parsed, dict):

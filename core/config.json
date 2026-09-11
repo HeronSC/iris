@@ -5,9 +5,55 @@
   "proposal_path": "E:\\AI\\Iris\\Data\\Proposals",
   "audit_path": "E:\\AI\\Iris\\Data\\Audit",
   "model": "qwen3:8b",
+  "models": {
+    "tasks": {
+      "code": "qwen2.5-coder:7b",
+      "embedding": "nomic-embed-text",
+      "vision": "qwen2.5vl:7b"
+    },
+    "fallbacks": {
+      "qwen3:8b": [
+        "mistral-small:24b"
+      ]
+    },
+    "planning_tasks": [
+      "intent",
+      "decision"
+    ]
+  },
   "image_server": "http://127.0.0.1:8188",
   "llm_server": "http://127.0.0.1:11434",
   "llm_timeout_seconds": 180,
+  "metrics_path": "E:\\AI\\Iris\\Data\\Metrics\\metrics.db",
+  "knowledge": {
+    "embeddings": {
+      "enabled": true,
+      "skip_sources": [
+        "bot:",
+        "iris:shadow",
+        "baseline:"
+      ],
+      "refresh_seconds": 120
+    }
+  },
+  "notifications": {
+    "enabled": true,
+    "quiet_hours": ""
+  },
+  "mcp_servers": {
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git"
+      ],
+      "enabled": true,
+      "bind": {
+        "repo_path": "E:\\AI\\iris"
+      },
+      "no_confirm": [],
+      "confirm": []
+    }
+  },
   "conversation": {
     "recent_message_limit": 16,
     "summary_trigger_message_count": 24,

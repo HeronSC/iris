@@ -1,3 +1,5 @@
+# File: core/knowledge/ranking.py
+
 from __future__ import annotations
 
 import re
@@ -7,10 +9,6 @@ from datetime import datetime, timezone
 from core.knowledge.models import MemoryRecord, MemoryStatus
 
 
-#: Words carrying no signal. Kept narrow for domain content, which is terse and
-#: technical, but the question words earn their place: these terms also build
-#: the search match, and a match is only as narrow as its commonest term, so
-#: "what did we see about volume" should search for volume and nothing else.
 _STOPWORDS = frozenset(
     """a an and are as at be been being by can could did do does for from had
     has have he her him his how i in into is it its me my of on or our she
@@ -20,8 +18,6 @@ _STOPWORDS = frozenset(
 
 _TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9_]*|\d+(?:\.\d+)?")
 
-#: How much a record's own standing counts, before any text match. A rule we
-#: accepted should outrank an idea we have not tested, all else equal.
 _STATUS_PRIOR: dict[MemoryStatus, float] = {
     MemoryStatus.ACCEPTED: 0.20,
     MemoryStatus.SUPPORTED: 0.15,
@@ -34,11 +30,6 @@ _STATUS_PRIOR: dict[MemoryStatus, float] = {
 
 
 def tokenize(text: str) -> set[str]:
-    """Words and numbers, lowercased.
-
-    Numbers are kept: "RSI 47" and "2.1x" are the content in an observation,
-    not noise. Identifiers keep their shape so a symbol stays one token.
-    """
     return {
         token.lower()
         for token in _TOKEN.findall(text or "")
@@ -47,7 +38,6 @@ def tokenize(text: str) -> set[str]:
 
 
 def record_tokens(record: MemoryRecord) -> set[str]:
-    """Everything about a record worth matching on, content and structured data."""
     tokens = tokenize(record.content)
     tokens |= tokenize(record.topic.replace("/", " "))
     for key, value in record.data.items():
@@ -57,18 +47,12 @@ def record_tokens(record: MemoryRecord) -> set[str]:
 
 
 def overlap(query_tokens: set[str], target_tokens: set[str]) -> float:
-    """Share of the query found in the target, in 0..1.
-
-    Coverage of the query rather than Jaccard: a long record should not be
-    penalised for containing more than was asked about.
-    """
     if not query_tokens or not target_tokens:
         return 0.0
     return len(query_tokens & target_tokens) / len(query_tokens)
 
 
 def recency_weight(record: MemoryRecord, *, now: datetime | None = None, half_life_days: float = 30.0) -> float:
-    """Newer records count for more, decaying smoothly rather than by cliff."""
     stamp = record.occurred_at or record.created_at
     moment = _parse(stamp)
     if moment is None:
@@ -92,14 +76,10 @@ def score(
     now: datetime | None = None,
     text_weight: float = 1.0,
     recency_weight_factor: float = 0.25,
+    semantic: float | None = None,
 ) -> ScoredRecord:
-    """Score one record, keeping the parts so a ranking can be explained.
-
-    The weights are a starting point, not a tuned model. They are exposed as
-    arguments so they can be moved on evidence from real retrievals rather
-    than by editing constants.
-    """
-    text = overlap(query_tokens, record_tokens(record)) if query_tokens else 0.0
+    lexical = overlap(query_tokens, record_tokens(record)) if query_tokens else 0.0
+    text = max(lexical, semantic) if semantic is not None else lexical
     recency = recency_weight(record, now=now)
     prior = _STATUS_PRIOR.get(record.status, 0.0)
     reasons = {
@@ -107,20 +87,18 @@ def score(
         "recency": round(recency * recency_weight_factor, 4),
         "status": round(prior, 4),
     }
-    return ScoredRecord(record=record, score=round(sum(reasons.values()), 4), reasons=reasons)
+    total = round(reasons["text"] + reasons["recency"] + reasons["status"], 4)
+    if semantic is not None:
+        reasons["lexical"] = round(lexical, 4)
+        reasons["semantic"] = round(semantic, 4)
+    return ScoredRecord(record=record, score=total, reasons=reasons)
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token count. Four characters per token is close enough for a budget."""
     return max(1, len(text or "") // 4)
 
 
 def fit_to_budget(scored: list[ScoredRecord], max_tokens: int | None) -> tuple[list[ScoredRecord], int]:
-    """Take records in order until the budget runs out.
-
-    Retrieval that overflows the prompt is worse than retrieval that returns
-    less, so this truncates rather than summarising.
-    """
     if max_tokens is None:
         return list(scored), sum(estimate_tokens(item.record.content) for item in scored)
     kept: list[ScoredRecord] = []

@@ -1,13 +1,28 @@
+# File: core/actions/implementations/scan_document_root.py
+
 from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from core.actions.executor import ActionExecutionContext
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
+from core.tools.models import PermissionLevel, ToolDefinition
+
+
+class ScanDocumentRootArguments(BaseModel):
+    root: str = Field(description="Absolute folder path to index, for example 'D:\\Projects\\Docs'")
 
 
 class ScanDocumentRootAction:
     name = "scan_document_root"
+    definition = ToolDefinition(
+        name="scan_document_root",
+        description="Index a folder so its documents become searchable. Use when the user names a specific folder path to index or scan.",
+        arguments=ScanDocumentRootArguments,
+        permission=PermissionLevel.READ,
+    )
 
     def validate(self, request: ActionRequest, context: ActionExecutionContext) -> ValidationResult:
         if context.document_scanner is None:

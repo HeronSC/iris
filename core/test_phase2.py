@@ -1,11 +1,16 @@
-﻿import json
+# File: core/test_phase2.py
+
+import json
 import tempfile
 import unittest
 from io import StringIO
 from pathlib import Path
 from contextlib import redirect_stdout
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from urllib import error as urllib_error
+
+import httpx
+import ollama
 
 from core.assistant.coordinator import AssistantCoordinator
 from core.assistant.project_command import ProjectCommandHandler
@@ -17,6 +22,7 @@ from core.conversation.session import ConversationSession
 from core.conversation.session_manager import SessionManager
 from core.conversation.session_repository import SessionRepository
 from core.conversation.session_summarizer import SessionSummarizer
+from core.llm.models import LLMRequest, ToolSpec
 from core.llm.ollama_client import OllamaClient, OllamaClientError
 from core.profile.store import MemoryStore
 from core.profile.writer import MemoryWriter
@@ -35,46 +41,83 @@ class ConversationSessionTests(unittest.TestCase):
 
 
 class OllamaClientTests(unittest.TestCase):
-    def test_generate_parses_successful_response(self) -> None:
-        client = OllamaClient("http://localhost:11434", "qwen")
-        response = Mock()
-        response.__enter__ = Mock(return_value=response)
-        response.__exit__ = Mock(return_value=False)
-        response.read.return_value = b'{"message": {"content": "hello"}}'
+    def _client(self) -> OllamaClient:
+        return OllamaClient("http://127.0.0.1:11434", "qwen")
 
-        with patch("core.llm.ollama_client.request.urlopen", return_value=response):
+    def test_generate_parses_successful_response(self) -> None:
+        client = self._client()
+        raw = SimpleNamespace(
+            model="qwen",
+            done_reason="stop",
+            prompt_eval_count=12,
+            eval_count=3,
+            total_duration=2_000_000,
+            load_duration=0,
+            message=SimpleNamespace(content="hello", thinking=None, tool_calls=None),
+        )
+        with patch.object(client._client, "chat", return_value=raw):
             self.assertEqual(client.generate("system", "user"), "hello")
+        self.assertIsNotNone(client.last_response)
+        self.assertEqual(client.last_response.usage.prompt_tokens, 12)
+        self.assertEqual(client.last_response.usage.completion_tokens, 3)
+        self.assertEqual(client.last_response.usage.total_duration_ms, 2.0)
+
+    def test_chat_returns_tool_calls_with_parsed_arguments(self) -> None:
+        client = self._client()
+        raw = SimpleNamespace(
+            model="qwen",
+            done_reason="stop",
+            message=SimpleNamespace(
+                content="",
+                thinking=None,
+                tool_calls=[
+                    SimpleNamespace(function=SimpleNamespace(name="launch_application", arguments={"app_name": "code"})),
+                    SimpleNamespace(function=SimpleNamespace(name="open_url", arguments='{"shortcut": "github"}')),
+                ],
+            ),
+        )
+        with patch.object(client._client, "chat", return_value=raw) as chat:
+            request = LLMRequest.from_prompts(
+                "system",
+                "user",
+                tools=(ToolSpec(name="launch_application", description="Launch", parameters={"type": "object"}),),
+                think=False,
+            )
+            response = client.chat(request)
+        self.assertTrue(response.has_tool_calls)
+        self.assertEqual(response.tool_calls[0].name, "launch_application")
+        self.assertEqual(response.tool_calls[0].arguments, {"app_name": "code"})
+        self.assertEqual(response.tool_calls[1].arguments, {"shortcut": "github"})
+        kwargs = chat.call_args.kwargs
+        self.assertEqual(kwargs["model"], "qwen")
+        self.assertEqual(kwargs["think"], False)
+        self.assertEqual(kwargs["tools"][0]["function"]["name"], "launch_application")
+        self.assertEqual([m["role"] for m in kwargs["messages"]], ["system", "user"])
 
     def test_generate_report_connection_failures(self) -> None:
-        client = OllamaClient("http://localhost:11434", "qwen")
-
-        with patch("core.llm.ollama_client.request.urlopen", side_effect=OSError("boom")):
-            with self.assertRaises(OllamaClientError):
+        client = self._client()
+        with patch.object(client._client, "chat", side_effect=httpx.ConnectError("boom")):
+            with self.assertRaises(OllamaClientError) as error:
                 client.generate("system", "user")
+        self.assertIn("connection failed", str(error.exception))
+
+    def test_generate_reports_timeouts(self) -> None:
+        client = self._client()
+        with patch.object(client._client, "chat", side_effect=httpx.ReadTimeout("slow")):
+            with self.assertRaises(OllamaClientError) as error:
+                client.generate("system", "user")
+        self.assertIn("timed out", str(error.exception))
 
     def test_generate_reports_empty_response(self) -> None:
-        client = OllamaClient("http://localhost:11434", "qwen")
-        response = Mock()
-        response.__enter__ = Mock(return_value=response)
-        response.__exit__ = Mock(return_value=False)
-        response.read.return_value = b""
-
-        with patch("core.llm.ollama_client.request.urlopen", return_value=response):
+        client = self._client()
+        raw = SimpleNamespace(model="qwen", message=SimpleNamespace(content="", thinking=None, tool_calls=None))
+        with patch.object(client._client, "chat", return_value=raw):
             with self.assertRaises(OllamaClientError):
                 client.generate("system", "user")
 
     def test_generate_reports_http_error_detail(self) -> None:
-        client = OllamaClient("http://localhost:11434", "qwen")
-        http_error = urllib_error.HTTPError(
-            url="http://localhost:11434/api/chat",
-            code=404,
-            msg="Not Found",
-            hdrs=None,
-            fp=None,
-        )
-        http_error.read = Mock(return_value=b'{"error":"model not found"}')
-
-        with patch("core.llm.ollama_client.request.urlopen", side_effect=http_error):
+        client = self._client()
+        with patch.object(client._client, "chat", side_effect=ollama.ResponseError("model not found", 404)):
             with self.assertRaises(OllamaClientError) as error:
                 client.generate("system", "user")
 
@@ -353,7 +396,6 @@ class CoordinatorSummaryTriggerTests(unittest.TestCase):
             self.assertEqual(messages[1]["role"], "system")
             self.assertEqual(messages[1]["content"], "Assistant response failed.")
             self.assertEqual(messages[1].get("metadata", {}).get("error_type"), "OllamaClientError")
-
 
 
 if __name__ == "__main__":

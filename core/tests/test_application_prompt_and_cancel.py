@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/tests/test_application_prompt_and_cancel.py
+
+from __future__ import annotations
 
 import tempfile
 import threading
@@ -167,7 +169,7 @@ class _CoordinatorFileIntentPipelineStub:
 
 
 class _CoordinatorLLMStub:
-    def generate(self, _system_prompt: str, _user_message: str) -> str:
+    def generate(self, _system_prompt: str, _user_message: str, task: str | None = None) -> str:
         return "Monotremes are mammals that lay eggs; the main living examples are the platypus and echidnas."
 
 
@@ -178,7 +180,7 @@ class _SummaryLLMStub:
         self.system_prompt: str | None = None
         self.user_prompt: str | None = None
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
         if self.error is not None:
@@ -192,7 +194,7 @@ class _CaptureLLMStub:
         self.system_prompt: str | None = None
         self.user_prompt: str | None = None
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
         return self.response

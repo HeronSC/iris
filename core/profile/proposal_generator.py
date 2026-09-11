@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/profile/proposal_generator.py
+
+from __future__ import annotations
 
 import json
 from typing import Any
@@ -23,7 +25,7 @@ class MemoryProposalGenerator:
 
         try:
             prompt = self._build_prompt(messages, existing_memory)
-            raw = self.llm_client.generate("You are a memory proposal generator.", prompt)
+            raw = self.llm_client.generate("You are a memory proposal generator.", prompt, task="proposal")
             payload = json.loads(raw)
             return self._parse_payload(payload)
         except (json.JSONDecodeError, TypeError, ValueError, ProposalValidationError) as error:

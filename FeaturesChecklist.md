@@ -30,21 +30,21 @@ Written down so the unchecked boxes below read as "not yet" rather than "nothing
 
 | Area | State | Where |
 |---|---|---|
-| Local model access | Ollama only (`qwen3:8b`), no router | `core/llm/ollama_client.py` |
+| Local model access | Official `ollama` package behind a messages/tools/usage seam; still one model, no router | `core/llm/ollama_client.py`, `core/llm/models.py` |
 | Memory and knowledge layer | Built: facts, observations, outcomes, decisions, hypotheses | `core/knowledge/` |
 | Learning loop | Built: evidence, appraisal, promotion gate, review queue | `core/knowledge/hypotheses.py`, `review.py`, `appraisal.py` |
 | Conversation, session, topic state | Built | `core/conversation/` |
 | Document indexing and search | Built for pdf/docx/xlsx/csv/text | `core/documents/` |
-| Actions and tools | Fixed set: open file/folder/url, launch app, clipboard, config/profile | `core/actions/implementations/` |
+| Actions and tools | Native actions plus MCP tools, all declared in one registry and run through one executor | `core/actions/`, `core/tools/` |
 | Capability/provider routing | Built for a fixed provider list (weather, news, stocks, time, lookup) | `core/assistant/general_knowledge_router.py` |
-| Intent routing and planning | Built | `core/assistant/intent_router.py`, `action_planner.py` |
+| Intent routing and planning | Built; tool choice is native Ollama tool-calling over the registry | `core/assistant/intent_router.py`, `action_planner.py` |
 | Audit log | Memory changes and actions only, not general | `core/audit/logger.py` |
 | Request tracing | Built, optional | `core/conversation/request_trace.py` |
 | Desktop UI | PySide6 desktop app | `ui/main.py` |
 | HTTP surface | FastAPI | `serve.py`, `core/server/` |
 | Voice | Empty package, nothing built | `core/voice/` |
 | Trading bot integration | Built: bot posts observations, calls `/assess`; Iris scores and compares | `core/server/app.py`, bot's `bot/api/iris/client.py` |
-| Generic tool/plugin registry | Not built (the package is empty) | `core/tools/` |
+| Generic tool/plugin registry | Built 2026-09-10: `ToolDefinition` + `ToolRegistry`, MCP client, `/tools` command | `core/tools/` |
 
 ---
 
@@ -95,16 +95,28 @@ single feature is what made those features look larger than they are.
 - [ ] Decide a forgetting policy: expiry, decay, relevance pruning, or never forget.
 - [ ] Let the user browse, correct, and delete memories directly, not only through conversation.
 - [ ] Export and back up memory in a readable format (11).
-- [ ] **Decided 2026-09-10:** add embedding retrieval beside FTS5, not instead of it.
+- [x] **Decided and built 2026-09-10:** add embedding retrieval beside FTS5, not instead of it.
+	-> `core/knowledge/embeddings.py`; fused in `retrieval.py`; `/knowledge embeddings` shows status.
 	Embeddings from `nomic-embed-text` via Ollama; vectors stored in `knowledge.db` with `sqlite-vec`,
 	so they share the store's transactions and backup. FTS5 and vector KNN are fused, then the
 	existing scorer (recency, prior, diagnostics) applies unchanged. `core/knowledge/` otherwise stays.
 	Considered and passed over: LanceDB (pyarrow), Chroma (onnxruntime, separate directory),
 	FAISS/hnswlib (separate index files to keep in sync), Mem0/Letta/Zep (server-shaped, and they
 	solve conversational recall, which is not the slice that needs help).
-- [ ] Embed everything except bot-generated observations — those are near-identical prose and are
-	already matched by numeric features in the appraisal.
-- [ ] Load-test retrieval at ~400k records (a year of bot volume) before trusting it at scale.
+- [x] Embed everything except machine-generated records — those are near-identical prose and are
+	already matched by numeric features in the appraisal. Built 2026-09-10 as a source-prefix rule
+	(`bot:`, `iris:shadow`, `baseline:`; `knowledge.embeddings.skip_sources` in config). Measured on
+	the real store: embedding the templated evaluator/shadow decisions too let them crowd out the
+	human-written records in every nearest-neighbour search, so the rule covers all kinds, not
+	only observations. 827 of 1,715 records embed, in about 5 s.
+- [x] Load-test retrieval at ~400k records (a year of bot volume) before trusting it at scale.
+	Run 2026-09-10 with random 768-d vectors: KNN is linear, ~2.3 ms per 1,000 rows (100k rows
+	= 220-250 ms; 400k would be ~0.9 s). Two findings that shaped the code: (1) machine-generated
+	records are excluded from the index, so the practical volume is human-written records — 827
+	today, growing by hundreds a year, not hundreds of thousands; (2) sqlite-vec 0.1.9 segfaults
+	intermittently on insert on this machine (about one crash per 50k-100k rows, any batch size),
+	so vector writes run in a child interpreter (`core/knowledge/vec_writer.py`) and a crash is a
+	failed pass to retry, not a dead Iris. A 0.1.10 pre-release exists; not adopted without a yes.
 	sqlite-vec is brute-force KNN with no ANN index; this is where that either holds or does not.
 - [ ] Evaluate memory/orchestration frameworks before extending custom code:
 	Mem0, Letta, Zep, Graphiti, Semantic Kernel, LangGraph, AutoGen, LlamaIndex, Haystack.
@@ -127,27 +139,31 @@ single feature is what made those features look larger than they are.
 
 ### 2.3 Plugin and Tool Architecture
 
-- [ ] Make plugin and tool architecture a core feature early. `core/tools/` is still empty;
-	today's actions are a fixed set in `core/actions/implementations/`.
-- [ ] Define a standard interface for adding tools.
-- [ ] Let tools advertise their capabilities: name, purpose, typed arguments, cost, side effects.
-- [ ] Let Iris choose appropriate tools.
-- [ ] Declare each tool's permission level — read, write, execute. Enforcement lives in 10.
+- [x] Make plugin and tool architecture a core feature early. Built 2026-09-10: `core/tools/`
+	holds the registry; `core/actions/implementations/` declare themselves into it.
+- [x] Define a standard interface for adding tools. -> `core/tools/models.py` (`ToolDefinition`)
+- [~] Let tools advertise their capabilities: name, purpose, typed arguments, cost, side effects.
+	Name, purpose, typed arguments, permission, and confirmation are declared; cost is not yet.
+- [x] Let Iris choose appropriate tools. -> native tool-calling in `intent_router._classify`
+- [x] Declare each tool's permission level — read, write, execute. Enforcement lives in 10.
+	Declared on every tool; MCP tools derive it from their annotations.
 - [ ] Support dry-run / preview for any tool that writes.
 - [ ] Give tools a uniform error and timeout contract, and make long-running tools cancellable.
-- [ ] Log every tool invocation and result (2.8).
-- [ ] Version tools, so a saved workflow (8.3) does not silently change meaning.
-- [ ] Let a tool be disabled or sandboxed without removing it.
+- [~] Log every tool invocation and result (2.8). Actions and MCP calls are audited with the
+	tool name; command tools and knowledge providers are not yet.
+- [~] Version tools, so a saved workflow (8.3) does not silently change meaning. A `version`
+	field exists on the definition; nothing reads it yet.
+- [x] Let a tool be disabled or sandboxed without removing it. -> `/tools disable <name>`
 - [ ] Ensure future tools can be added without redesign — a new app integration (4) should be a
 	plugin, not a core change.
-- [ ] **Decided 2026-09-10:** one tool definition — name, description, arguments as a pydantic
+- [x] **Decided and built 2026-09-10:** one tool definition — name, description, arguments as a pydantic
 	model (JSON Schema for free), permission level, `requires_confirmation`. Native actions and the
 	knowledge providers (`CapabilityDefinition`, already this shape) both become it. The registry is
 	the only place a tool is declared; today adding one touches four.
-- [ ] **Decided 2026-09-10:** native Ollama tool-calling replaces the hand-written intent prompt in
+- [x] **Decided and built 2026-09-10:** native Ollama tool-calling replaces the hand-written intent prompt in
 	`_classify`. Verified on `qwen3:8b`: right tool, right arguments, no call for ordinary chat,
 	under a second. Synonyms and learned examples stay as the fast path in front of it.
-- [ ] **Decided 2026-09-10:** adopt the official `mcp` Python SDK as a *client*. MCP servers register
+- [x] **Decided and built 2026-09-10:** adopt the official `mcp` Python SDK as a *client*. MCP servers register
 	into the same registry and pass through the same validate → preview → confirm → audit spine in
 	`core/actions/executor.py`, which stays. Node 22 and `uv` are installed for launching servers.
 	Passed over: LangGraph, Semantic Kernel, pydantic-ai, smolagents — each wants to own the loop,
@@ -161,22 +177,27 @@ single feature is what made those features look larger than they are.
 "later" item — it is a principle of the project (1), not a deferral. The router's job is to choose
 among local models, not to decide when to leave the machine.
 
-- [ ] Do not permanently tie Iris to one model (for example, Qwen 8B). Currently hard-tied via
-	`config.json -> model`.
-- [ ] Support multiple specialized local models: chat, code, embedding, vision. Already pulled:
+- [x] Do not permanently tie Iris to one model (for example, Qwen 8B). `config.json -> model` is
+	now only the default; `models.tasks` routes per task class. -> `core/llm/router.py`
+- [~] Support multiple specialized local models: chat, code, embedding, vision. Routes exist for
+	code, embedding, and vision; no caller sends `code` or `vision` yet. Already pulled:
 	`qwen3:8b`, `qwen2.5-coder:7b`, `qwen2.5vl:7b`, `mistral-small:24b`, `nomic-embed-text`.
-- [ ] Route on explicit signals: task class (the nine call sites are seven classes — chat, summary,
+- [~] Route on explicit signals: task class (the nine call sites are seven classes — chat, summary,
 	follow-up, topic patch, intent, decision, proposal), required context size, latency budget,
-	and VRAM (the RTX 4060 Ti has 16 GB; two large models do not fit at once).
-- [ ] Fall back cleanly when a model or host is down.
-- [ ] Require structured output / tool-calling support from any model used for planning.
-- [ ] Track tokens and latency per request, and make it visible (2.8).
-- [ ] **Decided 2026-09-10:** replace the hand-rolled urllib client with the official `ollama`
+	and VRAM (the RTX 4060 Ti has 16 GB; two large models do not fit at once). Task class is
+	built 2026-09-10: every call site tags its task. Context size, latency, and VRAM are not.
+- [x] Fall back cleanly when a model or host is down. A missing model follows `models.fallbacks`
+	then the default; a down host raises one clear error and is recorded in metrics.
+- [~] Require structured output / tool-calling support from any model used for planning.
+	`/models` and startup warn when a planning model lacks the `tools` capability; not enforced.
+- [x] Track tokens and latency per request, and make it visible (2.8). -> `core/llm/metrics.py`,
+	`/models usage`, `/models recent`.
+- [x] **Decided and built 2026-09-10:** replace the hand-rolled urllib client with the official `ollama`
 	Python package — chat history, tools, streaming, and embeddings in one thin dependency.
 	Today `stream: False` is hard-coded, which is why 6 cannot stream.
-- [ ] **Decided 2026-09-10:** a thin in-house router behind the existing `LLMClient` seam. The
+- [x] **Decided and built 2026-09-10:** a thin in-house router behind the existing `LLMClient` seam. The
 	seam itself must grow from `(system, user) -> str` to a request/response that carries messages,
-	tools, and usage — that is the real work here.
+	tools, and usage — that is the real work here. -> `core/llm/models.py`, `core/llm/router.py`.
 	Passed over: LiteLLM (normalises to OpenAI shape, heavy for a one-runtime problem), OpenRouter
 	(hosted middleman), and the `anthropic` SDK (no cloud AI, by principle).
 - [ ] Options for local runtimes beyond Ollama, if ever needed: llama.cpp, LM Studio, vLLM.
@@ -212,10 +233,13 @@ for a problem Windows already solves.
 	reads like a file but downloads on access, so indexing an on-demand tree pulls down the whole
 	tree. Detect the placeholder attribute via `os.stat` and refuse to index it. Graph stays a 4.5
 	question for mail and calendar, not storage.
-- [ ] Know which roots are indexed, and keep the index current as files move.
-- [ ] **Decided 2026-09-10:** `watchdog` for change detection — native Windows change
+- [x] Know which roots are indexed, and keep the index current as files move. -> `/index status`,
+	`/index watch`; `core/documents/watch.py` applies creates, edits, moves, and deletes as they
+	happen. Built 2026-09-11.
+- [x] **Decided and built 2026-09-11:** `watchdog` for change detection — native Windows change
 	notifications, one dependency serving this item and 8.2's file watchers. Scheduled rescans stay
-	as the safety net, because a watcher can miss events during downtime.
+	as the safety net, because a watcher can miss events during downtime: a full rescan every 24 h
+	(`document_search.watch.rescan_interval_hours`), events coalesced for 2 s before applying.
 - [ ] Respect path allowlists and per-root permissions (10).
 
 ### 2.7 Result Contract
@@ -237,20 +261,26 @@ for a problem Windows already solves.
 ### 2.8 Observability and Audit
 
 - [~] Log what Iris does. Exists for memory changes and actions -> `core/audit/logger.py`;
-	not yet uniform across tools, models, and integrations.
-- [~] Trace a request end to end: intent, plan, tools called, model used, timing.
-	-> `core/conversation/request_trace.py`, optional today.
-- [ ] Answer "why did you do that?" from the trace, in the UI, without reading log files.
-- [ ] **Decided 2026-09-10:** `structlog` on top of stdlib `logging` — a request id bound once and
+	not yet uniform across tools, models, and integrations. Since 2026-09-10 every audit entry,
+	metrics row, trace entry, and log line carries the turn's `request_id`.
+- [x] Trace a request end to end: intent, plan, tools called, model used, timing.
+	-> `core/conversation/request_trace.py` (now with request id, model, usage), the `turn` log
+	line per request, `llm_requests`, and `actions.jsonl`, joined by `request_id`.
+- [x] Answer "why did you do that?" from the trace, in the UI, without reading log files.
+	-> `/why` (last request) or `/why <id>`: what was asked, how it was routed, the model calls
+	with tokens and latency, the actions and their outcome, any warnings. Built 2026-09-10.
+- [x] **Decided and built 2026-09-10:** `structlog` on top of stdlib `logging` — a request id bound once and
 	present on every line, while `mcp`, `uvicorn`, and other libraries still log through stdlib and
-	get captured. JSON lines, rotating file handler, size cap. Today: two `getLogger` sites, no
-	prints, and the request trace wired into the coordinator only.
-- [ ] **Decided 2026-09-10:** metrics are a SQLite table of per-request rows — model, tokens,
-	latency, tools called, outcome — queried by the UI. No metrics server. OpenTelemetry was
+	get captured. JSON lines, rotating file handler, size cap. -> `core/observability/`;
+	`Data\logs\iris.jsonl`, 10 MB x 5; configured by the three entry points, never by tests.
+- [~] **Decided 2026-09-10, table built:** metrics are a SQLite table of per-request rows — model, tokens,
+	latency, tools called, outcome — queried by the UI. No metrics server. -> `core/llm/metrics.py`
+	(`Data\Metrics\metrics.db`); read by `/models usage`, not yet by the UI. OpenTelemetry was
 	passed over: the API package arrived with `mcp`, but a useful setup means an exporter and a
 	Jaeger/Grafana backend, which is three services for one user on one machine.
-- [ ] Unify the two audit streams (`core/audit/logger.py` for memory, `core/actions/audit.py` for
-	actions) into one schema; the tool registry (2.3) then writes every invocation there.
+- [~] Unify the two audit streams (`core/audit/logger.py` for memory, `core/actions/audit.py` for
+	actions) into one schema; the tool registry (2.3) then writes every invocation there. Both
+	carry `request_id` now and `/why` reads them together; the files and schemas are still two.
 - [ ] Never log secrets or credential values (10).
 - [ ] Retention policy for traces, audit entries, and captured screen or camera data.
 
@@ -318,7 +348,7 @@ Git-specific items moved to 3.3.
 - [ ] Work items: read, link to commits and PRs, update.
 - [ ] Relate a work item or PR back to the project it belongs to (3.4).
 - [ ] Eventually support full development workflow management.
-- [ ] **Decided 2026-09-10:** Iris's first two MCP servers (2.3) — `mcp-server-git` (the reference
+- [~] **Decided 2026-09-10:** Iris's first two MCP servers (2.3) — `mcp-server-git` (the reference
 	server, via `uvx`) and Microsoft's official `@azure-devops/mcp` (via `npx`). Both pass through
 	the confirm/audit spine, so a commit or a work-item update still gets a preview. Read-only
 	surfaces first.
@@ -460,12 +490,14 @@ Presentation moved to 2.7 and 6. This section is about getting good information.
 - [ ] Image search.
 - [ ] Video search.
 - [ ] News and current information.
-- [ ] Fetch and extract page content, not just search snippets.
+- [x] Fetch and extract page content, not just search snippets. -> `core/web/fetch.py`, the
+	`fetch_web_page` tool. Built 2026-09-10.
 - [ ] Compare multiple sources, and say when they disagree.
 - [ ] Summarize findings, always with citations.
 - [ ] Preserve useful findings in Iris memory when appropriate (2.1), with the source URL and
 	the date retrieved.
-- [ ] Cache results, and respect rate limits and site terms.
+- [~] Cache results, and respect rate limits and site terms. Page fetches are cached for ten
+	minutes and throttled to one request per host per second; nothing reads robots.txt yet.
 - [ ] Return structured results per 2.7, so the UI can show thumbnails, previews, and cards.
 - [ ] **Decided 2026-09-10:** general search through a self-hosted SearXNG container — keyless,
 	web/images/videos/news in one JSON API, and only the query leaves the machine, under SearXNG's
@@ -474,8 +506,10 @@ Presentation moved to 2.7 and 6. This section is about getting good information.
 	Passed over: Tavily and similar (LLM-backed server-side — no other AI, 1), `ddgs` (scrapes
 	DuckDuckGo; ToS-grey and brittle), Brave Search API (clean, but keyed and identity-bearing;
 	the fallback if the container ever proves a burden).
-- [ ] **Decided 2026-09-10:** fetch with `httpx`, extract with `trafilatura` (installed) — clean
-	text, title, author, date. Playwright deferred until JavaScript-only pages actually block work;
+- [x] **Decided and built 2026-09-10:** fetch with `httpx`, extract with `trafilatura` (installed) — clean
+	text, title, author, date. Every result cites the final URL and fetch time (2.7). Guards: http(s)
+	only, no credentials in the URL, no loopback/private/link-local hosts (the LAN and Iris's own
+	services are reached through their integrations, never through a model-chosen URL), 3 MB cap. Playwright deferred until JavaScript-only pages actually block work;
 	it is a ~300 MB browser download.
 - [ ] The five keyless endpoints the fixed providers already call — DuckDuckGo instant answers,
 	Google News RSS, stooq, wttr.in, worldtimeapi — stay as they are.
@@ -484,25 +518,33 @@ Presentation moved to 2.7 and 6. This section is about getting good information.
 
 - [x] Ingest PDFs, Word, Excel, CSV, and text. -> `core/documents/extractors/`
 - [x] Search across documents. -> `core/documents/search_service.py`
-- [ ] Handle scanned documents and images of text (OCR).
+- [x] Handle scanned documents and images of text (OCR). Built 2026-09-10 for PDF pages with
+	no text layer -> `core/documents/ocr.py`; images on their own are not indexed yet.
 - [ ] Handle PowerPoint, saved email (.msg/.eml), and Markdown.
-- [ ] Preserve the structure worth having: headings, tables, and page numbers for citation.
+- [~] Preserve the structure worth having: headings, tables, and page numbers for citation.
+	Pages are marked `[page N]` in PDF text, Word tables render as rows, Excel as sheet/rows;
+	headings are not distinguished from paragraphs.
 - [ ] Extract and relate document content to projects (3.4).
-- [ ] Cite the exact location — file, page, sheet, cell — when answering from a document.
-- [ ] Keep the index current as files change (2.6).
+- [~] Cite the exact location — file, page, sheet, cell — when answering from a document. A
+	meaning match carries the passage and its page (or character offsets) in the search result;
+	sheet and cell are not tracked.
+- [x] Keep the index current as files change (2.6). Built 2026-09-11; the embedding pass picks
+	up the re-indexed file on its next run.
 - [ ] Later support editing and creating documents through proper integrations (4).
-- [ ] **Decided 2026-09-10:** the xlsx and docx extractors move from hand-rolled `zipfile` +
+- [x] **Decided and built 2026-09-10:** the xlsx and docx extractors move from hand-rolled `zipfile` +
 	`ElementTree` to `openpyxl` and `python-docx` (both installed). Headers, footers, tables, and
 	footnotes in Word; cached values, merged cells, and date serials in Excel — the cases the
 	hand-rolled parsers do not see.
-- [ ] **Decided 2026-09-10:** PDFs through `PyMuPDF` (installed), replacing `pypdf` — faster, real
+- [x] **Decided and built 2026-09-10:** PDFs through `PyMuPDF` (installed), replacing `pypdf` — faster, real
 	layout and tables, and it renders pages to images, which is the doorway to OCR.
-- [ ] **Decided 2026-09-10:** scans through Windows' built-in OCR engine via `winocr` (installed,
+- [x] **Decided and built 2026-09-10:** scans through Windows' built-in OCR engine via `winocr` (installed,
 	no separate installer), with `qwen2.5vl:7b` — already pulled — as the local vision fallback for
 	what OCR cannot read. Tesseract passed over as one more installer to maintain.
-- [ ] **Decided 2026-09-10:** document embeddings use the same `nomic-embed-text` as memory, in
+- [x] **Decided and built 2026-09-10:** document embeddings use the same `nomic-embed-text` as memory, in
 	their own `sqlite-vec` table inside `documents.db`. One model, two stores, each backed up with
-	its own database.
+	its own database. -> `core/documents/embeddings.py` over the shared `core/storage/vector_table.py`;
+	chunked (1,200 chars, overlapping), fused into `DocumentSearchService` as a meaning bonus with
+	the passage and page attached. `pypdf` can leave `requirements.txt` once the release venv is rebuilt.
 - [ ] Options still open: docling or unstructured for mixed corpora; python-pptx; extract-msg.
 
 ---
@@ -515,7 +557,10 @@ Rendering only. *What* gets rendered is defined in 2.7.
 - [ ] Design the UI as the central interface for all Iris capabilities.
 - [ ] Render every result type from 2.7: rich response panels, image previews, video previews,
 	syntax-highlighted code, diffs, file previews, tables, and search result cards.
-- [ ] Stream responses as they generate, and let the user stop a running request.
+- [x] Stream responses as they generate, and let the user stop a running request. Built
+	2026-09-10: the coordinator streams the main answer through `on_delta`, the service turns
+	fragments into `IrisEvent.delta`, the desktop window rewrites the placeholder bubble as text
+	arrives, and Stop closes the model stream and keeps what came through.
 - [ ] Show tool and action status clearly — what is running, what it touched, what it cost.
 - [ ] Show pending confirmations and approvals prominently (10).
 - [ ] Improve conversation and project organization (2.5, 3.4).
@@ -523,9 +568,9 @@ Rendering only. *What* gets rendered is defined in 2.7.
 - [ ] Keyboard-first navigation and a command palette.
 - [ ] Show sources, and let the user open the underlying file, page, or record in one click.
 - [ ] Dark mode and readable defaults at the screen sizes actually used.
-- [ ] **Decided 2026-09-10:** stay on PySide6, and render the result panels in an embedded
+- [~] **Decided 2026-09-10:** stay on PySide6, and render the result panels in an embedded
 	`QWebEngineView` — `QtWebEngineWidgets` is already present in the installed PySide6 6.11.
-	Streaming arrives with the `ollama` client change (2.4). A web front end on the FastAPI app was
+	Streaming arrived with the `ollama` client change (2.4) and is wired (above); the web view is not. A web front end on the FastAPI app was
 	passed over: a second TypeScript codebase for a phone view that 11 does not ask for yet. The
 	result contract (2.7) keeps that door open without touching core.
 
@@ -552,21 +597,24 @@ rules out every hosted speech API, which leaves a short, good list.
 
 ### 7.1 System, PC, and Diagnostics
 
-- [ ] Disk usage visibility (for example: "What is eating space on E:?").
-- [ ] Drive health (SMART), including the drives holding Iris data and camera footage.
-- [ ] Memory and RAM usage.
-- [ ] Process visibility.
-- [ ] CPU and GPU utilization, including VRAM — Iris shares the GPU with its own models.
+- [x] Disk usage visibility (for example: "What is eating space on E:?"). -> `disk_usage` tool.
+- [~] Drive health (SMART), including the drives holding Iris data and camera footage.
+	-> `drive_health` tool: Windows' health verdict per physical disk works unelevated; the SMART
+	counters (temperature, wear, errors) need an elevated process and are shown when readable.
+- [x] Memory and RAM usage. -> `system_overview` tool.
+- [x] Process visibility. -> `top_processes` tool.
+- [x] CPU and GPU utilization, including VRAM — Iris shares the GPU with its own models.
+	-> `system_overview` (psutil + `nvidia-smi`).
 - [ ] Temperatures and fan state.
-- [ ] Windows Event Logs.
-- [ ] Services status.
-- [ ] Startup applications.
+- [x] Windows Event Logs. -> `event_log_errors` tool (System and Application, level error and critical).
+- [x] Services status. -> `windows_services` tool.
+- [x] Startup applications. -> `startup_apps` tool.
 - [ ] Hardware information.
 - [ ] Installed software and pending Windows updates.
 - [ ] File-system tools.
 - [ ] Prefer native Windows APIs/interfaces and proven open-source utilities.
 - [ ] Expose all of this as declared tools (2.3), not ad-hoc shell calls.
-- [ ] **Decided 2026-09-10:** `psutil` (installed) for CPU, RAM, disk, processes, and network
+- [x] **Decided and built 2026-09-10:** `psutil` (installed) for CPU, RAM, disk, processes, and network
 	counters; `nvidia-smi` (present, driver 596) as a subprocess for GPU and VRAM; drive health from
 	Windows itself — `MSStorageDriver_FailurePredictStatus` over WMI and
 	`Get-StorageReliabilityCounter` for NVMe — with no installer; event logs, services, and startup
@@ -620,25 +668,33 @@ rules out every hosted speech API, which leaves a short, good list.
 
 ### 8.2 Notifications and Monitoring
 
-- [ ] Monitor conditions without repeated prompting.
-- [ ] Define a watcher once — source, condition, threshold, channel — rather than coding each one.
-- [ ] Watch PC health (7.1).
-- [ ] Watch network problems (7.2).
+- [x] Monitor conditions without repeated prompting. -> `core/watchers/`, `/watch`. Built 2026-09-10.
+- [x] Define a watcher once — source, condition, threshold, channel — rather than coding each one.
+	A watcher is data (`Data\Configuration\watchers.json`): a kind, its parameters, an interval,
+	and channels. Ten kinds today: disk free, RAM, CPU, VRAM, service stopped, drive unhealthy,
+	new event-log errors, path changed, path missing, host unreachable.
+- [x] Watch PC health (7.1). -> disk_free_below, memory_percent_above, cpu_percent_above, vram_percent_above, drive_unhealthy, event_log_errors.
+- [~] Watch network problems (7.2). -> host_unreachable (TCP port); nothing gateway-aware yet.
 - [ ] Watch development builds and pipelines (3.3).
 - [ ] Watch cameras. Camera-specific behaviour is in 9.1; this is the delivery side.
-- [ ] Watch files and folders (2.6).
-- [ ] Watch services.
+- [~] Watch files and folders (2.6). -> path_changed / path_missing by polling for notification
+	watchers; the document index itself uses `watchdog` events (2.6).
+- [x] Watch services. -> service_not_running.
 - [ ] Watch long-running jobs Iris itself started: renders, indexing, scans.
 - [ ] Add trading-related monitoring later.
-- [ ] Notify only on meaningful events: thresholds with hysteresis, deduplication, and suppression
-	of a condition already reported.
-- [ ] Respect quiet hours, and offer a "what did I miss" digest instead.
-- [ ] **Decided 2026-09-10:** `APScheduler` (installed) is the scheduler — in-process, with its
-	SQLite job store so watchers survive a restart. Iris had no scheduler at all; the only
+- [x] Notify only on meaningful events: thresholds with hysteresis, deduplication, and suppression
+	of a condition already reported. A transition notifies once, an ongoing condition at most every
+	`renotify_minutes`, clearing is reported past a margin (disk: 10% above the limit; RAM: 5 points).
+- [x] Respect quiet hours, and offer a "what did I miss" digest instead. `notifications.quiet_hours`
+	in config (or `/watch quiet 22:00-07:00`); held toasts go to `/watch missed` and one digest toast
+	at the end of the window.
+- [x] **Decided and built 2026-09-10:** `APScheduler` (installed) is the scheduler — in-process. Its
+	SQLite job store needs SQLAlchemy, which is not installed, so definitions and state live in Iris's
+	own JSON and every watcher is rescheduled at startup: watchers survive a restart all the same. Iris had no scheduler at all; the only
 	background machinery was cancel events and the UI's QThread. This also answers PhaseStatus's
 	open question of what triggers TEST and MEASURE without a person. Passed over: Windows Task
 	Scheduler (one process per job, no shared state), a hand-rolled asyncio loop.
-- [ ] **Decided 2026-09-10:** first delivery channel is Windows toast via `windows-toasts`
+- [x] **Decided and built 2026-09-10:** first delivery channel is Windows toast via `windows-toasts`
 	(installed, native WinRT). Phone push (ntfy, Pushover), email, and Teams are not built until
 	an away-from-desk need is real.
 

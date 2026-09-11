@@ -1,4 +1,4 @@
-﻿# File: core/actions/executor.py
+# File: core/actions/executor.py
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from core.documents.scanner import DocumentScanner
 from core.actions.policy import ActionPolicy
 from core.actions.registry import ActionRegistry
 from core.documents.catalog import DocumentCatalog
+from core.observability.request_context import current_request_id
 
 
 class SystemAdapter:
@@ -86,11 +87,28 @@ class ActionExecutor:
         self._expired_confirmation_notice = False
 
     def execute(self, request: ActionRequest) -> ActionResult:
-        action = self.registry.get(request.action)
-        if action is None:
+        tool_name = request.action
+        resolved = self.registry.resolve(request)
+        if resolved is None:
             result = ActionResult(status="failed", message="Unknown action type", action=request.action, error="unknown_action")
             self._log(request, result)
             return result
+        if not self.registry.is_enabled(tool_name):
+            result = ActionResult(status="failed", message=f"Tool is disabled: {tool_name}", action=request.action, error="tool_disabled")
+            self._log(request, result)
+            return result
+        if resolved.error:
+            result = ActionResult(status="failed", message=f"Invalid arguments: {resolved.error}", action=request.action, error="invalid_arguments")
+            self._log(request, result)
+            return result
+
+        action = resolved.action
+        request = resolved.request
+        definitions = [resolved.definition]
+        if resolved.definition.is_facet:
+            underlying = self.registry.definition(resolved.definition.target_action)
+            if underlying is not None:
+                definitions.append(underlying)
 
         validation = action.validate(request, self.context)
         if not validation.ok:
@@ -118,7 +136,10 @@ class ActionExecutor:
             workflow_parameters=request.workflow_parameters,
         )
 
-        if validation.requires_confirmation or self.policy.requires_confirmation(request):
+        needs_confirmation = validation.requires_confirmation or any(
+            self.policy.requires_confirmation(request, definition) for definition in definitions
+        )
+        if needs_confirmation:
             if self.has_pending_confirmation():
                 result = ActionResult(
                     status="rejected",
@@ -127,7 +148,7 @@ class ActionExecutor:
                     resolved_target=validation.resolved_target,
                     error="confirmation_already_pending",
                 )
-                self._log(request, result)
+                self._log(request, result, tool=tool_name)
                 return result
             self._pending_action = PendingAction(
                 original_request=request,
@@ -151,11 +172,11 @@ class ActionExecutor:
                 error="confirmation_required",
                 confirmation_preview=validation.confirmation_preview,
             )
-            self._log(request, result)
+            self._log(request, result, tool=tool_name)
             return result
 
         result = self._execute_validated(validated_request, validation.resolved_target)
-        self._log(request, result)
+        self._log(request, result, tool=tool_name)
         return result
 
     def confirm_pending(self) -> ActionResult:
@@ -277,10 +298,12 @@ class ActionExecutor:
             )
         return result
 
-    def _log(self, request: ActionRequest, result: ActionResult) -> None:
+    def _log(self, request: ActionRequest, result: ActionResult, tool: str | None = None) -> None:
         self.audit.log(
             {
+                "request_id": current_request_id(),
                 "action": request.action,
+                "tool": tool if tool and tool != request.action else request.action,
                 "arguments": request.arguments,
                 "source": request.source,
                 "reason": request.reason,

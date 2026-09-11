@@ -1,3 +1,5 @@
+# File: core/documents/models.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -158,3 +160,5 @@ class RankedSearchResult:
     record: FileRecord
     score: float
     reasons: list[str]
+    snippet: str | None = None
+    location: str | None = None

@@ -1,80 +1,92 @@
-﻿from __future__ import annotations
+# File: core/documents/extractors/excel_extractor.py
 
+from __future__ import annotations
+
+from datetime import date, datetime, time
 from pathlib import Path
-from zipfile import BadZipFile, ZipFile
-import xml.etree.ElementTree as ET
+from typing import Any
 
 from core.documents.models import ExtractedDocument
 
 
 class ExcelExtractor:
+
     name = "excel"
 
+    def __init__(self, *, max_rows_per_sheet: int = 2000, max_cells: int = 40000) -> None:
+        self.max_rows_per_sheet = max_rows_per_sheet
+        self.max_cells = max_cells
+
     def supports(self, path: Path) -> bool:
-        return path.suffix.lower() in {".xlsx", ".xls"}
+        return path.suffix.lower() in {".xlsx", ".xlsm", ".xls"}
 
     def extract(self, path: Path) -> ExtractedDocument:
         if path.suffix.lower() == ".xls":
-            return ExtractedDocument(text="", content_status="text_unavailable", extractor=self.name, error="Legacy .xls extraction not implemented")
+            return ExtractedDocument(text="", content_status="text_unavailable", extractor=self.name, error="Legacy .xls is not supported; save as .xlsx")
+        try:
+            #! @allow-local-import
+            from openpyxl import load_workbook
+        except Exception:
+            return ExtractedDocument(text="", content_status="text_unavailable", extractor=self.name, error="Install openpyxl for Excel extraction")
 
         try:
-            with ZipFile(path) as archive:
-                names = archive.namelist()
-                workbook_xml = archive.read("xl/workbook.xml")
-                workbook_root = ET.fromstring(workbook_xml)
-                lines: list[str] = []
-
-                sheet_names = [
-                    node.attrib.get("name", "")
-                    for node in workbook_root.iter()
-                    if node.tag.endswith("}sheet") and node.attrib.get("name")
-                ]
-                if sheet_names:
-                    lines.append("Sheets: " + ", ".join(sheet_names))
-
-                shared_strings: list[str] = []
-                if "xl/sharedStrings.xml" in names:
-                    shared_xml = archive.read("xl/sharedStrings.xml")
-                    shared_root = ET.fromstring(shared_xml)
-                    for node in shared_root.iter():
-                        if node.tag.endswith("}t") and node.text:
-                            shared_strings.append(node.text.strip())
-
-                for entry in names:
-                    if not entry.startswith("xl/worksheets/") or not entry.endswith(".xml"):
-                        continue
-                    sheet_xml = archive.read(entry)
-                    sheet_root = ET.fromstring(sheet_xml)
-                    lines.append(f"Worksheet: {Path(entry).stem}")
-                    cell_values: list[str] = []
-                    for node in sheet_root.iter():
-                        if not node.tag.endswith("}c"):
-                            continue
-                        value_node = None
-                        for child in node:
-                            if child.tag.endswith("}v"):
-                                value_node = child
-                                break
-                        if value_node is None or value_node.text is None:
-                            continue
-                        raw_value = value_node.text.strip()
-                        if node.attrib.get("t") == "s":
-                            try:
-                                index = int(raw_value)
-                                if 0 <= index < len(shared_strings):
-                                    raw_value = shared_strings[index]
-                            except ValueError:
-                                pass
-                        if raw_value:
-                            cell_values.append(raw_value)
-                        if len(cell_values) >= 1000:
-                            break
-                    if cell_values:
-                        lines.append(" ".join(cell_values))
-
-            return ExtractedDocument(text="\n".join(lines), content_status="indexed", extractor=self.name)
-        except KeyError:
-            return ExtractedDocument(text="", content_status="text_unavailable", extractor=self.name, error="Workbook XML missing")
-        except (BadZipFile, ET.ParseError, OSError) as error:
+            workbook = load_workbook(str(path), read_only=True, data_only=True)
+        except Exception as error:
             return ExtractedDocument(text="", content_status="error", extractor=self.name, error=str(error))
 
+        try:
+            lines: list[str] = []
+            names = list(workbook.sheetnames)
+            if names:
+                lines.append("Sheets: " + ", ".join(names))
+            cells_seen = 0
+            truncated = False
+            for sheet in workbook.worksheets:
+                lines.append(f"Worksheet: {sheet.title}")
+                for row_index, row in enumerate(sheet.iter_rows(values_only=True)):
+                    if row_index >= self.max_rows_per_sheet:
+                        lines.append(f"... sheet truncated after {self.max_rows_per_sheet} rows")
+                        truncated = True
+                        break
+                    rendered = [self._render(value) for value in row]
+                    while rendered and rendered[-1] == "":
+                        rendered.pop()
+                    if not any(rendered):
+                        continue
+                    cells_seen += len(rendered)
+                    lines.append(" | ".join(rendered))
+                    if cells_seen >= self.max_cells:
+                        lines.append(f"... workbook truncated after {self.max_cells} cells")
+                        truncated = True
+                        break
+                if truncated:
+                    break
+            if len(lines) <= 1:
+                return ExtractedDocument(text="\n".join(lines), content_status="text_unavailable", extractor=self.name, error="Workbook has no cell values")
+            return ExtractedDocument(
+                text="\n".join(lines),
+                content_status="indexed",
+                extractor=self.name,
+                error="Workbook was truncated" if truncated else None,
+            )
+        except Exception as error:
+            return ExtractedDocument(text="", content_status="error", extractor=self.name, error=str(error))
+        finally:
+            try:
+                workbook.close()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _render(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, datetime):
+            return value.date().isoformat() if value.time() == time(0, 0) else value.isoformat(sep=" ", timespec="minutes")
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, bool):
+            return "TRUE" if value else "FALSE"
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return " ".join(str(value).split())

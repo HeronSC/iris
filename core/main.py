@@ -1,4 +1,4 @@
-﻿# File: core/main.py
+# File: core/main.py
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ if str(root) not in sys.path:
 
 #! @allow-local-import
 from core.application import IrisApplication, MessageRole
+#! @allow-local-import
+from core.observability import configure_logging, log_dir_for
 #! @allow-local-import
 from core.application.contracts import DetailContent
 #! @allow-local-import
@@ -54,7 +56,9 @@ def _render_console_response(response, assistant_name: str) -> None:
 
 
 def main() -> None:
-    app = IrisApplication(Path(__file__).resolve().parent / "config.json")
+    config_path = Path(__file__).resolve().parent / "config.json"
+    configure_logging(log_dir_for(None, config_path))
+    app = IrisApplication(config_path)
     try:
         app.initialize()
     except (ConfigError, AssistantMemoryError) as error:

@@ -1,8 +1,12 @@
+# File: core/audit/logger.py
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Any
+
+from core.observability.request_context import current_request_id
 
 
 class AuditLogger:
@@ -13,8 +17,10 @@ class AuditLogger:
 
     def log(self, entry: dict[str, Any]) -> None:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        record = dict(entry)
+        record.setdefault("request_id", current_request_id())
         with self.log_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def read_entries(self) -> list[dict[str, Any]]:
         if not self.log_path.exists():

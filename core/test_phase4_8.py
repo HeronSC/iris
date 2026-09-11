@@ -1,3 +1,5 @@
+# File: core/test_phase4_8.py
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,7 +27,7 @@ class FakeLLM:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
         self.calls.append((system_prompt, user_prompt))
         return "summary-ready"
 

@@ -5,14 +5,29 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from core.actions.executor import ActionExecutionContext
 from core.config.loader import ConfigLoader
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
 from core.config.document_search_mutations import build_confirmation_preview, ensure_document_search_section, ensure_root_entries, upsert_root_entry
+from core.tools.models import PermissionLevel, ToolDefinition
+
+
+class AddDocumentRootArguments(BaseModel):
+    root: str = Field(description="Absolute folder path to add to the searchable document roots")
 
 
 class AddDocumentRootAction:
     name = "add_document_root"
+    definition = ToolDefinition(
+        name="add_document_root",
+        description="Add a folder to the searchable document roots in config.json.",
+        arguments=AddDocumentRootArguments,
+        permission=PermissionLevel.WRITE,
+        requires_confirmation=True,
+        expose_to_model=False,
+    )
 
     def validate(self, request: ActionRequest, context: ActionExecutionContext) -> ValidationResult:
         if context.config_path is None:

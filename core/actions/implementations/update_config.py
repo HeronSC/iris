@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
 
 from core.actions.executor import ActionExecutionContext
 from core.actions.models import ApplicationConfig, ActionRequest, ActionResult, ValidationResult
@@ -16,10 +18,124 @@ from core.config.document_search_mutations import (
 )
 from core.config.loader import ConfigLoader
 from core.documents.models import root_entry_to_json
+from core.tools.models import PermissionLevel, ToolDefinition
+
+
+class UpdateConfigArguments(BaseModel):
+    operation: str = Field(description="One of add_application, set_document_roots, remove_document_root, set_web_shortcut, remove_web_shortcut, remove_application, set_value")
+    app_id: str | None = None
+    display_name: str | None = None
+    executable: str | None = None
+    aliases: list[str] | None = None
+    roots: list[str] | None = None
+    root: str | None = None
+    name: str | None = None
+    url: str | None = None
+    key: str | None = None
+    value: Any = None
+
+
+class AddApplicationArguments(BaseModel):
+    app_id: str = Field(description="Short identifier for the application, for example 'excel'")
+    display_name: str = Field(description="Human-readable application name")
+    executable: str = Field(description="Full path to the executable")
+    aliases: list[str] = Field(default_factory=list, description="Other names the user may call it")
+
+
+class SetDocumentRootsArguments(BaseModel):
+    roots: list[str] = Field(description="Absolute folder paths that replace the current searchable roots")
+
+
+class RemoveDocumentRootArguments(BaseModel):
+    root: str = Field(description="Absolute folder path to stop indexing")
+
+
+class SetWebShortcutArguments(BaseModel):
+    name: str = Field(description="Shortcut name, for example 'github'")
+    url: str = Field(description="Full URL the shortcut opens")
+
+
+class RemoveWebShortcutArguments(BaseModel):
+    name: str = Field(description="Shortcut name to remove")
+
+
+class RemoveApplicationArguments(BaseModel):
+    app_id: str = Field(description="Identifier of the application to remove")
+
+
+class SetConfigValueArguments(BaseModel):
+    key: Literal["assistant_name", "model", "llm_server", "image_server"] = Field(description="Setting to change")
+    value: str | int | float | bool = Field(description="New value for the setting")
 
 
 class UpdateConfigAction:
     name = "update_config"
+    definition = ToolDefinition(
+        name="update_config",
+        description="Change a setting in config.json.",
+        arguments=UpdateConfigArguments,
+        permission=PermissionLevel.WRITE,
+        requires_confirmation=True,
+        expose_to_model=False,
+    )
+    facets = (
+        ToolDefinition(
+            name="config_add_application",
+            description="Register a new application so Iris can launch it by name.",
+            arguments=AddApplicationArguments,
+            permission=PermissionLevel.WRITE,
+            requires_confirmation=True,
+            bind={"operation": "add_application"},
+        ),
+        ToolDefinition(
+            name="config_set_document_roots",
+            description="Replace the list of folders Iris indexes for document search.",
+            arguments=SetDocumentRootsArguments,
+            permission=PermissionLevel.WRITE,
+            requires_confirmation=True,
+            bind={"operation": "set_document_roots"},
+        ),
+        ToolDefinition(
+            name="config_remove_document_root",
+            description="Stop indexing a folder: remove it from the searchable document roots.",
+            arguments=RemoveDocumentRootArguments,
+            permission=PermissionLevel.WRITE,
+            requires_confirmation=True,
+            bind={"operation": "remove_document_root"},
+        ),
+        ToolDefinition(
+            name="config_set_web_shortcut",
+            description="Save or update a named web shortcut.",
+            arguments=SetWebShortcutArguments,
+            permission=PermissionLevel.WRITE,
+            requires_confirmation=True,
+            bind={"operation": "set_web_shortcut"},
+        ),
+        ToolDefinition(
+            name="config_remove_web_shortcut",
+            description="Remove a saved web shortcut.",
+            arguments=RemoveWebShortcutArguments,
+            permission=PermissionLevel.WRITE,
+            requires_confirmation=True,
+            bind={"operation": "remove_web_shortcut"},
+        ),
+        ToolDefinition(
+            name="config_remove_application",
+            description="Remove a registered application from Iris.",
+            arguments=RemoveApplicationArguments,
+            permission=PermissionLevel.WRITE,
+            requires_confirmation=True,
+            bind={"operation": "remove_application"},
+        ),
+        ToolDefinition(
+            name="config_set_value",
+            description="Set a top-level Iris setting: assistant_name, model, llm_server, or image_server.",
+            arguments=SetConfigValueArguments,
+            permission=PermissionLevel.WRITE,
+            requires_confirmation=True,
+            bind={"operation": "set_value"},
+        ),
+    )
     ALLOWED_SET_VALUE_KEYS = {"assistant_name", "model", "llm_server", "image_server"}
 
     def validate(self, request: ActionRequest, context: ActionExecutionContext) -> ValidationResult:
