@@ -287,7 +287,7 @@ among local models, not to decide when to leave the machine.
 	Passed over: LiteLLM (normalises to OpenAI shape, heavy for a one-runtime problem), OpenRouter
 	(hosted middleman), and the `anthropic` SDK (no cloud AI, by principle).
 - [ ] Options for local runtimes beyond Ollama, if ever needed: llama.cpp, LM Studio, vLLM.
-- [ ] Fixed 2026-09-10: `config.json` pointed at `localhost`, which resolves to `::1` first on
+- [x] Fixed 2026-09-10: `config.json` pointed at `localhost`, which resolves to `::1` first on
 	Windows and stalled ~2 s per call before falling back. Now `127.0.0.1`; a chat call went from
 	2,242 ms to 228 ms for identical work, and roughly five calls run per turn.
 
@@ -301,7 +301,9 @@ Already built and relied on everywhere, but missing from the original document.
 - [x] Build request context from the available sources. -> `context_builder.py`
 - [ ] Branch or fork a conversation without losing the original.
 - [ ] Search across past conversations.
-- [ ] Attach a session to a project (3.4) so its context loads with that project.
+- [x] Attach a session to a project (3.4) so its context loads with that project. Sessions carry
+	`project_id`; `/project <name>` sets it on the active session and the project block (focus,
+	decisions, open tasks) loads into every prompt while it is set.
 
 ### 2.6 Storage Abstraction
 
@@ -555,7 +557,8 @@ Git-specific items moved to 3.3.
 	workspace in view (linked root or matching name), then the window title. `/project` says what
 	is in view and why; `/project use` adopts it; the system prompt names the likely project
 	without switching.
-- [ ] Scope memory per project (2.1).
+- [x] Scope memory per project (2.1). Built there 2026-09-12: `project:<id>` scope, recall
+	filtered to the active project plus global, `@project` on observe, hypothesize and fact.
 - [~] Remember current project state. Focus, decisions, open tasks and last-opened date are on
 	the record and in the prompt when the project is active. What was being done in the last
 	session is not summarised into it yet.
@@ -638,13 +641,24 @@ An adapter is only as trustworthy as its undo. Read-only ships first in every ca
 
 ### 4.2 VS Code
 
-- [ ] Active workspace and project awareness — via 3.1.
-- [ ] Active file awareness — via 3.1.
-- [ ] Selection awareness — via 3.1.
-- [ ] File editing.
-- [ ] Build and compiler integration.
-- [ ] Show Iris's output inside the editor, not only in the Iris window.
-- [~] **Decided 2026-09-10, half built 2026-09-12:** no custom extension. VS Code is already an MCP
+- [x] Active workspace and project awareness — via 3.1. The VS Code window title names the
+	workspace; `core/code` resolves it to the AL project under the document roots (3.2).
+- [~] Active file awareness — via 3.1. The open file's name comes from the title and is resolved
+	to its path inside the workspace; a file outside any workspace is a name only.
+- [ ] Selection awareness — via 3.1. Not available without an extension; Copilot in VS Code has
+	the selection itself and passes what it needs as tool arguments.
+- [x] File editing. `read_file`, `edit_file`, `write_file` (3.2) from Iris's side; from the
+	editor's side Copilot edits and Iris supplies symbols, search and compiles.
+- [x] Build and compiler integration. `al_compile` (3.2) here, `compile_workspace` over MCP.
+- [~] Show Iris's output inside the editor, not only in the Iris window. **Built 2026-09-12:**
+	Iris's MCP server offers `workspaces`, `describe_workspace`, `find_symbol`, `search_code`,
+	`read_file` and `compile_workspace` beside the memory tools, so Copilot Chat in VS Code
+	shows Iris's answers inline; every call is audited with the client's name.
+	`.vscode/mcp.json` in this repo and the user-level `mcp.json` under the VS Code profile
+	(written 2026-09-12) point VS Code at `mcp_server.py --client vscode`. Verified over stdio:
+	14 tools, 18 workspaces listed, Sales-Post resolved. Panels or diffs inside the editor would
+	need the extension the decision below defers.
+- [x] **Decided 2026-09-10, built 2026-09-12:** no custom extension. VS Code is already an MCP
 	client, and the server it needs exists now (2.3), so Iris's memory is callable from the editor
 	today. What is still missing is the other direction -- 3.1's awareness of workspace, file, and
 	selection -- which is why the items above stay unchecked. VS Code and Copilot call Iris's tools directly,
@@ -1064,7 +1078,8 @@ rules out every hosted speech API, which leaves a short, good list.
 	grab snapshot/clip -> analyze -> store metadata -> add to searchable vision index.
 - [ ] Support semantic camera history search.
 	Example: "Find times yesterday when people were in the living room."
-- [ ] Return thumbnails and timestamps (rendered per 2.7).
+- [x] Return thumbnails and timestamps (rendered per 2.7). `camera_alerts` returns each alert as an
+	image result with its time and camera in the title.
 - [ ] Support follow-up drill-in.
 	Example: "Show me number 3." then play/open recording.
 - [x] Show camera status. `camera_status`.
@@ -1215,7 +1230,7 @@ and the `Data/` tree.
 	automatic start and a restart-on-failure policy (5 s, 30 s, 60 s, reset daily), which is the
 	Windows half. Still to verify on the machine itself: that the first boot after
 	`iris_service.py install` brings the host up before the desktop opens.
-- [ ] **Decided and done 2026-09-10:** one `requirements.txt` at the root for dev (`.venv`) and
+- [x] **Decided and done 2026-09-10:** one `requirements.txt` at the root for dev (`.venv`) and
 	release (`Runtime\venv`). `core/requirements.txt` and `ui/requirements.txt` are removed and
 	`deploy_phase4.ps1` now installs from the root file — before this, the release build read
 	`core/requirements.txt`, which listed only `pypdf`, and would have missed every dependency
