@@ -94,6 +94,7 @@ class AssistantCoordinator:
         self._checkpoint_path: Path | None = None
         self._agent: IrisAgent | None = None
         self._turn_cache: dict[str, Any] = {}
+        self.context_provider: Callable[[], str] | None = None
         audit_path = self.config.get("audit_path") if isinstance(self.config, dict) else None
         if isinstance(audit_path, str):
             audit_path = Path(audit_path)
@@ -804,6 +805,9 @@ class AssistantCoordinator:
         memory_block = (persistent_memory_context or "").strip()
         if memory_block:
             context = context + "\n\n" + memory_block
+        screen = self._screen_context()
+        if screen:
+            context = context + "\n\nWhat the user is looking at (resolve 'this', 'here', 'the file I have open' against it):\n" + screen
         return (
             f"You are {self.assistant_name}, a personal assistant.\n\n"
             "Default to the most likely ordinary-language interpretation when one meaning is clearly dominant.\n"
@@ -823,6 +827,16 @@ class AssistantCoordinator:
             "Ask for clarification when a required detail is missing.\n\n"
             f"User context:\n{context}"
         )
+
+    def _screen_context(self) -> str:
+        provider = self.context_provider
+        if provider is None:
+            return ""
+        try:
+            return (provider() or "").strip()
+        except Exception as error:
+            logger.debug("Screen context unavailable: %s", error)
+            return ""
 
     def _prepare_user_message_for_llm(self, user_message: str) -> str:
         text = user_message or ""

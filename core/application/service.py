@@ -43,7 +43,9 @@ from core.actions.bootstrap import build_action_layer
 from core.actions.changes import ChangeLedger
 from core.assistant.backup_command import BackupCommandHandler
 from core.assistant.changes_command import ChangesCommandHandler
+from core.assistant.context_command import ContextCommandHandler
 from core.assistant.stop_command import StopCommandHandler
+from core.context import build_context_service
 from core.assistant.corrections_command import CorrectionsCommandHandler
 from core.assistant.workflow_command import WorkflowCommandHandler
 from core.llm.budget import LatencyBudget
@@ -188,6 +190,8 @@ class IrisApplication:
         self.backup_handler: CommandHandler = _NoopCommandHandler()
         self.changes_handler: CommandHandler = _NoopCommandHandler()
         self.stop_handler: CommandHandler = _NoopCommandHandler()
+        self.context_handler: CommandHandler = _NoopCommandHandler()
+        self.context_service = None
         self.workflow_handler: CommandHandler = _NoopCommandHandler()
         self.corrections_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
@@ -410,9 +414,11 @@ class IrisApplication:
             audit=self.audit_stream,
         )
         self.changes = ChangeLedger(Path(self.config["memory_path"]).parent / "Backups" / "undo", audit=self.audit_stream)
+        self.context_service = build_context_service(self.config)
         action_layer = build_action_layer(
             self.config,
             catalog=document_catalog,
+            context_service=self.context_service,
             audit_folder=self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit",
             permissions=self.permissions,
             ledger=self.changes,
@@ -510,6 +516,9 @@ class IrisApplication:
         self.backup_handler = BackupCommandHandler(self.backups, output=self._sink)
         self.changes_handler = ChangesCommandHandler(self.changes, output=self._sink)
         self.stop_handler = StopCommandHandler(self.halt, self.release, output=self._sink)
+        self.context_handler = ContextCommandHandler(self.context_service, output=self._sink)
+        self.coordinator.context_provider = self.context_service.prompt_line
+        self.context_service.start()
         self.why_handler = WhyCommandHandler(
             log_file=log_dir_for(self.config) / LOG_FILE_NAME,
             trace_file=getattr(getattr(self.coordinator, "trace_logger", None), "path", None),
@@ -677,6 +686,8 @@ class IrisApplication:
             if self._handle_slash_command(self.changes_handler, stripped, status, command_prefixes=("/changes", "/undo")):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.stop_handler, stripped, status, command_prefixes=("/stop", "/halt", "/resume")):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.context_handler, stripped, status, command_prefixes=("/context",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.workflow_handler, stripped, status, command_prefixes=("/workflow", "/workflows")):
                 return self._build_response(status, cancel_event)
@@ -961,6 +972,12 @@ class IrisApplication:
         embedding_thread = getattr(self, "_embedding_thread", None)
         if embedding_thread is not None and embedding_thread.is_alive():
             embedding_thread.join(timeout=5.0)
+        context_service = getattr(self, "context_service", None)
+        if context_service is not None:
+            try:
+                context_service.stop()
+            except Exception:
+                pass
         watchers = getattr(self, "watchers", None)
         if watchers is not None:
             try:

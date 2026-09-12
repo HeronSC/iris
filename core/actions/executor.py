@@ -64,6 +64,7 @@ class ActionExecutionContext:
     config_path: Path | None = None
     memory_path: Path | None = None
     document_scanner: DocumentScanner | None = None
+    context_service: Any = None
 
 
 @dataclass(frozen=True)

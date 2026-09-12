@@ -363,21 +363,41 @@ for a problem Windows already solves.
 **Owner:** "what is the user looking at right now." Sections 4.1 and 4.2 previously repeated
 this; they now consume it.
 
-- [ ] Understand what the user is currently working on.
-- [ ] Detect active application.
-- [ ] Detect active file, document, and project.
-- [ ] Detect the current selection where the app exposes one.
-- [ ] Handle requests like:
+- [~] Understand what the user is currently working on. **Built 2026-09-12:** `core/context/`
+	samples the foreground window every 1.5 s in the desktop app, skips Iris's own window, and
+	keeps the last twelve distinct contexts. What it knows is the app and, per provider, the file,
+	workbook, folder, project and selection; what the user is *doing* with it is still inference.
+- [x] Detect active application. Foreground window through `pywin32`, process name through `psutil`.
+- [~] Detect active file, document, and project. VS Code from its title (file, workspace,
+	unsaved marker); Excel through COM (`ActiveWorkbook.FullName`, active sheet); Word,
+	PowerPoint and Acrobat from the title; File Explorer from the title when it is a path.
+	VS Code gives a file name, not a path -- the path arrives with 4.2 (MCP) or a workspace
+	search.
+- [~] Detect the current selection where the app exposes one. Excel's selection address; nothing
+	else yet.
+- [x] Handle requests like:
 	"Look at the workbook I have open."
 	"Look at the project I have open in VS Code."
 	"Look at this file."
-- [ ] Implement this generically: a context-provider interface with one small provider per app,
-	not one-off handling per request.
-- [ ] Resolve "this" and "here" against the current context, and say which target was picked.
-- [ ] Keep a short history of recent context, so "the file I had open before" works.
-- [ ] Context capture is user-visible and can be paused (10).
-- [ ] Options: Win32 foreground-window APIs, UI Automation, per-app adapters (Excel COM, a VS Code
-	extension), window-title parsing as the crude fallback.
+	The system prompt carries "What the user is looking at" on every turn and the
+	`active_context` tool returns it on demand with the file as a result, so the model passes the
+	real path to the next tool.
+- [x] Implement this generically: a context-provider interface with one small provider per app,
+	not one-off handling per request. `ContextProvider` (`matches`, `capture`) in
+	`core/context/providers.py`; the chain ends with a plain window provider so every app yields
+	something.
+- [~] Resolve "this" and "here" against the current context, and say which target was picked.
+	`ContextService.resolve()` picks the current or the previous context and returns why; the
+	model does the resolving from the prompt line today, and the tool's sentence names the target.
+- [x] Keep a short history of recent context, so "the file I had open before" works. `/context
+	history`, `active_context which=previous`, and "Before that:" in the prompt line.
+- [x] Context capture is user-visible and can be paused (10). `/context` shows what Iris sees,
+	`/context pause` and `/context resume` switch it, `context.enabled: false` in `config.json`
+	starts it paused. While paused nothing is sampled and the prompt line is empty.
+- [x] Options: Win32 foreground-window APIs, UI Automation, per-app adapters (Excel COM, a VS Code
+	extension), window-title parsing as the crude fallback. **Chosen 2026-09-12:** Win32 foreground
+	window plus per-app adapters, title parsing as the fallback; UI Automation waits on the
+	`pywinauto` question in 8.1.
 
 ### 3.2 Coding and Development Assistant (Start with BC/AL)
 
