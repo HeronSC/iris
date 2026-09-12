@@ -110,7 +110,7 @@ class ScreenLookAction:
         captures = Path(
             getattr(context, "captures_dir", None) or Path.cwd() / "Captures"
         )
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
         destination = captures / f"screen-{stamp}.png"
         try:
             self.capture(destination)

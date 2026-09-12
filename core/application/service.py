@@ -451,6 +451,8 @@ class IrisApplication:
             active_project_id=lambda: self.state.get("active_project_id") if isinstance(getattr(self, "state", None), dict) else None,
             knowledge=self.knowledge,
             cameras=self.camera_service,
+            model_router=self.model_router,
+            captures_dir=Path(self.config["memory_path"]).parent / "Captures",
             audit_folder=self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit",
             permissions=self.permissions,
             ledger=self.changes,

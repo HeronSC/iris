@@ -1025,15 +1025,24 @@ rules out every hosted speech API, which leaves a short, good list.
 
 ### 8.1 Screen and Desktop Awareness
 
-- [ ] Understand on-screen context when requested.
-- [ ] Active window awareness — via 3.1.
-- [ ] Optional screenshot and vision analysis.
+- [x] Understand on-screen context when requested. **Built 2026-09-12:** `screen_look(question)`
+	(`core/actions/implementations/screen_tools.py`) captures the whole desktop with
+	`System.Drawing` through PowerShell (no new dependency), sends the PNG to the model router's
+	`vision` task (`qwen2.5vl:7b`, already pulled) with the question, and returns the answer plus
+	the screenshot as an image card. Nothing is captured unless the tool is called.
+- [x] Active window awareness — via 3.1. `active_context` reports the foreground window, its
+	process and what the VS Code, Excel, Office and Explorer providers know about it.
+- [x] Optional screenshot and vision analysis. Same tool; `keep: false` deletes the file after
+	the answer, otherwise it lives under `Data\Captures` and the retention job removes it.
 - [ ] Read the UI tree where available before falling back to pixels — cheaper and exact.
-- [ ] Use for apps without strong APIs.
-- [ ] Prefer API/native integration whenever available.
-- [ ] Capture is explicitly triggered, never continuous. Captures are retained per 2.8 and analysed
-	locally, always (1).
-- [ ] **Decided 2026-09-10, cheapest layer first:** `pywin32` (present) for the foreground window
+- [x] Use for apps without strong APIs. That is what `screen_look` is for; the tool description
+	says so and the API-backed tools come first in the registry.
+- [x] Prefer API/native integration whenever available. The router sees Excel, VS Code, git,
+	Explorer and the cameras as tools; the screenshot is the last resort.
+- [x] Capture is explicitly triggered, never continuous. Captures are retained per 2.8 and analysed
+	locally, always (1). One capture per call, the file under `Data\Captures` trimmed by the
+	retention job, the model local.
+- [~] **Decided 2026-09-10, cheapest layer first:** `pywin32` (present) for the foreground window
 	and owning process; the UI Automation tree for text and controls without pixels; `winocr`
 	(installed) for screenshots; `qwen2.5vl:7b` (pulled) for understanding. No cloud vision (1).
 - [ ] **Open:** `pywinauto` for the UI Automation tree. Without it the tree is raw `comtypes` calls,
