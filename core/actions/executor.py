@@ -17,6 +17,9 @@ from core.actions.policy import ActionPolicy
 from core.actions.registry import ActionRegistry
 from core.documents.catalog import DocumentCatalog
 from core.observability.request_context import current_request_id
+from core.permissions.models import PermissionRequest
+from core.permissions.policy import PermissionPolicy
+from core.permissions.targets import hosts_in, paths_in
 
 
 class SystemAdapter:
@@ -77,11 +80,13 @@ class ActionExecutor:
         audit: ActionAuditLogger,
         context: ActionExecutionContext,
         confirmation_ttl_seconds: int = 120,
+        permissions: PermissionPolicy | None = None,
     ) -> None:
         self.registry = registry
         self.policy = policy
         self.audit = audit
         self.context = context
+        self.permissions = permissions
         self.confirmation_ttl_seconds = confirmation_ttl_seconds
         self._pending_action: PendingAction | None = None
         self._expired_confirmation_notice = False
@@ -136,9 +141,23 @@ class ActionExecutor:
             workflow_parameters=request.workflow_parameters,
         )
 
+        permission = self._permission_decision(resolved.definition, validated_request, validation.resolved_target)
+        if permission is not None and permission.denied:
+            result = ActionResult(
+                status="failed",
+                message=f"Not allowed: {permission.reason}.",
+                action=request.action,
+                resolved_target=validation.resolved_target,
+                error="permission_denied",
+            )
+            self._log(request, result, tool=tool_name)
+            return result
+
         needs_confirmation = validation.requires_confirmation or any(
             self.policy.requires_confirmation(request, definition) for definition in definitions
         )
+        if permission is not None and permission.requires_confirmation:
+            needs_confirmation = True
         if needs_confirmation:
             if self.has_pending_confirmation():
                 result = ActionResult(
@@ -274,6 +293,22 @@ class ActionExecutor:
         if not self.has_pending_confirmation() or self._pending_action is None:
             return None
         return self._pending_action.confirmation_preview
+
+    def _permission_decision(self, definition: Any, request: ActionRequest, resolved_target: str | None) -> Any:
+        if self.permissions is None:
+            return None
+        return self.permissions.enforce(
+            PermissionRequest(
+                tool=definition.name,
+                permission=definition.permission,
+                action=request.action,
+                source=request.source,
+                target=resolved_target,
+                paths=paths_in(request.arguments, resolved_target),
+                hosts=hosts_in(request.arguments, resolved_target),
+                outbound=bool(getattr(definition, "outbound", False)),
+            )
+        )
 
     def _execute_validated(self, request: ActionRequest, resolved_target: str | None) -> ActionResult:
         action = self.registry.get(request.action)

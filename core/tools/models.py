@@ -53,6 +53,10 @@ class ToolDefinition:
     bind: dict[str, Any] = field(default_factory=dict)
     version: str = "1"
     expose_to_model: bool = True
+    #: True when running the tool sends something off this machine. Section 10
+    #: caps outbound work, and it can only do that if a tool says it is outbound
+    #: rather than the policy keeping a list of tool names that will go stale.
+    outbound: bool = False
     source: str = "native"
     handler: Any = None
     #: Words or short phrases in a request that make this tool worth offering to

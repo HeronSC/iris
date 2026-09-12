@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core.knowledge import KnowledgeError, KnowledgeQuery, MemoryKind, MemoryRecord
 from core.knowledge.appraisal import CONTRACT, FAVOURABLE_KEY, Appraisal, Appraiser
 from core.knowledge.comparison import compare_rankers, render_comparison
 from core.knowledge.links import MemoryLink, MemoryRelation
+from core.server.auth import ApiAuthenticator, AuthSettings, token_from_headers
 from core.server.models import (
     AppraisalOut,
     AssessIn,
@@ -91,9 +92,33 @@ def _outcome_data(data: dict[str, Any], favourable: bool | None) -> dict[str, An
     return payload
 
 
-def create_app(app_service: Any) -> FastAPI:
+def authenticator_for(app_service: Any) -> ApiAuthenticator:
+    config = getattr(app_service, "config", {}) or {}
+    settings = AuthSettings.from_config(config.get("http") if isinstance(config, dict) else None)
+    return ApiAuthenticator(
+        secrets=getattr(app_service, "secrets", None),
+        settings=settings,
+        audit=getattr(app_service, "audit_stream", None),
+    )
+
+
+def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) -> FastAPI:
     api = FastAPI(title="Iris", version="1")
     appraiser = Appraiser(app_service.knowledge, app_service.knowledge_retriever)
+    auth = authenticator or authenticator_for(app_service)
+    api.state.authenticator = auth
+
+    @api.middleware("http")
+    async def _authenticate(request: Request, call_next: Any) -> Any:
+        outcome = auth.authenticate(
+            path=request.url.path,
+            token=token_from_headers(request.headers),
+            client_host=request.client.host if request.client else None,
+        )
+        if not outcome.ok:
+            return JSONResponse(status_code=outcome.status_code, content={"detail": outcome.reason})
+        request.state.client = outcome.client
+        return await call_next(request)
 
     @api.exception_handler(KnowledgeError)
     async def _knowledge_error(_request: Any, error: KnowledgeError) -> JSONResponse:

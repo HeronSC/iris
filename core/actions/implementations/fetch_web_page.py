@@ -24,6 +24,7 @@ class FetchWebPageAction:
         description="Fetch a web page by URL and return its readable text, title, author, and date, with the source cited. Use only for a URL the user gave.",
         arguments=FetchWebPageArguments,
         permission=PermissionLevel.READ,
+        outbound=True,
         keywords=("fetch", "http", "https", "www", "url", "link", "website", "web page", "webpage", "article", "read this"),
     )
 

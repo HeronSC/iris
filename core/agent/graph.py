@@ -17,6 +17,8 @@ from core.actions.models import ActionRequest
 from core.assistant.request_kinds import is_code_request, is_small_talk
 from core.llm.models import ChatMessage, LLMRequest, LLMResponse, ToolSpec
 from core.llm.ollama_client import OllamaClientError
+from core.permissions.models import PermissionLevel, PermissionRequest
+from core.permissions.targets import hosts_in, paths_in
 from core.tools.models import ToolArgumentError, ToolKind
 
 logger = logging.getLogger(__name__)
@@ -86,6 +88,7 @@ class IrisAgent:
         checkpoint_path: str | Path | None = None,
         on_tool_success: Callable[[str, str, dict[str, Any]], None] | None = None,
         tool_auditor: Any | None = None,
+        permissions: Any | None = None,
         max_iterations: int = MAX_ITERATIONS,
     ) -> None:
         self.coordinator = coordinator
@@ -94,6 +97,7 @@ class IrisAgent:
         self.knowledge_router = knowledge_router
         self.on_tool_success = on_tool_success
         self.tool_auditor = tool_auditor
+        self.permissions = permissions
         self.max_iterations = max(1, int(max_iterations))
         self._lock = threading.RLock()
         self._saver_context: Any = None
@@ -385,13 +389,39 @@ class IrisAgent:
     def _dispatch(self, name: str, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
         definition = self.tool_registry.get(name) if self.tool_registry is not None else None
         if definition is not None and self.tool_registry.is_enabled(name):
-            if definition.kind == ToolKind.COMMAND:
-                return self._run_command(definition, arguments, user_message)
             if definition.kind == ToolKind.ACTION and self.action_executor is not None:
                 return self._run_action(name, arguments, user_message)
+            refusal = self._permission_refusal(name, definition, arguments)
+            if refusal is not None:
+                return refusal
+            if definition.kind == ToolKind.COMMAND:
+                return self._run_command(definition, arguments, user_message)
+        elif definition is None:
+            refusal = self._permission_refusal(name, None, arguments)
+            if refusal is not None:
+                return refusal
         if self.knowledge_router is not None:
             return self._run_capability(name, arguments)
         return {"status": "failed", "error": "unknown_tool", "message": f"I do not have a tool named {name}."}
+
+    def _permission_refusal(self, name: str, definition: Any, arguments: dict[str, Any]) -> dict[str, Any] | None:
+        if self.permissions is None:
+            return None
+        request = PermissionRequest(
+            tool=name,
+            permission=getattr(definition, "permission", PermissionLevel.READ),
+            action=name,
+            source="agent",
+            paths=paths_in(arguments),
+            hosts=hosts_in(arguments),
+            outbound=bool(getattr(definition, "outbound", True)),
+        )
+        decision = self.permissions.enforce(request)
+        if decision.denied:
+            return {"status": "failed", "error": "permission_denied", "message": f"Not allowed: {decision.reason}."}
+        if decision.requires_confirmation and not interrupt({"tool": name, "arguments": arguments, "summary": decision.reason}):
+            return {"status": "cancelled", "error": None, "message": f"{name} was not run."}
+        return None
 
     def _audit_tool(self, name: str, arguments: dict[str, Any], result: dict[str, Any]) -> None:
         if self.tool_auditor is None:

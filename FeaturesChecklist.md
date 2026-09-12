@@ -819,8 +819,19 @@ rules out every hosted speech API, which leaves a short, good list.
 **Owner:** all permission and safety rules. Sections 2.3, 4, 7.2, 8, and 9.2 declare what they
 need; this section decides what is allowed.
 
-- [ ] Enforce read vs write vs execute boundaries.
-- [ ] Scope permissions to targets, not just verbs: allowlisted paths, repos, hosts, devices.
+- [x] Enforce read vs write vs execute boundaries. **Built 2026-09-12:** `core/permissions/`
+	decides, `core/actions/executor.py` asks before it runs anything, and the agent asks for the
+	tools that do not go through the executor. Each level is `allow`, `confirm`, or `deny` in
+	`permissions` in config.json. The shipped defaults leave today's behaviour exactly as it was
+	-- all three allowed, each tool's own `requires_confirmation` unchanged -- because a
+	permission layer that silently starts asking about every file open is a regression, not a
+	feature. Tightening a level is one word in config.
+- [x] Scope permissions to targets, not just verbs: allowlisted paths, repos, hosts, devices.
+	**Built 2026-09-12:** `permissions.allowed_paths` / `denied_paths` / `allowed_hosts` /
+	`denied_hosts`. Paths and hosts are read out of the resolved arguments, so a rule covers a
+	tool written next year without naming it. Denied beats allowed; a host rule covers its
+	subdomains and cannot be fooled by `example.com.evil.net`. Empty lists mean the action's own
+	roots still apply and nothing else changes. Devices arrive with 9.2.
 - [ ] Require confirmation for dangerous actions.
 - [ ] Show exactly what will change before confirming — diff, file list, target device.
 - [ ] Backup before destructive file changes.
@@ -828,22 +839,37 @@ need; this section decides what is allowed.
 - [x] Log all changes Iris makes (2.8). One stream since 2026-09-12, tools and permission
 	decisions included.
 - [ ] Show diffs.
-- [ ] Keep credentials and secrets separate from model reasoning: never in `config.json`, never in
-	a prompt, never in a log.
-- [ ] Rate-limit and cap physical-world and outbound actions: email, messages, devices.
-- [ ] Authenticate the HTTP surface. `serve.py` binds `127.0.0.1:8765` with no credential at all —
-	acceptable while only this PC's own processes reach it, not once a Windows service (11) hosts it
-	and the trading bot (13), Blue Iris, or Home Assistant call in. A per-client token from
-	Credential Manager, checked on every request; still loopback-only until a remote client exists.
+- [x] Keep credentials and secrets separate from model reasoning: never in `config.json`, never in
+	a prompt, never in a log. **Built 2026-09-12:** `core/permissions/secrets.py` over Credential
+	Manager, with the names (never the values) kept in `Data\Configuration\secrets.json` so
+	`/secrets` can list what is set without reading any of it, and redaction on the audit stream
+	(2.8) for anything that slips into an argument or a message.
+- [x] Rate-limit and cap physical-world and outbound actions: email, messages, devices.
+	**Built 2026-09-12:** a tool declares `outbound=True` on its definition (2.3) and the policy
+	caps the lot together -- 120 an hour by default, a sliding window, configurable per bucket.
+	Declared rather than a list of tool names in the policy, which would go stale the first time
+	someone adds a tool. Web fetches and the knowledge providers are outbound today; opening a
+	browser tab is not, since the browser is the thing making the call.
+- [x] Authenticate the HTTP surface. **Built 2026-09-12:** one middleware in
+	`core/server/app.py` over `core/server/auth.py`, so it is every request rather than every
+	route someone remembers to decorate. A per-client token (`api_token:<client>`) out of
+	Credential Manager, compared in constant time, accepted as `X-Iris-Token` or a bearer header;
+	non-loopback callers are turned away before the token is even read. The check turns itself on
+	the moment a token exists and says so at startup while none does, so installing it cannot
+	lock out the desktop app or the bot mid-session; `http.require_token: true` demands one
+	outright. `/health` stays open for monitoring. Refusals are audited without the token.
 - [ ] Provide a global stop that halts running tools, workflows, and watchers at once.
 - [ ] Nothing leaves the machine by default — decided 2026-09-10. There is no cloud AI (1, 2.4);
 	any non-AI outbound call (search, Graph, notifications) names what it sends, and memory,
 	documents, and camera content are never part of it.
 - [ ] Increase rigor as Iris shifts from advisory to action-taking behavior.
-- [ ] **Decided 2026-09-10:** secrets live in Windows Credential Manager through `keyring`
-	(installed; it selects the Windows backend itself, no service). First tenants: the UniFi API
-	key, the Blue Iris login, the MQTT credentials, later Graph tokens. Passed over: raw `win32cred`
-	(more code for the same store), an encrypted file, `.env`.
+- [x] **Decided 2026-09-10, built 2026-09-12:** secrets live in Windows Credential Manager through
+	`keyring` (installed; it selects the Windows backend itself, no service). `/secrets list|set|clear`
+	manages them; where there is no credential store (a dev box, a headless run) a secret can come
+	from `IRIS_SECRET_<NAME>` in the environment instead, and reading refuses silently rather than
+	inventing a value. First tenants: the HTTP token above, then the UniFi API key, the Blue Iris
+	login, the MQTT credentials, later Graph tokens. Passed over: raw `win32cred` (more code for the
+	same store), an encrypted file, `.env`.
 
 ---
 
@@ -865,7 +891,12 @@ and the `Data/` tree.
 	decided today. `pywin32` is pinned explicitly rather than left transitive, since Excel COM,
 	the service host, and 3.1 all depend on it.
 - [ ] One documented way to launch dev, one for release.
-- [ ] Config: one schema, validated on load, clear errors, no secrets (10).
+- [~] Config: one schema, validated on load, clear errors, no secrets (10). **Fixed 2026-09-12:**
+	`ConfigLoader.load()` returned only the keys it normalized, so five configured sections --
+	`mcp_servers`, `notifications`, `knowledge`, `web`, `metrics_path` -- were read from
+	`config.json` and then silently dropped before anything could use them. The git MCP server
+	(2.3) never started and quiet hours (8.2) never applied, both from this. They are passed
+	through now, along with `permissions` and `http` (10). A real schema is still to come.
 - [ ] Document the data directory layout, and add migrations for the SQLite databases.
 - [ ] Back up `Data/` — memory, sessions, audit, index — and test a restore.
 - [ ] SQLite durability for `knowledge.db` and `conversations.db` — decided 2026-09-10, stdlib only:
@@ -924,7 +955,8 @@ side: batch observations, outcomes, recall, assess, compare.
 	evidence.
 - [ ] Trading monitoring (8.2): candidate-list health, outcome latency, an assessment that stops
 	arriving.
-- [ ] Authenticate the bot's calls (10).
+- [x] Authenticate the bot's calls (10). Set `api_token:bot` on this machine and give the bot the
+	same value; until one is set the surface stays open exactly as it was.
 
 ### 13.2 Later Applications
 

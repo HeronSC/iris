@@ -51,6 +51,7 @@ from core.assistant.intent_example_store import IntentExampleStore
 from core.assistant.intent_router import IntentRouter
 from core.assistant.memory_commands import MemoryCommandHandler
 from core.assistant.models_command import ModelsCommandHandler
+from core.assistant.permissions_command import PermissionsCommandHandler
 from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
 from core.assistant.proposal_commands import ProposalCommandHandler
@@ -105,6 +106,8 @@ from core.system.applications import ApplicationCatalog
 from core.system.places import KnownFolder, find_folders, root_subfolders, vscode_folders
 from core.tools.mcp_client import McpManager, load_server_configs
 from core.tools.models import PermissionLevel, ToolDefinition, ToolKind
+from core.permissions.policy import PermissionPolicy
+from core.permissions.secrets import SecretStore
 from core.tools.audit import ToolAuditor
 from core.tools.registry import ToolRegistry
 from core.watchers import InboxNotifier, LogNotifier, QuietHours, ToastNotifier, WatcherService
@@ -170,6 +173,7 @@ class IrisApplication:
         self.models_handler: CommandHandler = _NoopCommandHandler()
         self.why_handler: CommandHandler = _NoopCommandHandler()
         self.watch_handler: CommandHandler = _NoopCommandHandler()
+        self.permissions_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
 
     def initialize(self, event_handler: EventHandler | None = None) -> None:
@@ -264,7 +268,11 @@ class IrisApplication:
         self.save_handler: CommandHandler = SaveCommandHandler(output=self._sink)
         proposal_store = MemoryProposalStore(self.config.get("proposal_path") or Path(__file__).resolve().parents[1] / "memory" / "proposals")
         audit_folder = Path(self.config.get("audit_path") or Path(__file__).resolve().parents[1] / "audit")
+        self.audit_stream = AuditStream(audit_folder)
         audit_logger = AuditLogger(audit_folder)
+        self.secrets = SecretStore(
+            index_path=Path(self.config["memory_path"]).parent / "Configuration" / "secrets.json"
+        )
         self.knowledge_review = KnowledgeReviewWorkflow(self.hypotheses, audit_logger=audit_logger)
         self.knowledge_handler: CommandHandler = KnowledgeCommandHandler(
             self.knowledge_review,
@@ -402,10 +410,16 @@ class IrisApplication:
             action_registry.register(system_action())
 
         action_audit = ActionAuditLogger(self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit")
+        self.permissions = PermissionPolicy.from_config(
+            self.config.get("permissions"),
+            default_allowed_paths=[],
+            audit=self.audit_stream,
+        )
         self.action_executor = ActionExecutor(
             registry=action_registry,
             policy=ActionPolicy(),
             audit=action_audit,
+            permissions=self.permissions,
             context=ActionExecutionContext(
                 catalog=document_catalog,
                 allowed_roots=document_config.root_paths(),
@@ -453,13 +467,14 @@ class IrisApplication:
             tool_registry=self.tool_registry,
         )
         self._register_capability_tools()
-        self.tool_auditor = ToolAuditor(AuditStream(audit_folder), self.tool_registry)
+        self.tool_auditor = ToolAuditor(self.audit_stream, self.tool_registry)
         self.coordinator.attach_tools(
             tool_registry=self.tool_registry,
             action_executor=self.action_executor,
             example_store=intent_example_store,
             checkpoint_path=Path(self.config.get("session_path") or Path(self.config["memory_path"]).parent / "Sessions") / "agent_checkpoints.db",
             tool_auditor=self.tool_auditor,
+            permissions=self.permissions,
         )
         self.mcp_manager = McpManager(
             load_server_configs(self.config.get("mcp_servers") if isinstance(self.config, dict) else None),
@@ -469,6 +484,9 @@ class IrisApplication:
         self.mcp_manager.start(background=True)
         self.tools_handler = ToolsCommandHandler(self.tool_registry, self.mcp_manager, output=self._sink)
         self.models_handler = ModelsCommandHandler(self.model_router, self.request_metrics, output=self._sink)
+        self.permissions_handler = PermissionsCommandHandler(
+            self.permissions, self.secrets, audit=self.audit_stream, output=self._sink
+        )
         self.watchers = self._build_watchers()
         self.watch_handler = WatchCommandHandler(self.watchers, output=self._sink)
         self.why_handler = WhyCommandHandler(
@@ -617,6 +635,10 @@ class IrisApplication:
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.watch_handler, stripped, status, command_prefixes=("/watch",)):
                 return self._build_response(status, cancel_event)
+            if self._handle_slash_command(
+                self.permissions_handler, stripped, status, command_prefixes=("/permissions", "/secrets")
+            ):
+                return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)
             if self._handle_slash_command(self.search_handler, stripped, IrisStatus.SEARCHING, command_prefixes=("/search", "/file")):
@@ -764,6 +786,7 @@ class IrisApplication:
                     permission=PermissionLevel.READ,
                     kind=ToolKind.CAPABILITY,
                     expose_to_model=False,
+                    outbound=True,
                     source="knowledge",
                     handler=provider,
                 )

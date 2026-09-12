@@ -1,3 +1,5 @@
+# File: core/config/loader.py
+
 from __future__ import annotations
 
 import json
@@ -247,6 +249,19 @@ class ConfigLoader:
 
         llm_timeout_seconds = _normalize_timeout_seconds(config.get("llm_timeout_seconds", 30.0), field_name="llm_timeout_seconds")
 
+        metrics_path_raw = config.get("metrics_path")
+        if metrics_path_raw:
+            metrics_path = Path(str(metrics_path_raw)).expanduser()
+            if not metrics_path.is_absolute():
+                metrics_path = (self.config_path.parent / metrics_path).resolve()
+        else:
+            metrics_path = (memory_path.parent / "Metrics" / "metrics.db").resolve()
+
+        for section in ("knowledge", "notifications", "mcp_servers", "web", "permissions", "http"):
+            value = config.get(section)
+            if value is not None and not isinstance(value, dict):
+                raise ConfigError(f"{section} must be an object")
+
         return {
             "assistant_name": str(config["assistant_name"]),
             "memory_path": memory_path,
@@ -265,6 +280,13 @@ class ConfigLoader:
             "applications": normalized_applications,
             "web_shortcuts": normalized_web_shortcuts,
             "action_audit_path": action_audit_path,
+            "metrics_path": metrics_path,
+            "knowledge": config.get("knowledge", {}),
+            "notifications": config.get("notifications", {}),
+            "mcp_servers": config.get("mcp_servers", {}),
+            "web": config.get("web", {}),
+            "permissions": config.get("permissions", {}),
+            "http": config.get("http", {}),
         }
 
 
