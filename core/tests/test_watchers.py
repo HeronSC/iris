@@ -122,7 +122,10 @@ class ServiceTests(unittest.TestCase):
         self.clock = Clock(datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc))
         self.service = WatcherService(root / "watchers.json", root / "state.json", {"toast": self.toast}, inbox=self.inbox, clock=self.clock)
         self.results: dict[str, CheckResult] = {}
-        self._patch = patch("core.watchers.service.run_check", side_effect=lambda kind, params, baseline: self.results[kind])
+        self._patch = patch(
+            "core.watchers.service.run_check",
+            side_effect=lambda kind, params, baseline, context=None: self.results[kind],
+        )
         self._patch.start()
 
     def tearDown(self) -> None:

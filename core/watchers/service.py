@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from core.watchers.checks import KINDS, CheckResult, run_check
-from core.watchers.models import Notification, WatcherDefinition, WatcherState, format_duration, utc_now_iso
+from core.watchers.models import Notification, WatcherContext, WatcherDefinition, WatcherState, format_duration, utc_now_iso
 from core.watchers.notify import InboxNotifier, Notifier, QuietHours
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ class WatcherService:
         quiet_hours: QuietHours | None = None,
         inbox: InboxNotifier | None = None,
         clock: Any = None,
+        context: WatcherContext | None = None,
     ) -> None:
         self.definitions_path = Path(definitions_path)
         self.state_path = Path(state_path)
@@ -36,6 +37,7 @@ class WatcherService:
         if self.inbox is not None and "inbox" not in self.notifiers:
             self.notifiers["inbox"] = self.inbox
         self.quiet_hours = quiet_hours or QuietHours()
+        self.context = context or WatcherContext()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._definitions: dict[str, WatcherDefinition] = {}
         self._states: dict[str, WatcherState] = {}
@@ -226,7 +228,7 @@ class WatcherService:
             baseline = state.baseline
         now = self.clock()
         try:
-            result = run_check(definition.kind, definition.params, baseline)
+            result = run_check(definition.kind, definition.params, baseline, self.context)
         except Exception as error:
             with self._lock:
                 state.failures += 1

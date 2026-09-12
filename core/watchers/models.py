@@ -42,6 +42,11 @@ def format_duration(seconds: int) -> str:
 
 
 @dataclass(frozen=True)
+class WatcherContext:
+    knowledge: Any = None
+
+
+@dataclass(frozen=True)
 class WatcherDefinition:
     kind: str
     params: dict[str, Any] = field(default_factory=dict)

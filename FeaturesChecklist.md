@@ -728,7 +728,9 @@ rules out every hosted speech API, which leaves a short, good list.
 	watchers; the document index itself uses `watchdog` events (2.6).
 - [x] Watch services. -> service_not_running.
 - [ ] Watch long-running jobs Iris itself started: renders, indexing, scans.
-- [ ] Add trading-related monitoring later.
+- [x] Add trading-related monitoring later. Done 2026-09-12; the three kinds are listed in 13.1.
+	Watcher checks can now be handed a context (the knowledge graph today), which is what let a
+	watcher ask a question about memory instead of only about the machine.
 - [x] Notify only on meaningful events: thresholds with hysteresis, deduplication, and suppression
 	of a condition already reported. A transition notifies once, an ongoing condition at most every
 	`renotify_minutes`, clearing is reported past a margin (disk: 10% above the limit; RAM: 5 points).
@@ -951,10 +953,19 @@ side: batch observations, outcomes, recall, assess, compare.
 - [ ] Iris as the decision layer — the bot *acts* on Iris's assessment rather than logging it
 	beside its own. Gated on the comparison showing sustained lift on real mornings, not seeded
 	data; PhaseStatus is explicit that nothing has met real data yet.
-- [ ] Re-evaluate hypotheses on a schedule (APScheduler, 8.2) instead of only when a person files
-	evidence.
-- [ ] Trading monitoring (8.2): candidate-list health, outcome latency, an assessment that stops
-	arriving.
+- [x] Re-evaluate hypotheses on a schedule (APScheduler, 8.2) instead of only when a person files
+	evidence. **Built 2026-09-12:** `core/scheduler/` holds jobs the same way 8.2 holds watchers --
+	as data in `Data\Configuration\schedules.json`, rescheduled at startup -- and ships one:
+	`hypothesis_review` re-appraises everything unsettled at 06:00 daily and raises a toast only
+	when something newly has the evidence to be accepted. It still cannot accept anything: the
+	schedule moves a hypothesis to supported, and a named person promotes it. Every run is audited
+	(2.8). `/schedule` lists, runs, adds and disables them.
+- [x] Trading monitoring (8.2): candidate-list health, outcome latency, an assessment that stops
+	arriving. **Built 2026-09-12:** three watcher kinds over the knowledge graph --
+	`no_new_records` (the candidate list stopped arriving), `outcomes_overdue` (observations sitting
+	open past a deadline), `no_assessments` (Iris stopped scoring a topic it is supposed to score,
+	counting only records Iris itself wrote, since the comparison depends on that).
+	-> `core/watchers/knowledge_checks.py`.
 - [x] Authenticate the bot's calls (10). Set `api_token:bot` on this machine and give the bot the
 	same value; until one is set the surface stays open exactly as it was.
 

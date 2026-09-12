@@ -52,6 +52,7 @@ from core.assistant.intent_router import IntentRouter
 from core.assistant.memory_commands import MemoryCommandHandler
 from core.assistant.models_command import ModelsCommandHandler
 from core.assistant.permissions_command import PermissionsCommandHandler
+from core.assistant.schedule_command import ScheduleCommandHandler
 from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
 from core.assistant.proposal_commands import ProposalCommandHandler
@@ -110,7 +111,13 @@ from core.permissions.policy import PermissionPolicy
 from core.permissions.secrets import SecretStore
 from core.tools.audit import ToolAuditor
 from core.tools.registry import ToolRegistry
+from core.scheduler.jobs import HYPOTHESIS_REVIEW, build_jobs
+from core.scheduler.models import JobDefinition
+from core.scheduler.service import ScheduleService
 from core.watchers import InboxNotifier, LogNotifier, QuietHours, ToastNotifier, WatcherService
+from core.watchers.checks import register_kinds
+from core.watchers.knowledge_checks import KNOWLEDGE_KINDS
+from core.watchers.models import WatcherContext
 from core.web.fetch import PageFetcher
 
 import structlog
@@ -174,6 +181,7 @@ class IrisApplication:
         self.why_handler: CommandHandler = _NoopCommandHandler()
         self.watch_handler: CommandHandler = _NoopCommandHandler()
         self.permissions_handler: CommandHandler = _NoopCommandHandler()
+        self.schedule_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
 
     def initialize(self, event_handler: EventHandler | None = None) -> None:
@@ -489,6 +497,7 @@ class IrisApplication:
         )
         self.watchers = self._build_watchers()
         self.watch_handler = WatchCommandHandler(self.watchers, output=self._sink)
+        self.schedule_handler = ScheduleCommandHandler(self.schedules, output=self._sink)
         self.why_handler = WhyCommandHandler(
             log_file=log_dir_for(self.config) / LOG_FILE_NAME,
             trace_file=getattr(getattr(self.coordinator, "trace_logger", None), "path", None),
@@ -639,6 +648,8 @@ class IrisApplication:
                 self.permissions_handler, stripped, status, command_prefixes=("/permissions", "/secrets")
             ):
                 return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.schedule_handler, stripped, status, command_prefixes=("/schedule",)):
+                return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)
             if self._handle_slash_command(self.search_handler, stripped, IrisStatus.SEARCHING, command_prefixes=("/search", "/file")):
@@ -741,18 +752,41 @@ class IrisApplication:
         except ValueError as error:
             logger.warning("Ignoring notifications.quiet_hours", error=str(error))
             quiet = QuietHours()
+        register_kinds(KNOWLEDGE_KINDS)
+        inbox = InboxNotifier(audit / "notifications.jsonl")
         service = WatcherService(
             configuration / "watchers.json",
             configuration / "watchers_state.json",
             notifiers,
             quiet_hours=quiet,
-            inbox=InboxNotifier(audit / "notifications.jsonl"),
+            inbox=inbox,
+            context=WatcherContext(knowledge=self.knowledge),
+        )
+        self.schedules = ScheduleService(
+            configuration / "schedules.json",
+            configuration / "schedules_state.json",
+            build_jobs(review=self.knowledge_review),
+            notifiers={**notifiers, "inbox": inbox},
+            quiet_hours=quiet,
+            audit=self.audit_stream,
+        )
+        self.schedules.ensure(
+            JobDefinition(
+                job=HYPOTHESIS_REVIEW,
+                name="Re-appraise hypotheses",
+                cron="0 6 * * *",
+                id="hypothesis-review",
+            )
         )
         if bool(notifications_cfg.get("enabled", True)):
             try:
                 service.start()
             except Exception as error:
                 logger.warning("Watchers could not start", error=str(error))
+            try:
+                self.schedules.start()
+            except Exception as error:
+                logger.warning("Scheduled jobs could not start", error=str(error))
         return service
 
     def _build_ocr(self) -> OcrService | None:
@@ -806,6 +840,12 @@ class IrisApplication:
         if watchers is not None:
             try:
                 watchers.stop()
+            except Exception:
+                pass
+        schedules = getattr(self, "schedules", None)
+        if schedules is not None:
+            try:
+                schedules.stop()
             except Exception:
                 pass
         document_watch = getattr(self, "document_watch", None)

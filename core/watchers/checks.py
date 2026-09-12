@@ -25,8 +25,9 @@ class CheckKind:
     name: str
     description: str
     params: dict[str, str]
-    run: Callable[[dict[str, Any], Any], CheckResult]
+    run: Callable[..., CheckResult]
     needs_baseline: bool = False
+    needs_context: bool = False
 
 
 def _mount(value: Any) -> str:
@@ -186,8 +187,14 @@ KINDS: dict[str, CheckKind] = {
 }
 
 
-def run_check(kind: str, params: dict[str, Any], baseline: Any) -> CheckResult:
+def register_kinds(kinds: dict[str, CheckKind]) -> None:
+    KINDS.update(kinds)
+
+
+def run_check(kind: str, params: dict[str, Any], baseline: Any, context: Any = None) -> CheckResult:
     definition = KINDS.get(kind)
     if definition is None:
         raise ValueError(f"Unknown watcher kind: {kind}. Known: {', '.join(sorted(KINDS))}")
+    if definition.needs_context:
+        return definition.run(params, baseline, context)
     return definition.run(params, baseline)
