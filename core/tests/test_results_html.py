@@ -17,6 +17,7 @@ from core.results.html import (
     render_page,
     render_result,
     render_results,
+    render_search_results,
 )
 from core.results.models import Source, chart, code, diff, file, image, link, status, table, text, video
 
@@ -140,6 +141,38 @@ class ConfirmationTests(unittest.TestCase):
         rendered = render_approval_bar()
         self.assertIn(CONFIRM_URL, rendered)
         self.assertIn(CANCEL_URL, rendered)
+
+
+class SearchResultTests(unittest.TestCase):
+    def test_matches_are_grouped_by_folder_and_open_on_click(self) -> None:
+        docs = r"E:\Docs"
+        year_folder = docs + "\\2026"
+        budget = year_folder + "\\budget.xlsx"
+        payload = {
+            "query": "budget",
+            "total_matches": 3,
+            "searched_roots": [docs],
+            "failed_roots": ["\\\\nas\\share"],
+            "matches": [
+                {"position": 1, "path": budget, "classification": "exact"},
+                {"position": 2, "path": year_folder + "\\budget notes.docx", "classification": "strong"},
+                {"position": 3, "path": docs + "\\old\\budget-2019.xlsx", "classification": "partial"},
+            ],
+        }
+        rendered = render_search_results(payload)
+        self.assertIn('3 matches for &quot;budget&quot;', rendered)
+        self.assertEqual(rendered.count('<div class="search-group">'), 2)
+        self.assertIn("1 root unreachable", rendered)
+        self.assertIn('<span class="badge badge-ok">exact</span>', rendered)
+        budget_url = open_url(budget)
+        folder_url = open_url(year_folder)
+        self.assertIn(f'href="{budget_url}"', rendered)
+        self.assertIn(f'href="{folder_url}"', rendered)
+
+    def test_no_matches_says_so(self) -> None:
+        rendered = render_search_results({"query": "nothing", "total_matches": 0, "matches": []})
+        self.assertIn("0 matches", rendered)
+        self.assertIn("No matching files.", rendered)
 
 
 class PageTests(unittest.TestCase):

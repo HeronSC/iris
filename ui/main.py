@@ -49,7 +49,7 @@ from core.observability import configure_logging, log_dir_for
 #! @allow-local-import
 from core.profile.loader import AssistantMemoryError
 #! @allow-local-import
-from core.results.html import render_confirmation
+from core.results.html import render_confirmation, render_search_results
 #! @allow-local-import
 from ui.results_panel import ResultsPanel, markdown_to_html, results_fragment
 
@@ -1013,18 +1013,23 @@ class IrisWindow(QMainWindow):
         self._details_actions_clear()
         self.details_actions_row.setVisible(False)
 
+    def _show_search_results(self, payload: dict[str, object]) -> None:
+        self.details_title.setText("Search")
+        self.results_panel.show_sections([render_search_results(payload)], title="Search")
+        self.details_stack.setCurrentWidget(self.results_panel)
+        self._details_actions_clear()
+        self.details_actions_row.setVisible(False)
+
     def _sync_file_operations_panel(self, detail_type: str, items, metadata) -> None:
         payload = metadata.get("file_operations") if isinstance(metadata, dict) else None
         if isinstance(payload, dict) and str(payload.get("mode", "")).strip().lower() == "search":
-            self.file_ops_panel.show_search_results(payload)
-            self._show_file_operations_panel("Search")
+            self._show_search_results(payload)
             return
 
         if detail_type in {"search_results", "file_results", "file_list"}:
             fallback_payload = self._build_file_search_payload_from_items(items)
             if fallback_payload is not None:
-                self.file_ops_panel.show_search_results(fallback_payload)
-                self._show_file_operations_panel("Search")
+                self._show_search_results(fallback_payload)
             return
 
         command_text = str(metadata.get("command", "")).strip().lower() if isinstance(metadata, dict) else ""

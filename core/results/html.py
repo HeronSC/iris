@@ -77,6 +77,13 @@ video.result-video { max-width: 100%; border-radius: 6px; }
 .confirmation-actions { display: flex; gap: 10px; margin-top: 10px; }
 .confirmation-actions a { text-decoration: none; padding: 6px 16px; border-radius: 6px; font-weight: 600; border: 1px solid var(--border); color: var(--fg); background: var(--code-bg); }
 .confirmation-actions a.approve { background: var(--accent); color: #fff; border-color: var(--accent); }
+.search-summary { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 10px; }
+.search-group { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 0 0 10px; }
+.search-folder { font-family: Consolas, "Cascadia Mono", monospace; font-size: 0.9em; margin-bottom: 4px; }
+.search-folder a { color: var(--muted); text-decoration: none; }
+.search-row { padding: 2px 0 2px 12px; }
+.search-row a.file-name { text-decoration: none; color: var(--fg); }
+.search-row a.file-name:hover { text-decoration: underline; color: var(--accent); }
 .section { margin-bottom: 14px; }
 hr.section-break { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
 .empty { color: var(--muted); font-style: italic; }
@@ -385,6 +392,48 @@ def render_confirmation(preview: dict[str, Any], *, actions: bool = True) -> str
     )
 
 
+CLASSIFICATION_ORDER = {"exact": 0, "strong": 1, "partial": 2}
+
+
+def render_search_results(payload: dict[str, Any]) -> str:
+    query = str(payload.get("query") or "").strip()
+    matches = [item for item in (payload.get("matches") or []) if isinstance(item, dict) and str(item.get("path") or "").strip()]
+    total = int(payload.get("total_matches") or len(matches))
+    searched = [str(item) for item in (payload.get("searched_roots") or [])]
+    failed = [str(item) for item in (payload.get("failed_roots") or [])]
+    heading = f"{total} match{'es' if total != 1 else ''}" + (f' for "{query}"' if query else "")
+    if len(matches) < total:
+        heading += f", {len(matches)} shown"
+    rows = [f'<div class="search-summary"><b>{escape(heading)}</b>']
+    if searched:
+        rows.append(f'<span class="file-meta">Searched {len(searched)} root{"s" if len(searched) != 1 else ""}: {escape(", ".join(searched))}</span>')
+    if failed:
+        rows.append(f'<span class="badge badge-warning">{len(failed)} root{"s" if len(failed) != 1 else ""} unreachable</span> <span class="file-meta">{escape(", ".join(failed))}</span>')
+    rows.append("</div>")
+    if not matches:
+        rows.append('<p class="empty">No matching files.</p>')
+        return "".join(rows)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in matches:
+        folder = str(PurePath(str(item["path"])).parent)
+        groups.setdefault(folder, []).append(item)
+    for folder, items in groups.items():
+        rows.append('<div class="search-group">')
+        rows.append(f'<div class="search-folder"><a href="{escape(open_url(folder))}" title="Open folder">{escape(folder)}</a> <span class="file-meta">{len(items)} match{"es" if len(items) != 1 else ""}</span></div>')
+        for item in items:
+            path = str(item["path"])
+            name = PurePath(path).name or path
+            classification = str(item.get("classification") or "partial")
+            css = "badge-ok" if classification == "exact" else "badge-pending" if classification == "strong" else ""
+            position = f'<span class="file-meta">{int(item["position"])}.</span> ' if _is_number(item.get("position")) else ""
+            rows.append(
+                f'<div class="search-row">{position}<a class="file-name" href="{escape(open_url(path))}" title="{escape(path)}">{escape(name)}</a>'
+                f' <span class="badge {css}">{escape(classification)}</span></div>'
+            )
+        rows.append("</div>")
+    return "".join(rows)
+
+
 def render_page(body: str, *, title: str | None = None, theme: str = "light") -> str:
     heading = f'<h2 class="panel-title">{escape(title)}</h2>' if title else ""
     return (
@@ -408,4 +457,5 @@ __all__ = [
     "render_page",
     "render_result",
     "render_results",
+    "render_search_results",
 ]
