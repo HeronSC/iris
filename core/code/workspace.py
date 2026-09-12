@@ -143,7 +143,7 @@ JSONC_TRAILING_COMMA = re.compile(r",(\s*[}\]])")
 
 def parse_jsonc(text: str) -> Any:
     cleaned = JSONC_COMMENT.sub("", text)
-    cleaned = JSONC_TRAILING_COMMA.sub(r"", cleaned)
+    cleaned = JSONC_TRAILING_COMMA.sub(r"\1", cleaned)
     return json.loads(cleaned)
 
 

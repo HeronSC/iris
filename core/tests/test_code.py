@@ -201,12 +201,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIsNone(find_workspace_by_name("Nope", [self.root]))
 
     def test_vs_code_json_with_comments_and_trailing_commas_is_read(self) -> None:
-        text = "{
-  // the sandbox
-  \"configurations\": [
-    {\"name\": \"BC\", \"type\": \"al\",},
-  ],
-}"
+        text = "{\n  // the sandbox\n  \"configurations\": [\n    {\"name\": \"BC\", \"type\": \"al\",},\n  ],\n}"
         self.assertEqual(parse_jsonc(text)["configurations"][0]["name"], "BC")
         (self.project / ".vscode" / "launch.json").write_text(text, encoding="utf-8")
         self.assertEqual([item.name for item in load_workspace(self.project).launch], ["BC"])
