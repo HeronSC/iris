@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -32,6 +33,8 @@ from core.server.models import (
     ScoredOut,
     Written,
 )
+
+logger = structlog.get_logger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -107,6 +110,9 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
     appraiser = Appraiser(app_service.knowledge, app_service.knowledge_retriever)
     auth = authenticator or authenticator_for(app_service)
     api.state.authenticator = auth
+    notice = auth.startup_notice()
+    if notice:
+        logger.warning("http surface unauthenticated", detail=notice)
 
     @api.middleware("http")
     async def _authenticate(request: Request, call_next: Any) -> Any:

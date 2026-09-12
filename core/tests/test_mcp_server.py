@@ -103,6 +103,7 @@ class McpToolTests(unittest.TestCase):
         self.assertEqual([item.event for item in events], ["observe", "recall"])
         self.assertEqual(events[0].source, "mcp:claude-code")
         self.assertEqual(events[0].subject, "mcp")
+        self.assertEqual(events[0].data["arguments"]["topic"], TOPIC)
 
 
 class McpPermissionTests(unittest.TestCase):

@@ -73,7 +73,7 @@ class IrisMcpTools:
                 for item in result.records
             ]
         }
-        return self._done("recall", payload)
+        return self._done("recall", {"text": text, "topic": topic, "limit": limit}, payload)
 
     def observe(
         self,
@@ -86,7 +86,7 @@ class IrisMcpTools:
         record = self.review.observe(
             _topic(topic), _content(content), source=source or DEFAULT_RECORD_SOURCE, data=dict(data or {})
         )
-        return self._done("observe", _record(record))
+        return self._done("observe", {"topic": topic, "source": source}, _record(record))
 
     def close_observation(
         self,
@@ -115,14 +115,14 @@ class IrisMcpTools:
                 )
             ]
         )
-        return self._done("close_observation", _record(stored[0]))
+        return self._done("close_observation", {"observation_id": observation_id, "favourable": favourable}, _record(stored[0]))
 
     def hypothesize(self, topic: str, content: str, source: str | None = None) -> dict[str, Any]:
         self._permit("hypothesize", PermissionLevel.WRITE)
         record = self.review.hypothesize(
             _topic(topic), _content(content), source=source or DEFAULT_RECORD_SOURCE
         )
-        return self._done("hypothesize", _record(record))
+        return self._done("hypothesize", {"topic": topic, "source": source}, _record(record))
 
     def add_evidence(
         self,
@@ -147,7 +147,7 @@ class IrisMcpTools:
             "rationale": assessment.rationale,
             "note": "Reaching supported is evidence; accepting it needs a person.",
         }
-        return self._done("add_evidence", payload)
+        return self._done("add_evidence", {"hypothesis_id": hypothesis_id, "record_id": record_id, "supports": supports}, payload)
 
     def assess(self, ids: Sequence[str], record: bool = False) -> dict[str, Any]:
         self._permit("assess", PermissionLevel.WRITE if record else PermissionLevel.READ)
@@ -170,7 +170,7 @@ class IrisMcpTools:
                 for item in appraisals
             ],
         }
-        return self._done("assess", payload)
+        return self._done("assess", {"ids": list(ids), "record": record}, payload)
 
     def review_queue(self, topic: str | None = None, limit: int = 20) -> dict[str, Any]:
         self._permit("review_queue", PermissionLevel.READ)
@@ -180,7 +180,7 @@ class IrisMcpTools:
             "under_test": [_summary(item) for item in self.review.under_test(topic=wanted, limit=_bounded(limit))],
             "note": "Only a person can accept a hypothesis; /knowledge review does it in Iris.",
         }
-        return self._done("review_queue", payload)
+        return self._done("review_queue", {"topic": topic}, payload)
 
     def explain(self, memory_id: str, max_depth: int = 3) -> dict[str, Any]:
         self._permit("explain", PermissionLevel.READ)
@@ -188,7 +188,7 @@ class IrisMcpTools:
             rendered = self.review.explain(memory_id, max_depth=max(1, min(int(max_depth), 6)))
         except KnowledgeError as error:
             raise McpToolError(str(error)) from error
-        return self._done("explain", {"id": memory_id, "explanation": rendered})
+        return self._done("explain", {"memory_id": memory_id}, {"id": memory_id, "explanation": rendered})
 
     def _permit(self, name: str, permission: PermissionLevel) -> None:
         if self.permissions is None:
@@ -204,12 +204,12 @@ class IrisMcpTools:
                 "Run it in Iris, where there is someone to ask."
             )
 
-    def _done(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _done(self, name: str, arguments: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         if self.auditor is not None:
             try:
                 self.auditor.record(
                     name,
-                    {},
+                    arguments,
                     {"status": "success"},
                     source=self.source,
                     kind=ToolKind.MCP,

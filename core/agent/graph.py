@@ -388,21 +388,18 @@ class IrisAgent:
 
     def _dispatch(self, name: str, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
         definition = self.tool_registry.get(name) if self.tool_registry is not None else None
-        if definition is not None and self.tool_registry.is_enabled(name):
-            if definition.kind == ToolKind.ACTION and self.action_executor is not None:
-                return self._run_action(name, arguments, user_message)
-            refusal = self._permission_refusal(name, definition, arguments)
-            if refusal is not None:
-                return refusal
-            if definition.kind == ToolKind.COMMAND:
-                return self._run_command(definition, arguments, user_message)
-        elif definition is None:
-            refusal = self._permission_refusal(name, None, arguments)
-            if refusal is not None:
-                return refusal
-        if self.knowledge_router is not None:
-            return self._run_capability(name, arguments)
-        return {"status": "failed", "error": "unknown_tool", "message": f"I do not have a tool named {name}."}
+        enabled = definition is not None and self.tool_registry.is_enabled(name)
+        if enabled and definition.kind == ToolKind.ACTION and self.action_executor is not None:
+            return self._run_action(name, arguments, user_message)
+        as_command = enabled and definition.kind == ToolKind.COMMAND
+        if not as_command and self.knowledge_router is None:
+            return {"status": "failed", "error": "unknown_tool", "message": f"I do not have a tool named {name}."}
+        refusal = self._permission_refusal(name, definition if enabled else None, arguments)
+        if refusal is not None:
+            return refusal
+        if as_command:
+            return self._run_command(definition, arguments, user_message)
+        return self._run_capability(name, arguments)
 
     def _permission_refusal(self, name: str, definition: Any, arguments: dict[str, Any]) -> dict[str, Any] | None:
         if self.permissions is None:
