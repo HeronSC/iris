@@ -555,13 +555,25 @@ An adapter is only as trustworthy as its undo. Read-only ships first in every ca
 	same four tools. Error checking on a closed file needs Excel to have saved cached values; a
 	file written by a library and never opened reports none, and the tool says so only implicitly
 	(worth a note in the result later).
-- [ ] Make controlled edits.
-- [ ] Validate changes: recalculate, compare before and after, check for new errors.
-- [ ] Add backup and undo protection (10).
-- [~] Handle the awkward cases explicitly: unsaved changes, protected sheets, a workbook the user
+- [x] Make controlled edits. **Built 2026-09-12:** `excel_write` puts values or formulas into a
+	cell or range of a workbook open in Excel, through Excel itself (`LiveWriter` in
+	`core/excel/live.py`). Files on disk stay read-only on purpose: saving through `openpyxl`
+	silently drops charts and pivot caches, and starting a hidden Excel to avoid that is the
+	`Dispatch` path 4.1 ruled out. The tool refuses a range whose shape does not match the values,
+	a protected sheet, a read-only workbook, and a write that changes nothing.
+- [x] Validate changes: recalculate, compare before and after, check for new errors. The
+	confirmation shows a unified diff of the cells (`B2 = 2` to `B2 = 3`) and how many of them
+	change; after the write Excel recalculates, and any cell that newly shows an error value is
+	listed with its formula, with the undo named in the same breath.
+- [x] Add backup and undo protection (10). The previous formulas of every written range are kept
+	(last twenty writes) and `excel_undo` puts them back, with its own diff and confirmation. The
+	file-copy ledger does not apply to a live workbook, so this is the undo for cells; the user's
+	own save decides what reaches disk.
+- [x] Handle the awkward cases explicitly: unsaved changes, protected sheets, a workbook the user
 	is actively typing in, files locked by OneDrive. Unsaved changes, read-only and protected
-	sheets are reported; a locked file gives a clear message; a workbook being typed in is not
-	detected yet (COM calls simply wait for Excel).
+	sheets are reported and refuse writes; a locked file gives a clear message; a cell being
+	edited makes Excel reject the COM call (0x80010001), which is reported as "Excel is busy,
+	finish the cell and try again" rather than an error code.
 - [x] **Decided 2026-09-10, built 2026-09-12:** the live workbook is reached through Excel COM via `pywin32` (already
 	in the venv; verified against Excel 16). Attach to the running instance with `GetActiveObject`,
 	never `Dispatch`, or Iris starts a second hidden Excel.

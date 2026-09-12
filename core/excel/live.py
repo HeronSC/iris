@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.excel.models import MAX_SCAN_CELLS, CellHit, RangeData, SheetInfo, WorkbookInfo, cell_address, error_text
@@ -196,4 +197,96 @@ class LiveExcel:
         return hits
 
 
-__all__ = ["LiveExcel", "excel_application"]
+class ExcelBusy(RuntimeError):
+    pass
+
+
+class ExcelWriteRefused(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class WriteReport:
+    sheet: str
+    address: str
+    before: tuple[tuple[Any, ...], ...]
+    after: tuple[tuple[Any, ...], ...]
+    new_errors: tuple[CellHit, ...]
+    calculated: bool
+
+    @property
+    def cells(self) -> int:
+        return sum(len(row) for row in self.after)
+
+
+def normalize_grid(values: Any) -> list[list[Any]]:
+    if isinstance(values, (list, tuple)):
+        if not values:
+            raise ExcelWriteRefused("No values were given")
+        if all(isinstance(item, (list, tuple)) for item in values):
+            grid = [list(item) for item in values]
+            width = len(grid[0])
+            if any(len(row) != width for row in grid):
+                raise ExcelWriteRefused("Every row must have the same number of values")
+            return grid
+        return [list(values)]
+    return [[values]]
+
+
+def _busy(error: Exception) -> bool:
+    text = str(error).lower()
+    return "rejected by callee" in text or "0x80010001" in text or "busy" in text
+
+
+class LiveWriter:
+    def __init__(self, reader: "LiveExcel") -> None:
+        self.reader = reader
+
+    def sheet_state(self, workbook: Any, sheet: str | None) -> tuple[Any, bool]:
+        target = workbook.Worksheets(sheet) if sheet else workbook.ActiveSheet
+        return target, bool(getattr(target, "ProtectContents", False))
+
+    def current(self, workbook: Any, sheet: str | None, address: str) -> tuple[str, str, tuple[tuple[Any, ...], ...], tuple[tuple[Any, ...], ...], int, int]:
+        target, _protected = self.sheet_state(workbook, sheet)
+        rng = target.Range(address)
+        rows = int(rng.Rows.Count)
+        columns = int(rng.Columns.Count)
+        formulas = tuple(tuple(row) for row in _grid(rng.Formula))
+        values = tuple(tuple(_clean(item) for item in row) for row in _grid(rng.Value2))
+        return str(target.Name), str(rng.Address(False, False)), formulas, values, rows, columns
+
+    def write(self, workbook: Any, sheet: str | None, address: str, values: Any, *, check_errors: bool = True) -> WriteReport:
+        grid = normalize_grid(values)
+        try:
+            target, protected = self.sheet_state(workbook, sheet)
+            if protected:
+                raise ExcelWriteRefused(f"Sheet {target.Name} is protected; unprotect it in Excel first")
+            if bool(getattr(workbook, "ReadOnly", False)):
+                raise ExcelWriteRefused(f"{workbook.Name} is open read-only in Excel")
+            rng = target.Range(address)
+            rows = int(rng.Rows.Count)
+            columns = int(rng.Columns.Count)
+            if len(grid) != rows or len(grid[0]) != columns:
+                raise ExcelWriteRefused(f"{address} is {rows} x {columns} but {len(grid)} x {len(grid[0])} values were given")
+            before = tuple(tuple(row) for row in _grid(rng.Formula))
+            errors_before = {(hit.sheet, hit.address) for hit in self.reader.errors(workbook)} if check_errors else set()
+            rng.Formula = grid[0][0] if rows == 1 and columns == 1 else tuple(tuple(row) for row in grid)
+            calculated = False
+            application = getattr(workbook, "Application", None)
+            if application is not None and hasattr(application, "Calculate"):
+                application.Calculate()
+                calculated = True
+            after = tuple(tuple(_clean(item) for item in row) for row in _grid(rng.Value2))
+            new_errors: tuple[CellHit, ...] = ()
+            if check_errors:
+                new_errors = tuple(hit for hit in self.reader.errors(workbook) if (hit.sheet, hit.address) not in errors_before)
+        except ExcelWriteRefused:
+            raise
+        except Exception as error:
+            if _busy(error):
+                raise ExcelBusy("Excel is busy, probably a cell being edited; finish it and try again") from error
+            raise
+        return WriteReport(sheet=str(target.Name), address=str(rng.Address(False, False)), before=before, after=after, new_errors=new_errors, calculated=calculated)
+
+
+__all__ = ["ExcelBusy", "ExcelWriteRefused", "LiveExcel", "LiveWriter", "WriteReport", "excel_application", "normalize_grid"]

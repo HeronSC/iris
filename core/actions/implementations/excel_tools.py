@@ -6,10 +6,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from core.actions.models import ActionRequest, ActionResult, ValidationResult
-from core.excel import WorkbookUnavailable
+from core.actions.diffs import unified_text_diff
+from core.actions.models import ActionRequest, ActionResult, ConfirmationPreview, ValidationResult
+from core.excel import ExcelBusy, ExcelWriteRefused, WorkbookUnavailable, grid_lines
 from core.excel.models import column_letter
 from core.results.models import Result, Source, status, table
+from core.results.models import diff as diff_result
 from core.results.models import text as text_result
 from core.tools.models import PermissionLevel, ToolDefinition
 
@@ -222,6 +224,120 @@ class ExcelCheckAction:
         return ActionResult(status="success", message="\n".join(lines), action=self.name, resolved_target=target.path, results=tuple(results))
 
 
-EXCEL_ACTIONS = (ExcelWorkbookAction, ExcelReadAction, ExcelFindAction, ExcelCheckAction)
+class WriteArguments(BaseModel):
+    range: str = Field(description="A1-style cell or range to write, such as B2 or A1:C3")
+    values: Any = Field(description="One value for a single cell, a list for one row, or a list of rows; a string starting with = is a formula")
+    path: str | None = Field(default=None, description="Open workbook name or path; the workbook in view when omitted")
+    sheet: str | None = Field(default=None, description="Sheet name; the active sheet when omitted")
 
-__all__ = ["EXCEL_ACTIONS", "ExcelCheckAction", "ExcelFindAction", "ExcelReadAction", "ExcelWorkbookAction"]
+
+class ExcelWriteAction:
+
+    name = "excel_write"
+    definition = ToolDefinition(
+        name="excel_write",
+        description="Write values or formulas into cells of a workbook open in Excel. Shows the cells before and after for approval, recalculates, reports any new error values, and keeps the previous contents so excel_undo can put them back.",
+        arguments=WriteArguments,
+        permission=PermissionLevel.WRITE,
+        requires_confirmation=True,
+        keywords=("put in cell", "set cell", "write to cell", "change the value", "enter in", "fill in", "update the cell", "put a formula"),
+    )
+
+    def validate(self, request: ActionRequest, context: object) -> ValidationResult:
+        try:
+            arguments = WriteArguments.model_validate(request.arguments)
+        except Exception as error:
+            return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
+        service, target, problem = _target(context, arguments.path)
+        if problem:
+            return ValidationResult(ok=False, error=problem)
+        try:
+            preview = service.preview_write(target, arguments.sheet or None, arguments.range.strip(), arguments.values)
+        except (WorkbookUnavailable, ExcelWriteRefused, ExcelBusy) as error:
+            return ValidationResult(ok=False, error=str(error))
+        except Exception as error:
+            return ValidationResult(ok=False, error=f"Could not read {target.name}: {error}")
+        if preview["changed"] == 0:
+            return ValidationResult(ok=False, error=f"{preview['label']} already holds those values; nothing to write.")
+        summary = f"Write {preview['changed']} of {preview['cells']} cell{'s' if preview['cells'] != 1 else ''} in {preview['label']}"
+        return ValidationResult(
+            ok=True,
+            resolved_target=preview["label"],
+            resolved_arguments={"path": target.path, "sheet": preview["sheet"], "range": preview["address"], "values": [list(row) for row in preview["after"]]},
+            confirmation_preview=ConfirmationPreview(
+                summary=summary,
+                target=preview["label"],
+                impact="Excel recalculates afterwards; any new error value is reported. The previous contents are kept, and excel_undo puts them back.",
+                title="Excel",
+                metadata={"diff": preview["diff"]},
+            ),
+        )
+
+    def execute(self, request: ActionRequest, context: object) -> ActionResult:
+        arguments = request.arguments
+        service, target, problem = _target(context, arguments.get("path"))
+        if problem:
+            return ActionResult(status="failed", message=problem, action=self.name, error="workbook_unavailable")
+        try:
+            report = service.write(target, arguments.get("sheet") or None, str(arguments.get("range") or ""), arguments.get("values"))
+        except (WorkbookUnavailable, ExcelWriteRefused, ExcelBusy) as error:
+            return ActionResult(status="failed", message=str(error), action=self.name, error="write_refused")
+        except Exception as error:
+            return ActionResult(status="failed", message=f"Could not write to {target.name}: {error}", action=self.name, error="write_failed")
+        label = f"{target.name} {report.sheet}!{report.address}"
+        source = Source("excel_write", "document", f"{target.path}#{report.sheet}!{report.address}")
+        lines = [f"Wrote {report.cells} cell{'s' if report.cells != 1 else ''} in {label}" + (" and recalculated." if report.calculated else ".")]
+        for row_index, row in enumerate(report.after[:20]):
+            lines.append(" | ".join("" if value is None else str(value) for value in row))
+        results: list[Result] = [diff_result(unified_text_diff("\n".join(grid_lines(report.before, report.address)) + "\n", "\n".join(grid_lines(report.after, report.address)) + "\n", label=label), source=source, title=label)]
+        if report.new_errors:
+            lines.append(f"{len(report.new_errors)} new error value{'s' if len(report.new_errors) != 1 else ''}: " + ", ".join(f"{hit.sheet}!{hit.address} {hit.value}" for hit in report.new_errors[:10]) + ". excel_undo puts the previous contents back.")
+            results.append(table(("sheet", "cell", "error", "formula"), [(hit.sheet, hit.address, hit.value, hit.formula or "") for hit in report.new_errors], source=source, title="New errors after the write"))
+            results.append(status("warning", f"{len(report.new_errors)} cell{'s' if len(report.new_errors) != 1 else ''} now show an error value", source=source))
+        else:
+            results.append(status("ok", "No new error values after the write.", source=source))
+        return ActionResult(status="success", message="\n".join(lines), action=self.name, resolved_target=label, results=tuple(results))
+
+
+class ExcelUndoAction:
+
+    name = "excel_undo"
+    definition = ToolDefinition(
+        name="excel_undo",
+        description="Put back the previous contents of the cells that the last excel_write changed, while the workbook is still open in Excel.",
+        permission=PermissionLevel.WRITE,
+        requires_confirmation=True,
+        keywords=("undo the excel change", "put the cells back", "revert the cell", "undo that write"),
+    )
+
+    def validate(self, request: ActionRequest, context: object) -> ValidationResult:
+        service = _service(context)
+        if service is None:
+            return ValidationResult(ok=False, error=NO_SERVICE)
+        if not service.history:
+            return ValidationResult(ok=False, error="Nothing to put back; no cells were written in this session.")
+        change = service.history[-1]
+        diff = unified_text_diff("\n".join(grid_lines(change.after, change.address)) + "\n", "\n".join(grid_lines(change.before, change.address)) + "\n", label=change.label)
+        return ValidationResult(
+            ok=True,
+            resolved_target=change.label,
+            resolved_arguments={},
+            confirmation_preview=ConfirmationPreview(summary=f"Put back the previous contents of {change.label} (written {change.made_at[11:16]} UTC)", target=change.label, title="Excel", metadata={"diff": diff}),
+        )
+
+    def execute(self, request: ActionRequest, context: object) -> ActionResult:
+        service = _service(context)
+        if service is None:
+            return ActionResult(status="failed", message=NO_SERVICE, action=self.name, error="no_service")
+        try:
+            change, report = service.undo_last()
+        except (WorkbookUnavailable, ExcelWriteRefused, ExcelBusy) as error:
+            return ActionResult(status="failed", message=str(error), action=self.name, error="undo_failed")
+        source = Source("excel_undo", "document", f"{change.path}#{change.sheet}!{change.address}")
+        message = f"Put back {report.cells} cell{'s' if report.cells != 1 else ''} in {change.label}."
+        return ActionResult(status="success", message=message, action=self.name, resolved_target=change.label, results=(status("ok", message, source=source),))
+
+
+EXCEL_ACTIONS = (ExcelWorkbookAction, ExcelReadAction, ExcelFindAction, ExcelCheckAction, ExcelWriteAction, ExcelUndoAction)
+
+__all__ = ["EXCEL_ACTIONS", "ExcelCheckAction", "ExcelFindAction", "ExcelReadAction", "ExcelUndoAction", "ExcelWorkbookAction", "ExcelWriteAction"]

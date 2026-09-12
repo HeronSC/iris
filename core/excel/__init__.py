@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from core.excel.closed import ClosedExcel, WorkbookUnavailable
-from core.excel.live import LiveExcel, excel_application
-from core.excel.models import CellHit, RangeData, SheetInfo, WorkbookInfo
+from core.actions.diffs import unified_text_diff
+from core.excel.live import ExcelBusy, ExcelWriteRefused, LiveExcel, LiveWriter, WriteReport, excel_application, normalize_grid
+from core.excel.models import CellHit, RangeData, SheetInfo, WorkbookInfo, cell_address
 
 logger = logging.getLogger(__name__)
 
 NO_WORKBOOK = "No workbook is in view. Open one in Excel, or say which file."
+EDIT_NEEDS_EXCEL = "Edits go through Excel itself, so open the workbook in Excel first; files on disk are read-only here."
+MAX_HISTORY = 20
 
 
 @dataclass(frozen=True)
@@ -33,6 +38,8 @@ class ExcelService:
         self.live = live or LiveExcel(excel_application)
         self.closed = closed or ClosedExcel()
         self.context_service = context_service
+        self.writer = LiveWriter(self.live)
+        self.history: list[CellChange] = []
 
     def within_roots(self, path: str | Path) -> bool:
         if not self.allowed_roots:
@@ -103,5 +110,74 @@ class ExcelService:
     def open_workbooks(self) -> list[tuple[str, str]]:
         return self.live.workbooks()
 
+    def preview_write(self, target: Target, sheet: str | None, address: str, values: Any) -> dict[str, Any]:
+        if not target.live:
+            raise WorkbookUnavailable(EDIT_NEEDS_EXCEL)
+        grid = normalize_grid(values)
+        sheet_name, resolved, formulas, current, rows, columns = self.writer.current(target.handle, sheet, address)
+        if len(grid) != rows or len(grid[0]) != columns:
+            raise ExcelWriteRefused(f"{resolved} is {rows} x {columns} but {len(grid)} x {len(grid[0])} values were given")
+        _target_sheet, protected = self.writer.sheet_state(target.handle, sheet)
+        if protected:
+            raise ExcelWriteRefused(f"Sheet {sheet_name} is protected; unprotect it in Excel first")
+        label = f"{target.name} {sheet_name}!{resolved}"
+        diff = unified_text_diff("\n".join(grid_lines(formulas, resolved)) + "\n", "\n".join(grid_lines(grid, resolved)) + "\n", label=label)
+        changed = sum(1 for before_row, after_row in zip(formulas, grid) for before, after in zip(before_row, after_row) if str(before if before is not None else "") != str(after if after is not None else ""))
+        return {"sheet": sheet_name, "address": resolved, "before": formulas, "values": current, "after": tuple(tuple(row) for row in grid), "diff": diff, "changed": changed, "cells": rows * columns, "label": label}
 
-__all__ = ["CellHit", "ClosedExcel", "ExcelService", "LiveExcel", "NO_WORKBOOK", "RangeData", "SheetInfo", "Target", "WorkbookInfo", "WorkbookUnavailable"]
+    def write(self, target: Target, sheet: str | None, address: str, values: Any) -> WriteReport:
+        if not target.live:
+            raise WorkbookUnavailable(EDIT_NEEDS_EXCEL)
+        report = self.writer.write(target.handle, sheet, address, values)
+        self.history.append(CellChange(path=target.path, sheet=report.sheet, address=report.address, before=report.before, after=report.after, made_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat()))
+        del self.history[:-MAX_HISTORY]
+        return report
+
+    def undo_last(self) -> tuple[CellChange, WriteReport]:
+        if not self.history:
+            raise WorkbookUnavailable("Nothing to put back; no cells were written in this session.")
+        change = self.history[-1]
+        handle = self.live.workbook(change.path)
+        if handle is None:
+            raise WorkbookUnavailable(f"{Path(change.path).name} is no longer open in Excel, so its cells cannot be put back from here.")
+        report = self.writer.write(handle, change.sheet, change.address, [list(row) for row in change.before], check_errors=False)
+        self.history.pop()
+        return change, report
+
+
+@dataclass(frozen=True)
+class CellChange:
+    path: str
+    sheet: str
+    address: str
+    before: tuple[tuple[Any, ...], ...]
+    after: tuple[tuple[Any, ...], ...]
+    made_at: str
+
+    @property
+    def label(self) -> str:
+        return f"{Path(self.path).name} {self.sheet}!{self.address}"
+
+
+def grid_lines(grid: Sequence[Sequence[Any]], address: str) -> list[str]:
+    match = re.match(r"^\$?([A-Za-z]{1,3})\$?(\d+)", address.split("!")[-1])
+    start_column = 1
+    start_row = 1
+    if match:
+        start_column = column_index(match.group(1).upper())
+        start_row = int(match.group(2))
+    lines: list[str] = []
+    for row_offset, row in enumerate(grid):
+        for column_offset, value in enumerate(row):
+            lines.append(f"{cell_address(start_row + row_offset, start_column + column_offset)} = {'' if value is None else value}")
+    return lines
+
+
+def column_index(letters: str) -> int:
+    index = 0
+    for char in letters:
+        index = index * 26 + (ord(char) - 64)
+    return index
+
+
+__all__ = ["CellChange", "CellHit", "ClosedExcel", "EDIT_NEEDS_EXCEL", "ExcelBusy", "ExcelService", "ExcelWriteRefused", "LiveExcel", "NO_WORKBOOK", "RangeData", "SheetInfo", "Target", "WorkbookInfo", "WorkbookUnavailable", "WriteReport", "grid_lines"]
