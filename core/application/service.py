@@ -44,6 +44,7 @@ from core.actions.changes import ChangeLedger
 from core.assistant.backup_command import BackupCommandHandler
 from core.assistant.changes_command import ChangesCommandHandler
 from core.assistant.context_command import ContextCommandHandler
+from core.assistant.tool_progress import describe_tool_event
 from core.assistant.stop_command import StopCommandHandler
 from core.code import CodeService
 from core.knowledge.scopes import resolve_scope, visible_scopes
@@ -535,6 +536,7 @@ class IrisApplication:
         self.stop_handler = StopCommandHandler(self.halt, self.release, output=self._sink)
         self.context_handler = ContextCommandHandler(self.context_service, output=self._sink)
         self.coordinator.context_provider = self._screen_prompt
+        self.coordinator.on_tool_event = self._on_tool_event
         self.context_service.start()
         self.why_handler = WhyCommandHandler(
             log_file=log_dir_for(self.config) / LOG_FILE_NAME,
@@ -1154,6 +1156,11 @@ class IrisApplication:
         if not requires_tool:
             return False
         return intent in {"find_files", "read_file", "count_files", "select_pending_result"}
+
+    def _on_tool_event(self, event: dict[str, Any]) -> None:
+        if self._active_event_handler is None:
+            return
+        self._emit_message(MessageRole.PROGRESS, describe_tool_event(event), IrisStatus.THINKING)
 
     def _emit_delta(self, text: str) -> None:
         if self._active_event_handler is not None and text:

@@ -788,14 +788,17 @@ Rendering only. *What* gets rendered is defined in 2.7.
 	2026-09-10: the coordinator streams the main answer through `on_delta`, the service turns
 	fragments into `IrisEvent.delta`, the desktop window rewrites the placeholder bubble as text
 	arrives, and Stop closes the model stream and keeps what came through.
-- [~] Show tool and action status clearly — what is running, what it touched, what it cost.
+- [x] Show tool and action status clearly — what is running, what it touched, what it cost.
 	**Built 2026-09-12:** every response carries `metadata["activity"]` -- the request's actions
 	and tools with status and target, model calls with model, tokens and wall time, permission
 	refusals, total elapsed -- assembled from the same audit stream, metrics and log that `/why`
 	reads (`WhyCommandHandler.summary`). The window shows it as one line under the header
 	("Tools: al_symbol codeunit 80 Sales-Post (ok) · Model: qwen2.5-coder, 1 call, 750 tokens,
-	1.5 s · Total 2.1 s") and "Working…" while a request runs. Per-tool progress *during* a
-	request is not emitted yet.
+	1.5 s · Total 2.1 s") and "Working…" while a request runs. **Per-tool progress during a
+	request, 2026-09-12:** the agent reports every tool start and end (name, the argument that
+	names its target, status, elapsed) through the coordinator to the application, which emits
+	them as progress messages; the window's activity line shows "Running web_search on platypus
+	venom…" and then "Finished web_search in 1.2 s: ok" as they happen.
 - [x] Show pending confirmations and approvals prominently (10). **Built 2026-09-12:** while an
 	action waits, an approval bar with Approve and Cancel sits at the top of the panel and the
 	change itself is a card -- title, summary, target, the unified diff or the after-state, and

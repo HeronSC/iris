@@ -56,6 +56,8 @@ from ui.results_panel import ResultsPanel, markdown_to_html, results_fragment
 from ui.desktop_extras import DEFAULT_HOTKEY, GlobalHotkey, TrayController, make_icon
 #! @allow-local-import
 from core.assistant.why_command import describe_activity
+#! @allow-local-import
+from core.assistant.tool_progress import is_tool_progress
 
 
 class ChatInput(QTextEdit):
@@ -502,6 +504,9 @@ class IrisWindow(QMainWindow):
                 return
             self._append_live_detail_event(event.message.role, event.message.text)
             if event.message.role == MessageRole.PROGRESS:
+                if is_tool_progress(event.message.text):
+                    self.activity_label.setText(event.message.text)
+                    self.activity_label.setVisible(True)
                 return
             self._append_message(event.message.role, event.message.text)
 

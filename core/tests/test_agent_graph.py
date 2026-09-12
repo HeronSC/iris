@@ -148,6 +148,17 @@ class AgentRoutingTests(unittest.TestCase):
         self.assertEqual(self.learned[-1][1], "config_set_value")
         self.assertEqual(coordinator.completed[-1]["tool_status"]["status"], "success")
 
+    def test_tool_events_report_start_and_end(self) -> None:
+        events: list[dict] = []
+        executor = FakeExecutor(self.registry)
+        agent = IrisAgent(FakeCoordinator(FakeLLM('{"intent":"config_set_value","arguments":{"key":"model","value":"qwen3:8b"}}')), tool_registry=self.registry.tools, action_executor=executor, on_tool_event=events.append)
+        agent.run("set model to qwen3:8b", session_id="events")
+        self.assertEqual([item["phase"] for item in events], ["start", "end"])
+        self.assertEqual(events[0]["name"], "config_set_value")
+        self.assertEqual(events[0]["arguments"]["key"], "model")
+        self.assertEqual(events[1]["status"], "success")
+        self.assertGreaterEqual(events[1]["ms"], 0.0)
+
     def test_launch_and_profile_and_remove_facets(self) -> None:
         for response, action, key in (
             ('{"intent":"launch_application","arguments":{"app_name":"visual studio code"}}', "launch_application", "app_name"),

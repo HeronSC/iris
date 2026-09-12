@@ -95,6 +95,7 @@ class AssistantCoordinator:
         self._agent: IrisAgent | None = None
         self._turn_cache: dict[str, Any] = {}
         self.context_provider: Callable[[], str] | None = None
+        self.on_tool_event: Callable[[dict[str, Any]], None] | None = None
         audit_path = self.config.get("audit_path") if isinstance(self.config, dict) else None
         if isinstance(audit_path, str):
             audit_path = Path(audit_path)
@@ -172,8 +173,14 @@ class AssistantCoordinator:
                 on_tool_success=self._remember_tool_success,
                 tool_auditor=getattr(self, "_tool_auditor", None),
                 permissions=getattr(self, "_permissions", None),
+                on_tool_event=self._forward_tool_event,
             )
         return self._agent
+
+    def _forward_tool_event(self, event: dict[str, Any]) -> None:
+        callback = self.on_tool_event
+        if callback is not None:
+            callback(event)
 
     def current_session_id(self) -> str:
         session = self._resolve_session()

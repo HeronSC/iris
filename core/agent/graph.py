@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TypedDict
@@ -91,12 +92,14 @@ class IrisAgent:
         tool_auditor: Any | None = None,
         permissions: Any | None = None,
         max_iterations: int = MAX_ITERATIONS,
+        on_tool_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.coordinator = coordinator
         self.tool_registry = tool_registry
         self.action_executor = action_executor
         self.knowledge_router = knowledge_router
         self.on_tool_success = on_tool_success
+        self.on_tool_event = on_tool_event
         self.tool_auditor = tool_auditor
         self.permissions = permissions
         self.max_iterations = max(1, int(max_iterations))
@@ -383,9 +386,21 @@ class IrisAgent:
         return LLMResponse(content=str(text or "").strip())
 
     def _run_tool(self, name: str, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
+        self._notify_tool({"phase": "start", "name": name, "arguments": dict(arguments)})
+        started = time.perf_counter()
         result = self._dispatch(name, arguments, user_message)
         self._audit_tool(name, arguments, result)
+        self._notify_tool({"phase": "end", "name": name, "status": result.get("status"), "error": result.get("error"), "ms": (time.perf_counter() - started) * 1000})
         return result
+
+    def _notify_tool(self, event: dict[str, Any]) -> None:
+        callback = self.on_tool_event
+        if callback is None:
+            return
+        try:
+            callback(event)
+        except Exception as error:
+            logger.debug("Tool progress callback failed: %s", error)
 
     def _dispatch(self, name: str, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
         definition = self.tool_registry.get(name) if self.tool_registry is not None else None
