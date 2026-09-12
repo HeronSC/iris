@@ -1395,17 +1395,27 @@ eval is a saved-requests fixture plus a scoring script in the same suite.
 
 - [x] Automated test suite. -> `core/run_tests.py`, `core/tests/`
 - [x] House rules enforced mechanically. -> `tools/house_rules.py`, `.pre-commit-config.yaml`
-- [ ] A saved set of real requests, used to check routing, retrieval, and answer quality before
-	and after a change.
-- [ ] Measure retrieval quality directly — does the right memory come back? — not by feel.
+- [~] A saved set of real requests, used to check routing, retrieval, and answer quality before
+	and after a change. **Built 2026-09-12:** `/eval add <kind|intent=..|memory=..> :: <request>`
+	saves a request with what it should do into `Data\Evaluation\requests.jsonl`; `/eval` runs
+	the set through the request pipeline and the small-talk/code classifiers without a model call,
+	prints the failures, and appends the run to `runs.jsonl`. Answer quality is not scored.
+	-> `core/assistant/eval_command.py`.
+- [~] Measure retrieval quality directly — does the right memory come back? — not by feel. A
+	`memory=<text>` expectation passes when that text is in the top five records the retriever
+	returns for the request; `comparison.py` still does hit-rate-at-N for the layer as a whole.
 - [x] A latency budget per request class, and a warning when it is exceeded. **Built
 	2026-09-12:** `latency_budget_ms` in config (defaults: chat 8 s, code 20 s, intent 2.5 s,
 	decision 6 s, summary 12 s, embedding 2 s) checked against the metrics table's per-class
 	averages -- `/models budget [hours]` says which class is over, and `/health` lists it under
 	`broken`. A class with fewer than three calls is not judged. -> `core/llm/budget.py`.
-- [ ] Record failures in normal use — wrong tool, wrong answer, bad context — and feed them into
-	2.2 instead of losing them.
-- [ ] Regression check before swapping a model or changing a routing rule (2.4).
+- [x] Record failures in normal use — wrong tool, wrong answer, bad context — and feed them into
+	2.2 instead of losing them. Corrections (`/correct`), undone edits and open questions
+	(`record_gap`) are already observations in the knowledge store (2.2); `/eval failures` lists
+	them together with the hint to turn one into a saved request.
+- [~] Regression check before swapping a model or changing a routing rule (2.4). `/eval` names
+	any request that passed on the previous run and fails now; it covers routing and retrieval,
+	not the model's answers.
 
 ---
 

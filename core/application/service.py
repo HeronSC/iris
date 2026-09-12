@@ -48,6 +48,7 @@ from core.assistant.learning import LearningLoop
 from core.actions.bootstrap import document_search_config
 from core.documents.roots import probe_roots
 from core.scheduler.jobs import audit_retention
+from core.assistant.eval_command import EvalCommandHandler
 from core.assistant.principles_command import PrinciplesCommandHandler
 from core.knowledge.principles import PrincipleService
 from core.assistant.tool_progress import describe_tool_event
@@ -208,6 +209,7 @@ class IrisApplication:
         self.workflow_handler: CommandHandler = _NoopCommandHandler()
         self.corrections_handler: CommandHandler = _NoopCommandHandler()
         self.principles_handler: CommandHandler = _NoopCommandHandler()
+        self.eval_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
         self.attached_host: dict[str, Any] | None = None
 
@@ -524,6 +526,13 @@ class IrisApplication:
         self.principles = PrincipleService(self.knowledge.records)
         self.learning = LearningLoop(self.knowledge, request_id=lambda: getattr(self, "last_request_id", None))
         self.principles_handler = PrinciplesCommandHandler(self.principles, output=self._sink, actor=str(self.config.get("assistant_user", "user")))
+        self.eval_handler = EvalCommandHandler(
+            Path(self.config["memory_path"]).parent / "Evaluation",
+            output=self._sink,
+            pipeline=getattr(self.coordinator, "request_pipeline", None),
+            retriever=self.knowledge_retriever,
+            knowledge=self.knowledge,
+        )
         self.corrections_handler = CorrectionsCommandHandler(
             self.knowledge,
             last_request_id=lambda: getattr(self, "last_request_id", None),
@@ -737,6 +746,8 @@ class IrisApplication:
             if self._handle_slash_command(self.corrections_handler, stripped, status, command_prefixes=("/correct", "/corrections")):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.principles_handler, stripped, status, command_prefixes=("/principles",)):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.eval_handler, stripped, status, command_prefixes=("/eval",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)

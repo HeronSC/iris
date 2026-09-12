@@ -1302,6 +1302,7 @@ class AssistantCoordinator:
             "- /topic <name-or-id>\n"
             "- /conversations\n"
             "- /resume <session-id>\n"
+            "- /eval | /eval add <kind> :: <request> | /eval list | /eval failures\n"
             "- /new"
         )
         return self._trace_and_persist(
