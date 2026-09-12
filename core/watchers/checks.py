@@ -182,6 +182,23 @@ def gateway_unreachable(params: dict[str, Any], _baseline: Any) -> CheckResult:
     return CheckResult(True, f"Gateway {gateway} does not answer pings ({result.note or 'timed out'})", None)
 
 
+def camera_offline(params: dict[str, Any], _baseline: Any, context: Any = None) -> CheckResult:
+    service = getattr(context, "cameras", None)
+    if service is None or not getattr(service, "configured", False):
+        return CheckResult(False, getattr(service, "problem", None) or "Cameras are not configured", None)
+    try:
+        offline = service.offline()
+    except Exception as error:
+        return CheckResult(True, f"Blue Iris could not be asked: {error}", None)
+    wanted = str(params.get("camera") or "").strip().casefold()
+    if wanted:
+        offline = [camera for camera in offline if wanted in (camera.name.casefold(), camera.short_name.casefold())]
+    if offline:
+        names = ", ".join(camera.name for camera in offline)
+        return CheckResult(True, f"Camera offline: {names}", names)
+    return CheckResult(False, "Every camera is online", None)
+
+
 KINDS: dict[str, CheckKind] = {
     kind.name: kind
     for kind in (
@@ -196,6 +213,7 @@ KINDS: dict[str, CheckKind] = {
         CheckKind("path_missing", "A file or folder disappears", {"path": "file or folder"}, path_missing),
         CheckKind("host_unreachable", "A host stops answering on a TCP port", {"host": "name or ip", "port": "port (default 443)"}, host_unreachable),
         CheckKind("gateway_unreachable", "The default gateway stops answering pings", {"count": "pings per check (default 2)"}, gateway_unreachable),
+        CheckKind("camera_offline", "A Blue Iris camera goes offline or loses signal", {"camera": "one camera (default all)"}, camera_offline, needs_context=True),
     )
 }
 

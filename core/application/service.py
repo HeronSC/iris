@@ -46,6 +46,7 @@ from core.assistant.changes_command import ChangesCommandHandler
 from core.assistant.context_command import ContextCommandHandler
 from core.assistant.tool_progress import describe_tool_event
 from core.assistant.stop_command import StopCommandHandler
+from core.cameras import CameraService
 from core.code import CodeService
 from core.knowledge.scopes import resolve_scope, visible_scopes
 from core.projects import ProjectService
@@ -421,6 +422,7 @@ class IrisApplication:
         )
         self.changes = ChangeLedger(Path(self.config["memory_path"]).parent / "Backups" / "undo", audit=self.audit_stream)
         self.context_service = build_context_service(self.config)
+        self.camera_service = CameraService.from_config(self.config, self.secrets)
         code_cfg = self.config.get("code", {}) if isinstance(self.config.get("code"), dict) else {}
         self.code_service = CodeService(
             document_config.root_paths(),
@@ -439,6 +441,7 @@ class IrisApplication:
             project_service=self.project_service,
             active_project_id=lambda: self.state.get("active_project_id") if isinstance(getattr(self, "state", None), dict) else None,
             knowledge=self.knowledge,
+            cameras=self.camera_service,
             audit_folder=self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit",
             permissions=self.permissions,
             ledger=self.changes,
@@ -824,7 +827,7 @@ class IrisApplication:
             notifiers,
             quiet_hours=quiet,
             inbox=inbox,
-            context=WatcherContext(knowledge=self.knowledge),
+            context=WatcherContext(knowledge=self.knowledge, cameras=getattr(self, "camera_service", None)),
         )
         self.schedules = ScheduleService(
             configuration / "schedules.json",

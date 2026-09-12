@@ -13,6 +13,7 @@ import structlog
 
 from core.actions.bootstrap import build_action_layer
 from core.actions.changes import ChangeLedger
+from core.cameras import CameraService
 from core.conversation.persistent_memory.models import MemoryConfig
 from core.documents.catalog import DocumentCatalog
 from core.host.health import HOST_SERVICE, health_report
@@ -117,13 +118,14 @@ class IrisHost:
         inbox = InboxNotifier(self.audit_stream.folder / "notifications.jsonl")
         notifiers: dict[str, Any] = {"log": LogNotifier(), "inbox": inbox}
         register_kinds(KNOWLEDGE_KINDS)
+        self.camera_service = CameraService.from_config(self.config, self.secrets)
         self.watchers = WatcherService(
             configuration / "watchers.json",
             configuration / "watchers_state.json",
             notifiers,
             quiet_hours=quiet,
             inbox=inbox,
-            context=WatcherContext(knowledge=self.knowledge),
+            context=WatcherContext(knowledge=self.knowledge, cameras=self.camera_service),
         )
         self.schedules = ScheduleService(
             configuration / "schedules.json",
@@ -142,6 +144,7 @@ class IrisHost:
             ledger=self.changes,
             config_path=self.config_path,
             memory_path=Path(self.config["memory_path"]),
+            cameras=self.camera_service,
         )
         self.tool_registry = action_layer.tool_registry
         self.action_executor = action_layer.executor

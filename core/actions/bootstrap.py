@@ -12,6 +12,7 @@ from core.actions.executor import ActionExecutionContext, ActionExecutor, System
 from core.actions.implementations.add_document_root import AddDocumentRootAction
 from core.actions.implementations.clipboard import ClipboardAction
 from core.actions.implementations.active_context import ActiveContextAction
+from core.actions.implementations.camera_tools import CAMERA_ACTIONS
 from core.actions.implementations.code_tools import CODE_ACTIONS
 from core.actions.implementations.excel_tools import EXCEL_ACTIONS
 from core.actions.implementations.file_tools import FILE_ACTIONS
@@ -128,6 +129,7 @@ def build_action_layer(
     active_project_id: Any = None,
     excel_service: Any = None,
     knowledge: Any = None,
+    cameras: Any = None,
 ) -> ActionLayer:
     registry_of_tools = tool_registry or ToolRegistry()
     action_registry = ActionRegistry(registry_of_tools)
@@ -164,6 +166,8 @@ def build_action_layer(
         action_registry.register(memory_action())
     for file_action in FILE_ACTIONS:
         action_registry.register(file_action())
+    for camera_action in CAMERA_ACTIONS:
+        action_registry.register(camera_action())
 
     documents = document_config or document_search_config(config)
     applications, alias_map = application_maps(config)
@@ -190,6 +194,7 @@ def build_action_layer(
             active_project_id=active_project_id,
             excel_service=excel_service,
             knowledge=knowledge,
+            cameras=cameras,
         ),
     )
     return ActionLayer(

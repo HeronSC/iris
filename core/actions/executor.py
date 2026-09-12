@@ -70,6 +70,7 @@ class ActionExecutionContext:
     active_project_id: Any = None
     excel_service: Any = None
     knowledge: Any = None
+    cameras: Any = None
 
 
 @dataclass(frozen=True)

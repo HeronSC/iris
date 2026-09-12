@@ -44,6 +44,7 @@ def format_duration(seconds: int) -> str:
 @dataclass(frozen=True)
 class WatcherContext:
     knowledge: Any = None
+    cameras: Any = None
 
 
 @dataclass(frozen=True)

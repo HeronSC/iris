@@ -1031,9 +1031,20 @@ rules out every hosted speech API, which leaves a short, good list.
 
 ### 9.1 Blue Iris and Camera Intelligence
 
-- [ ] Keep Blue Iris as the NVR/recording layer initially.
-- [ ] Integrate Iris above Blue Iris as intelligence.
-- [ ] Consume Blue Iris motion/object triggers.
+- [x] Keep Blue Iris as the NVR/recording layer initially. **Built 2026-09-12:**
+	`core/cameras/blueiris.py` is a read-only client for the JSON API -- the two-step MD5 login,
+	`camlist`, `alertlist`, `status`, alert thumbnails and camera snapshots -- with the session
+	reused and renewed when Blue Iris drops it. `blue_iris.url` and `blue_iris.user` in
+	`config.json`, the password in Credential Manager as `blue_iris:password`; until those are
+	set the tools say exactly that. Not yet configured on this machine, so verified against a
+	fake server only.
+- [~] Integrate Iris above Blue Iris as intelligence. Tools `camera_status` (every camera:
+	online, recording, motion, alerting, fps, size, clips, triggers), `camera_alerts` (newest
+	first, with the zones or objects that triggered them and a thumbnail of each as an image
+	result the panel shows) and `camera_snapshot` (a current still). The vision index below is
+	the intelligence part and is not started.
+- [ ] Consume Blue Iris motion/object triggers. Alerts are pulled on request; the MQTT
+	listener that receives them as they happen waits on the broker's address and topic.
 - [ ] On event:
 	grab snapshot/clip -> analyze -> store metadata -> add to searchable vision index.
 - [ ] Support semantic camera history search.
@@ -1041,10 +1052,14 @@ rules out every hosted speech API, which leaves a short, good list.
 - [ ] Return thumbnails and timestamps (rendered per 2.7).
 - [ ] Support follow-up drill-in.
 	Example: "Show me number 3." then play/open recording.
-- [ ] Show camera status.
-- [ ] Show recording status.
+- [x] Show camera status. `camera_status`.
+- [x] Show recording status. Part of `camera_status` (recording, motion, alerting per camera).
 - [ ] Show storage health — reuse the drive checks in 7.1 rather than a camera-specific one.
-- [ ] Alert on offline cameras (delivery per 8.2).
+	Blue Iris runs on another machine, so 7.1's local drive checks do not reach its disks;
+	`status` from the JSON API carries them and is fetched but not yet surfaced.
+- [x] Alert on offline cameras (delivery per 8.2). Watcher kind `camera_offline` (all cameras,
+	or one by name), through the same notifiers as every other watcher, in the desktop and the
+	headless host alike.
 - [ ] Set retention for snapshots, clips, and the vision index, and keep all of it local.
 - [ ] Revisit NVR replacement only long-term (not early scope).
 - [ ] **Decided 2026-09-10:** Blue Iris runs on another machine; its web server is reachable on the
