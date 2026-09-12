@@ -52,6 +52,10 @@ from core.profile.loader import AssistantMemoryError
 from core.results.html import render_confirmation, render_search_results
 #! @allow-local-import
 from ui.results_panel import ResultsPanel, markdown_to_html, results_fragment
+#! @allow-local-import
+from ui.desktop_extras import DEFAULT_HOTKEY, GlobalHotkey, TrayController, make_icon
+#! @allow-local-import
+from core.assistant.why_command import describe_activity
 
 
 class ChatInput(QTextEdit):
@@ -344,6 +348,12 @@ class IrisWindow(QMainWindow):
         header.addWidget(self.details_toggle)
         header.addWidget(self.status_label)
 
+        self.activity_label = QLabel("")
+        self.activity_label.setWordWrap(True)
+        self.activity_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.activity_label.setStyleSheet("color: palette(mid); font-size: 11px;")
+        self.activity_label.setVisible(False)
+
         left_panel = QWidget()
         left_layout = QVBoxLayout()
         left_layout.addWidget(self.conversation_view, 1)
@@ -386,6 +396,7 @@ class IrisWindow(QMainWindow):
 
         body = QVBoxLayout()
         body.addLayout(header)
+        body.addWidget(self.activity_label)
         body.addWidget(self.splitter, 1)
         body.addLayout(composer)
 
@@ -396,7 +407,38 @@ class IrisWindow(QMainWindow):
         self._restore_window_state()
         self._set_controls_enabled(False)
         self._set_confirmation_controls_visible(False)
+        self.setWindowIcon(make_icon())
+        self._quit_requested = False
+        self.tray = TrayController(self, close_to_tray=str(self.settings.value("window/close_to_tray")).lower() in {"true", "1"})
+        self.tray.showRequested.connect(self.bring_to_front)
+        self.tray.hideRequested.connect(self.hide)
+        self.tray.quitRequested.connect(self._quit_from_tray)
+        self.tray.start()
+        self.hotkey = GlobalHotkey(self.bring_to_front)
+        application = QApplication.instance()
+        if application is not None:
+            application.installNativeEventFilter(self.hotkey)
+        self.hotkey.register(str(self.settings.value("window/hotkey") or DEFAULT_HOTKEY))
         self._start_engine_initialization()
+
+    def bring_to_front(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        else:
+            self.show()
+        self.raise_()
+        self.activateWindow()
+        self._focus_input_box()
+
+    def _quit_from_tray(self) -> None:
+        self._quit_requested = True
+        self.close()
+
+    def _show_activity(self, response) -> None:
+        activity = self._response_metadata(response).get("activity") if response is not None else None
+        summary = describe_activity(activity if isinstance(activity, dict) else None)
+        self.activity_label.setText(summary)
+        self.activity_label.setVisible(bool(summary))
 
     def _start_engine_initialization(self) -> None:
         if not self.config_path.exists():
@@ -480,6 +522,8 @@ class IrisWindow(QMainWindow):
         self._active_input_text = text
         self.input_box.clear()
         self.set_status("Thinking")
+        self.activity_label.setText("Working…")
+        self.activity_label.setVisible(True)
         self.send_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.input_box.setEnabled(False)
@@ -514,6 +558,7 @@ class IrisWindow(QMainWindow):
         self._active_input_text = ""
         self._current_response = response
         self._render_response(response)
+        self._show_activity(response)
         status_text = response.status.value.replace("_", " ").title()
         self.set_status(status_text)
         self.pending_text = None
@@ -1188,6 +1233,15 @@ class IrisWindow(QMainWindow):
         self.details_toggle.setChecked(True)
 
     def closeEvent(self, event) -> None:
+        tray = getattr(self, "tray", None)
+        if tray is not None and tray.close_to_tray and not self._quit_requested and tray.available:
+            self.settings.setValue("window/close_to_tray", True)
+            event.ignore()
+            self.hide()
+            tray.notify("Iris is still running", "Use the tray icon or the hotkey to bring it back.")
+            return
+        if tray is not None:
+            self.settings.setValue("window/close_to_tray", tray.close_to_tray)
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/splitter", self.splitter.saveState())
         self.settings.setValue("window/details_visible", self.details_panel.isVisible())
@@ -1208,6 +1262,11 @@ class IrisWindow(QMainWindow):
             self.app_service.shutdown()
         except (RuntimeError, OSError, ValueError, AssertionError) as error:
             QMessageBox.warning(self, "Shutdown Warning", f"Shutdown encountered an error: {error}")
+        hotkey = getattr(self, "hotkey", None)
+        if hotkey is not None:
+            hotkey.unregister()
+        if tray is not None:
+            tray.stop()
         super().closeEvent(event)
 
 

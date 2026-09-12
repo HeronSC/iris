@@ -747,7 +747,14 @@ Rendering only. *What* gets rendered is defined in 2.7.
 	2026-09-10: the coordinator streams the main answer through `on_delta`, the service turns
 	fragments into `IrisEvent.delta`, the desktop window rewrites the placeholder bubble as text
 	arrives, and Stop closes the model stream and keeps what came through.
-- [ ] Show tool and action status clearly — what is running, what it touched, what it cost.
+- [~] Show tool and action status clearly — what is running, what it touched, what it cost.
+	**Built 2026-09-12:** every response carries `metadata["activity"]` -- the request's actions
+	and tools with status and target, model calls with model, tokens and wall time, permission
+	refusals, total elapsed -- assembled from the same audit stream, metrics and log that `/why`
+	reads (`WhyCommandHandler.summary`). The window shows it as one line under the header
+	("Tools: al_symbol codeunit 80 Sales-Post (ok) · Model: qwen2.5-coder, 1 call, 750 tokens,
+	1.5 s · Total 2.1 s") and "Working…" while a request runs. Per-tool progress *during* a
+	request is not emitted yet.
 - [x] Show pending confirmations and approvals prominently (10). **Built 2026-09-12:** while an
 	action waits, an approval bar with Approve and Cancel sits at the top of the panel and the
 	change itself is a card -- title, summary, target, the unified diff or the after-state, and
@@ -755,7 +762,12 @@ Rendering only. *What* gets rendered is defined in 2.7.
 	`irreversible` on the pending preview and the service passes the preview's fields through
 	`DetailContent.metadata["confirmation"]`, so any client can render the same card.
 - [ ] Improve conversation and project organization (2.5, 3.4).
-- [ ] Make it reachable instantly: tray icon, global hotkey, a small always-available input.
+- [~] Make it reachable instantly: tray icon, global hotkey, a small always-available input.
+	**Built 2026-09-12:** a tray icon (`ui/desktop_extras.py`) with Show, Hide to tray, "Close to
+	tray instead of quitting" (remembered in QSettings) and Quit; a global hotkey, Ctrl+Alt+I by
+	default (`window/hotkey` in QSettings), registered with `RegisterHotKey` and caught by a
+	native event filter, that brings the window to the front and focuses the input. The small
+	always-available input is not built.
 - [ ] Keyboard-first navigation and a command palette.
 - [~] Show sources, and let the user open the underlying file, page, or record in one click.
 	**Built 2026-09-12:** every card shows its source and the time it was made; a web source opens

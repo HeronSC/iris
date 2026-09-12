@@ -11,6 +11,39 @@ from core.audit.stream import AuditCategory
 from core.observability.logging_setup import read_log_entries
 
 
+def describe_activity(activity: dict[str, Any] | None) -> str:
+    if not activity:
+        return ""
+    parts: list[str] = []
+    steps = [item for item in (activity.get("actions") or []) + (activity.get("tools") or []) if item.get("name")]
+    if steps:
+        marks = []
+        for item in steps:
+            status = str(item.get("status") or "")
+            mark = "ok" if status in {"success", "ok", "completed"} else ("waiting" if "pending" in status else status or "?")
+            target = f" {item['target']}" if item.get("target") else ""
+            marks.append(f"{item['name']}{target} ({mark})")
+        parts.append("Tools: " + ", ".join(marks))
+    calls = activity.get("model_calls") or []
+    if calls:
+        tokens = sum(int(item.get("prompt_tokens") or 0) + int(item.get("completion_tokens") or 0) for item in calls)
+        wall = sum(float(item.get("wall_ms") or 0.0) for item in calls)
+        models = []
+        for item in calls:
+            label = str(item.get("model") or "?")
+            if label not in models:
+                models.append(label)
+        fallback = " (fallback)" if any(item.get("fallback") for item in calls) else ""
+        parts.append(f"Model: {', '.join(models)}{fallback}, {len(calls)} call{'s' if len(calls) != 1 else ''}, {tokens} tokens, {wall / 1000:.1f} s")
+    denied = [item for item in activity.get("permissions") or [] if str(item.get("status") or "").lower() in {"denied", "blocked"}]
+    if denied:
+        parts.append("Blocked: " + ", ".join(str(item.get("name")) for item in denied))
+    elapsed = activity.get("elapsed_ms")
+    if elapsed:
+        parts.append(f"Total {float(elapsed) / 1000:.1f} s")
+    return " · ".join(parts)
+
+
 class WhyCommandHandler:
     def __init__(
         self,
@@ -106,6 +139,34 @@ class WhyCommandHandler:
             for entry in warnings:
                 lines.append(f"- {entry.get('logger', '')}: {entry.get('event', '')}")
         return "\n".join(lines)
+
+    def summary(self, request_id: str | None) -> dict[str, Any]:
+        if not request_id:
+            return {}
+        turn = self._turn_entry(request_id)
+        model_calls = [
+            {
+                "task": row.get("task") or "default",
+                "model": row.get("model"),
+                "prompt_tokens": int(row.get("prompt_tokens") or 0),
+                "completion_tokens": int(row.get("completion_tokens") or 0),
+                "wall_ms": float(row.get("wall_ms") or 0.0),
+                "outcome": row.get("outcome"),
+                "fallback": bool(row.get("fallback")),
+            }
+            for row in self._model_calls(request_id)
+        ]
+        actions = [
+            {"name": row.get("tool") or row.get("action"), "status": row.get("status"), "target": row.get("resolved_target"), "error": row.get("error")}
+            for row in self._actions(request_id)
+        ]
+        tools = [{"name": event.event, "status": event.status, "kind": event.subject, "error": event.error} for event in self._tools(request_id)]
+        permissions = [{"name": event.event, "status": event.status, "target": event.target, "reason": event.message} for event in self._permissions(request_id)]
+        payload: dict[str, Any] = {"request_id": request_id, "model_calls": model_calls, "actions": actions, "tools": tools, "permissions": permissions}
+        if turn is not None:
+            payload["route"] = turn.get("route")
+            payload["elapsed_ms"] = float(turn.get("elapsed_ms") or 0.0)
+        return payload
 
     def _describe_trace(self, trace: dict[str, Any]) -> list[str]:
         lines: list[str] = []

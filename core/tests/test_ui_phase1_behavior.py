@@ -307,6 +307,26 @@ class UiPhase1BehaviorTests(unittest.TestCase):
         self.assertNotIn("### **Physical Traits**", details_text)
         window.close()
 
+    def test_activity_strip_shows_tools_and_model_after_a_turn(self) -> None:
+        ui_module = _load_ui_module()
+        window, _ = self._create_window(ui_module, _FakeIrisApplication)
+        self.assertTrue(_wait_for(lambda: window.engine_available))
+        self.assertFalse(window.activity_label.isVisible())
+        response = IrisResponse(
+            messages=[IrisMessage(MessageRole.ASSISTANT, "done")],
+            status=IrisStatus.COMPLETE,
+            conversation=ConversationContent(message="done"),
+            metadata={"activity": {"actions": [{"name": "al_symbol", "status": "success", "target": "codeunit 80 Sales-Post"}], "model_calls": [{"model": "qwen2.5-coder", "prompt_tokens": 700, "completion_tokens": 50, "wall_ms": 1500}], "elapsed_ms": 2100}},
+        )
+        window._on_worker_finished(response)
+        self.assertIn("Tools: al_symbol codeunit 80 Sales-Post (ok)", window.activity_label.text())
+        self.assertIn("Model: qwen2.5-coder, 1 call, 750 tokens, 1.5 s", window.activity_label.text())
+        self.assertIsNotNone(window.tray)
+        self.assertEqual([action.text() for action in window.tray.icon.contextMenu().actions() if action.text()][0], "Show Iris")
+        window._on_worker_finished(IrisResponse(messages=[], status=IrisStatus.COMPLETE))
+        self.assertEqual(window.activity_label.text(), "")
+        window.close()
+
     def test_first_run_starts_maximized_with_details_visible(self) -> None:
         ui_module = _load_ui_module()
         with patch.object(ui_module, "QSettings", side_effect=lambda *_args, **_kwargs: _EmptySettings()):

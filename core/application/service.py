@@ -1402,6 +1402,9 @@ class IrisApplication:
             metadata["cancelled"] = True
         if requires_confirmation:
             metadata["awaiting_confirmation"] = True
+        activity = self._activity_summary()
+        if activity:
+            metadata["activity"] = activity
         return IrisResponse(
             messages=messages,
             status=status,
@@ -1412,6 +1415,17 @@ class IrisApplication:
             details=details,
             metadata=metadata,
         )
+
+    def _activity_summary(self) -> dict[str, Any]:
+        handler = getattr(self, "why_handler", None)
+        summary = getattr(handler, "summary", None)
+        if not callable(summary):
+            return {}
+        try:
+            return summary(getattr(self, "last_request_id", None)) or {}
+        except Exception as error:
+            logger.debug("Activity summary unavailable: %s", error)
+            return {}
 
     def _sink(self, text: str, role: str | None) -> None:
         normalized_role = self._normalize_role(role, text)
