@@ -866,13 +866,29 @@ need; this section decides what is allowed.
 	tool written next year without naming it. Denied beats allowed; a host rule covers its
 	subdomains and cannot be fooled by `example.com.evil.net`. Empty lists mean the action's own
 	roots still apply and nothing else changes. Devices arrive with 9.2.
-- [ ] Require confirmation for dangerous actions.
-- [ ] Show exactly what will change before confirming — diff, file list, target device.
-- [ ] Backup before destructive file changes.
-- [ ] Provide undo/rollback where possible, and say plainly when an action is irreversible.
+- [x] Require confirmation for dangerous actions. Declared per tool (`requires_confirmation`),
+	raised per level by the policy (`permissions.write: confirm`), and since 2026-09-12 the
+	confirmation says which of two things it is: a file write that is copied first so `/undo` can
+	put it back, or an act that cannot be undone.
+- [x] Show exactly what will change before confirming — diff, file list, target device. **Built
+	2026-09-12:** a config change previews as a unified diff of the section it touches, a profile
+	change as a diff of `profile.json`; the file about to be written is named in the preview.
+	Devices arrive with 9.2. -> `core/actions/diffs.py`.
+- [x] Backup before destructive file changes. **Built 2026-09-12:** an action names the files it
+	will write (`ValidationResult.changes`) and the executor copies each one into
+	`Data\Backups\undo\<change>\` before running it, keeping the last fifty changes. Every
+	config operation and the profile update declare theirs; a new file-writing action gets this by
+	naming its file. -> `core/actions/changes.py`.
+- [x] Provide undo/rollback where possible, and say plainly when an action is irreversible.
+	**Built 2026-09-12:** `/undo` puts the newest change back (`/undo <id>` a specific one,
+	`/changes` lists them), a file that did not exist before is removed again, and an undo is
+	itself audited. A tool declares `irreversible=True` (the clipboard does: what was on it is
+	gone) and its confirmation ends with "This cannot be undone."; the rest end with "copied first,
+	so /undo can put it back", so the difference is said before the choice is made.
 - [x] Log all changes Iris makes (2.8). One stream since 2026-09-12, tools and permission
 	decisions included.
-- [ ] Show diffs.
+- [x] Show diffs. In the confirmation before a write (above), and as a result kind (2.7) any
+	tool can return.
 - [x] Keep credentials and secrets separate from model reasoning: never in `config.json`, never in
 	a prompt, never in a log. **Built 2026-09-12:** `core/permissions/secrets.py` over Credential
 	Manager, with the names (never the values) kept in `Data\Configuration\secrets.json` so
@@ -892,10 +908,18 @@ need; this section decides what is allowed.
 	the moment a token exists and says so at startup while none does, so installing it cannot
 	lock out the desktop app or the bot mid-session; `http.require_token: true` demands one
 	outright. `/health` stays open for monitoring. Refusals are audited without the token.
-- [ ] Provide a global stop that halts running tools, workflows, and watchers at once.
-- [ ] Nothing leaves the machine by default — decided 2026-09-10. There is no cloud AI (1, 2.4);
+- [x] Provide a global stop that halts running tools, workflows, and watchers at once. **Built
+	2026-09-12:** `/stop` cancels the pending confirmation and the running request, pauses the
+	watchers and the scheduled jobs (they remember it across a restart), and halts the permission
+	policy so every tool -- native, MCP, capability -- is refused with "/resume to continue" until
+	`/resume`. When the Iris service is running, the window also calls its `POST /control/stop`, so
+	one command reaches both processes. Workflows (8.3) will run under the same latch when they
+	exist.
+- [~] Nothing leaves the machine by default — decided 2026-09-10. There is no cloud AI (1, 2.4);
 	any non-AI outbound call (search, Graph, notifications) names what it sends, and memory,
-	documents, and camera content are never part of it.
+	documents, and camera content are never part of it. Since 2026-09-12 an outbound tool is
+	declared as such, capped, and host-scoped, and `/permissions` shows the cap; "names what it
+	sends" is still per tool and not yet enforced by the policy.
 - [ ] Increase rigor as Iris shifts from advisory to action-taking behavior.
 - [x] **Decided 2026-09-10, built 2026-09-12:** secrets live in Windows Credential Manager through
 	`keyring` (installed; it selects the Windows backend itself, no service). `/secrets list|set|clear`

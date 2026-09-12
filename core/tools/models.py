@@ -57,6 +57,9 @@ class ToolDefinition:
     #: caps outbound work, and it can only do that if a tool says it is outbound
     #: rather than the policy keeping a list of tool names that will go stale.
     outbound: bool = False
+    #: True when what the tool does cannot be put back by /undo -- what was on
+    #: the clipboard, a message already sent. The confirmation says so plainly.
+    irreversible: bool = False
     source: str = "native"
     handler: Any = None
     #: Words or short phrases in a request that make this tool worth offering to

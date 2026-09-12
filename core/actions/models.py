@@ -36,6 +36,7 @@ class ValidationResult:
     resolved_target: str | None = None
     resolved_arguments: dict[str, Any] | None = None
     confirmation_preview: ConfirmationPreview | None = None
+    changes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

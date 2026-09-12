@@ -134,7 +134,36 @@ class IrisHost:
     def health(self) -> dict[str, Any]:
         report = health_report(self, host=HOST_SERVICE)
         report["http"] = {"host": self.http_host, "port": self.http_port, "running": self.http_running}
+        report["halted"] = self.permissions.halted
         return report
+
+    def halt(self) -> list[str]:
+        halted: list[str] = []
+        if not self.watchers.paused:
+            self.watchers.pause()
+            halted.append("watchers")
+        if not self.schedules.paused:
+            self.schedules.pause()
+            halted.append("scheduled jobs")
+        if not self.permissions.halted:
+            self.permissions.halt("Iris is stopped")
+            halted.append("tools")
+        logger.warning("iris host halted", halted=halted)
+        return halted
+
+    def release(self) -> list[str]:
+        released: list[str] = []
+        if self.watchers.paused:
+            self.watchers.resume()
+            released.append("watchers")
+        if self.schedules.paused:
+            self.schedules.resume()
+            released.append("scheduled jobs")
+        if self.permissions.halted:
+            self.permissions.release()
+            released.append("tools")
+        logger.info("iris host released", released=released)
+        return released
 
     @property
     def http_running(self) -> bool:

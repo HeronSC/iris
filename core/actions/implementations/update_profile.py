@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from core.actions.executor import ActionExecutionContext
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
 from core.config.document_search_mutations import build_confirmation_preview
+from core.actions.diffs import with_file_diff
 from core.tools.models import PermissionLevel, ToolDefinition
 
 
@@ -67,18 +68,22 @@ class UpdateProfileAction:
             profile_section = {}
         preview_profile = dict(profile_section)
         preview_profile.update(updates)
+        after_payload = dict(profile_payload)
+        after_payload["profile"] = preview_profile
+        preview = build_confirmation_preview(
+            summary=f"Will update profile fields: {', '.join(sorted(updates.keys()))}.",
+            target="profile",
+            after_payload={"profile": preview_profile},
+            impact="Affects future profile-aware responses.",
+            title="Profile",
+        )
         return ValidationResult(
             ok=True,
             requires_confirmation=True,
             resolved_target=str(profile_path),
             resolved_arguments={"updates": updates},
-            confirmation_preview=build_confirmation_preview(
-                summary=f"Will update profile fields: {', '.join(sorted(updates.keys()))}.",
-                target="profile",
-                after_payload={"profile": preview_profile},
-                impact="Affects future profile-aware responses.",
-                title="Profile",
-            ),
+            confirmation_preview=with_file_diff(preview, profile_path, after_payload),
+            changes=(str(profile_path),),
         )
 
     def execute(self, request: ActionRequest, context: ActionExecutionContext) -> ActionResult:

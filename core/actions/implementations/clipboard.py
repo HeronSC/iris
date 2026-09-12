@@ -20,6 +20,7 @@ class ClipboardAction:
         description="Copy text to the Windows clipboard.",
         arguments=ClipboardArguments,
         permission=PermissionLevel.WRITE,
+        irreversible=True,
         expose_to_model=False,
     )
 

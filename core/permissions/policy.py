@@ -45,6 +45,8 @@ class PermissionPolicy:
         self.denied_hosts = tuple(str(item).strip().lower() for item in denied_hosts if str(item).strip())
         self.limiter = limiter or RateLimiter(DEFAULT_LIMITS)
         self.audit = audit
+        self.halted = False
+        self.halted_reason = ""
 
     @classmethod
     def from_config(
@@ -79,7 +81,17 @@ class PermissionPolicy:
             audit=audit,
         )
 
+    def halt(self, reason: str = "Iris is stopped") -> None:
+        self.halted = True
+        self.halted_reason = reason
+
+    def release(self) -> None:
+        self.halted = False
+        self.halted_reason = ""
+
     def evaluate(self, request: PermissionRequest) -> PermissionDecision:
+        if self.halted:
+            return PermissionDecision(Decision.DENY, f"{self.halted_reason or 'Iris is stopped'}; /resume to continue", "halted")
         for path in request.paths:
             if self.denied_paths and within_any(path, self.denied_paths):
                 return PermissionDecision(Decision.DENY, f"{path} is on the denied list", "denied_paths")
@@ -130,6 +142,7 @@ class PermissionPolicy:
             "denied_hosts": list(self.denied_hosts),
             "rate_limits": {name: limit.describe() for name, limit in self.limiter.limits.items()},
             "outbound_remaining": self.outbound_remaining(),
+            "halted": self.halted,
         }
 
     def _record(self, request: PermissionRequest, decision: PermissionDecision) -> None:

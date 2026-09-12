@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -52,7 +55,10 @@ from core.assistant.intent_router import IntentRouter
 from core.assistant.memory_commands import MemoryCommandHandler
 from core.assistant.models_command import ModelsCommandHandler
 from core.assistant.permissions_command import PermissionsCommandHandler
+from core.actions.changes import ChangeLedger
 from core.assistant.backup_command import BackupCommandHandler
+from core.assistant.changes_command import ChangesCommandHandler
+from core.assistant.stop_command import StopCommandHandler
 from core.assistant.schedule_command import ScheduleCommandHandler
 from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
@@ -115,6 +121,8 @@ from core.tools.audit import ToolAuditor
 from core.tools.registry import ToolRegistry
 from core.host.health import HOST_DESKTOP, HOST_SERVICE, health_report
 from core.host.service import probe_host
+from core.server.app import DEFAULT_HOST, DEFAULT_PORT
+from core.server.auth import SECRET_PREFIX, TOKEN_HEADER
 from core.results.models import from_json_list
 from core.results.render import to_detail
 from core.scheduler.defaults import ensure_default_jobs
@@ -189,6 +197,8 @@ class IrisApplication:
         self.permissions_handler: CommandHandler = _NoopCommandHandler()
         self.schedule_handler: CommandHandler = _NoopCommandHandler()
         self.backup_handler: CommandHandler = _NoopCommandHandler()
+        self.changes_handler: CommandHandler = _NoopCommandHandler()
+        self.stop_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
         self.attached_host: dict[str, Any] | None = None
 
@@ -449,11 +459,13 @@ class IrisApplication:
             default_allowed_paths=[],
             audit=self.audit_stream,
         )
+        self.changes = ChangeLedger(Path(self.config["memory_path"]).parent / "Backups" / "undo", audit=self.audit_stream)
         self.action_executor = ActionExecutor(
             registry=action_registry,
             policy=ActionPolicy(),
             audit=action_audit,
             permissions=self.permissions,
+            ledger=self.changes,
             context=ActionExecutionContext(
                 catalog=document_catalog,
                 allowed_roots=document_config.root_paths(),
@@ -525,6 +537,8 @@ class IrisApplication:
         self.watch_handler = WatchCommandHandler(self.watchers, output=self._sink)
         self.schedule_handler = ScheduleCommandHandler(self.schedules, output=self._sink)
         self.backup_handler = BackupCommandHandler(self.backups, output=self._sink)
+        self.changes_handler = ChangesCommandHandler(self.changes, output=self._sink)
+        self.stop_handler = StopCommandHandler(self.halt, self.release, output=self._sink)
         self.why_handler = WhyCommandHandler(
             log_file=log_dir_for(self.config) / LOG_FILE_NAME,
             trace_file=getattr(getattr(self.coordinator, "trace_logger", None), "path", None),
@@ -689,6 +703,10 @@ class IrisApplication:
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.backup_handler, stripped, status, command_prefixes=("/backup",)):
                 return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.changes_handler, stripped, status, command_prefixes=("/changes", "/undo")):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.stop_handler, stripped, status, command_prefixes=("/stop", "/halt", "/resume")):
+                return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)
             if self._handle_slash_command(self.search_handler, stripped, IrisStatus.SEARCHING, command_prefixes=("/search", "/file")):
@@ -826,7 +844,71 @@ class IrisApplication:
         return service
 
     def health(self) -> dict[str, Any]:
-        return health_report(self, host=HOST_DESKTOP)
+        report = health_report(self, host=HOST_DESKTOP)
+        report["halted"] = bool(getattr(self.permissions, "halted", False))
+        return report
+
+    def halt(self) -> list[str]:
+        halted: list[str] = []
+        executor = getattr(self, "action_executor", None)
+        if executor is not None and callable(getattr(executor, "has_pending_confirmation", None)) and executor.has_pending_confirmation():
+            executor.cancel_pending()
+            halted.append("the pending confirmation")
+        cancel_event = self.state.get("cancel_event") if isinstance(getattr(self, "state", None), dict) else None
+        if isinstance(cancel_event, threading.Event) and not cancel_event.is_set():
+            cancel_event.set()
+            halted.append("the running request")
+        if not self.watchers.paused:
+            self.watchers.pause()
+            halted.append("watchers")
+        if not self.schedules.paused:
+            self.schedules.pause()
+            halted.append("scheduled jobs")
+        if not self.permissions.halted:
+            self.permissions.halt("Iris is stopped")
+            halted.append("tools")
+        remote = self._control_host("stop")
+        if remote:
+            halted.append(f"the Iris service ({', '.join(remote)})")
+        logger.warning("iris halted", halted=halted)
+        return halted
+
+    def release(self) -> list[str]:
+        released: list[str] = []
+        if self.watchers.paused:
+            self.watchers.resume()
+            released.append("watchers")
+        if self.schedules.paused:
+            self.schedules.resume()
+            released.append("scheduled jobs")
+        if self.permissions.halted:
+            self.permissions.release()
+            released.append("tools")
+        remote = self._control_host("resume")
+        if remote:
+            released.append(f"the Iris service ({', '.join(remote)})")
+        logger.info("iris released", released=released)
+        return released
+
+    def _control_host(self, verb: str) -> list[str]:
+        attached = getattr(self, "attached_host", None)
+        if not attached or attached.get("host") != HOST_SERVICE:
+            return []
+        http = attached.get("http") if isinstance(attached.get("http"), dict) else {}
+        host = str(http.get("host") or DEFAULT_HOST)
+        port = int(http.get("port") or DEFAULT_PORT)
+        token = self.secrets.get(f"{SECRET_PREFIX}desktop") if getattr(self, "secrets", None) is not None else None
+        headers = {TOKEN_HEADER: token} if token else {}
+        request = urllib.request.Request(f"http://{host}:{port}/control/{verb}", method="POST", headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=3.0) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            logger.warning("could not reach the iris service", verb=verb, error=str(error))
+            return [f"unreachable: {error}"]
+        watchers = (payload.get("watchers") or {}).get("defined", 0)
+        schedules = (payload.get("schedules") or {}).get("defined", 0)
+        return [f"{watchers} watchers", f"{schedules} jobs"]
 
     def _build_ocr(self) -> OcrService | None:
         readers: list[Any] = []
@@ -1504,7 +1586,10 @@ class IrisApplication:
         sections.append(f"Summary\n{preview.summary}")
         if preview.target:
             sections.append(f"Target\n{preview.target}")
-        if preview.after:
+        diff = str((preview.metadata or {}).get("diff") or "").strip()
+        if diff:
+            sections.append(f"Change\n```diff\n{diff}\n```")
+        elif preview.after:
             sections.append(f"After\n```json\n{preview.after}\n```")
         if preview.impact:
             sections.append(f"Impact\n{preview.impact}")

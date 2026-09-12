@@ -46,6 +46,7 @@ class WatcherService:
         self._scheduler: Any = None
         self.load()
         self._loaded_stamp = self._definitions_stamp()
+        self.paused = bool(self._read_json(self.state_path).get("paused", False))
 
 
     def load(self) -> None:
@@ -98,7 +99,7 @@ class WatcherService:
 
     def _save_state(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"watchers": {watcher_id: state.to_json() for watcher_id, state in self._states.items()}}
+        payload = {"watchers": {watcher_id: state.to_json() for watcher_id, state in self._states.items()}, "paused": self.paused}
         self.state_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
 
     @staticmethod
@@ -234,6 +235,16 @@ class WatcherService:
             pass
 
 
+    def pause(self) -> None:
+        with self._lock:
+            self.paused = True
+            self._save_state()
+
+    def resume(self) -> None:
+        with self._lock:
+            self.paused = False
+            self._save_state()
+
     def evaluate_all(self) -> list[Notification]:
         sent: list[Notification] = []
         for definition in self.definitions():
@@ -243,7 +254,7 @@ class WatcherService:
 
     def evaluate(self, watcher_id: str) -> list[Notification]:
         definition = self.get(watcher_id)
-        if definition is None:
+        if definition is None or self.paused:
             return []
         with self._lock:
             state = self._states.setdefault(definition.id, WatcherState())

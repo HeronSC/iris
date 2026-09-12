@@ -145,6 +145,20 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
             **{key: value for key, value in report.items() if key in HEALTH_DETAIL_KEYS},
         )
 
+    @api.post("/control/stop", response_model=Health)
+    def control_stop() -> Health:
+        halt = getattr(app_service, "halt", None)
+        if callable(halt):
+            halt()
+        return health()
+
+    @api.post("/control/resume", response_model=Health)
+    def control_resume() -> Health:
+        release = getattr(app_service, "release", None)
+        if callable(release):
+            release()
+        return health()
+
     @api.post("/observations", response_model=BatchAccepted, status_code=201)
     def observations(batch: ObservationBatch) -> BatchAccepted:
         topic = batch.topic.strip().lower()

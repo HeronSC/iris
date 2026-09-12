@@ -44,6 +44,7 @@ class ScheduleService:
         self._scheduler: Any = None
         self.load()
         self._loaded_stamp = self._definitions_stamp()
+        self.paused = bool(self._read_dict(self.state_path).get("paused", False))
 
     def load(self) -> None:
         with self._lock:
@@ -97,7 +98,7 @@ class ScheduleService:
 
     def _save_state(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"jobs": {job_id: state.to_json() for job_id, state in self._states.items()}}
+        payload = {"jobs": {job_id: state.to_json() for job_id, state in self._states.items()}, "paused": self.paused}
         self.state_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
 
     @staticmethod
@@ -238,7 +239,7 @@ class ScheduleService:
 
     def run(self, job_id: str) -> JobResult | None:
         definition = self.get(job_id)
-        if definition is None:
+        if definition is None or self.paused:
             return None
         handler = self.jobs.get(definition.job)
         if handler is None:
@@ -249,6 +250,16 @@ class ScheduleService:
             logger.warning("Scheduled job %s failed: %s", definition.label, error)
             result = JobResult(ok=False, summary=str(error))
         return self._finish(definition, result)
+
+    def pause(self) -> None:
+        with self._lock:
+            self.paused = True
+            self._save_state()
+
+    def resume(self) -> None:
+        with self._lock:
+            self.paused = False
+            self._save_state()
 
     def run_all(self) -> list[JobResult]:
         return [result for result in (self.run(item.id) for item in self.definitions() if item.enabled) if result]

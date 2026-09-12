@@ -18,6 +18,7 @@ from core.config.document_search_mutations import (
 )
 from core.config.loader import ConfigLoader
 from core.documents.models import root_entry_to_json
+from core.actions.diffs import with_section_diff
 from core.tools.models import PermissionLevel, ToolDefinition
 
 
@@ -161,6 +162,7 @@ class UpdateConfigAction:
                 ok=True,
                 requires_confirmation=True,
                 resolved_target=str(context.config_path),
+                changes=(str(context.config_path),),
                 resolved_arguments={
                     "operation": operation,
                     "app_id": app_id,
@@ -168,7 +170,7 @@ class UpdateConfigAction:
                     "executable": executable,
                     "aliases": aliases,
                 },
-                confirmation_preview=self._preview_add_application(config, app_id, display_name, executable, aliases),
+                confirmation_preview=with_section_diff(self._preview_add_application(config, app_id, display_name, executable, aliases), config),
             )
 
         if operation == "set_document_roots":
@@ -182,8 +184,9 @@ class UpdateConfigAction:
                 ok=True,
                 requires_confirmation=True,
                 resolved_target=str(context.config_path),
+                changes=(str(context.config_path),),
                 resolved_arguments={"operation": operation, "roots": roots},
-                confirmation_preview=self._preview_set_document_roots(config, roots),
+                confirmation_preview=with_section_diff(self._preview_set_document_roots(config, roots), config),
             )
 
         if operation == "remove_document_root":
@@ -194,8 +197,9 @@ class UpdateConfigAction:
                 ok=True,
                 requires_confirmation=True,
                 resolved_target=str(context.config_path),
+                changes=(str(context.config_path),),
                 resolved_arguments={"operation": operation, "root": root},
-                confirmation_preview=self._preview_remove_document_root(config, root),
+                confirmation_preview=with_section_diff(self._preview_remove_document_root(config, root), config),
             )
 
         if operation == "set_web_shortcut":
@@ -209,8 +213,9 @@ class UpdateConfigAction:
                 ok=True,
                 requires_confirmation=True,
                 resolved_target=str(context.config_path),
+                changes=(str(context.config_path),),
                 resolved_arguments={"operation": operation, "name": name, "url": url},
-                confirmation_preview=self._preview_set_web_shortcut(config, name, url),
+                confirmation_preview=with_section_diff(self._preview_set_web_shortcut(config, name, url), config),
             )
 
         if operation == "remove_web_shortcut":
@@ -221,8 +226,9 @@ class UpdateConfigAction:
                 ok=True,
                 requires_confirmation=True,
                 resolved_target=str(context.config_path),
+                changes=(str(context.config_path),),
                 resolved_arguments={"operation": operation, "name": name},
-                confirmation_preview=self._preview_remove_web_shortcut(config, name),
+                confirmation_preview=with_section_diff(self._preview_remove_web_shortcut(config, name), config),
             )
 
         if operation == "remove_application":
@@ -233,8 +239,9 @@ class UpdateConfigAction:
                 ok=True,
                 requires_confirmation=True,
                 resolved_target=str(context.config_path),
+                changes=(str(context.config_path),),
                 resolved_arguments={"operation": operation, "app_id": app_id},
-                confirmation_preview=self._preview_remove_application(config, app_id),
+                confirmation_preview=with_section_diff(self._preview_remove_application(config, app_id), config),
             )
 
         if operation == "set_value":
@@ -251,8 +258,9 @@ class UpdateConfigAction:
                 ok=True,
                 requires_confirmation=True,
                 resolved_target=str(context.config_path),
+                changes=(str(context.config_path),),
                 resolved_arguments={"operation": operation, "key": key, "value": value},
-                confirmation_preview=self._preview_set_value(config, key, value),
+                confirmation_preview=with_section_diff(self._preview_set_value(config, key, value), config),
             )
 
         return ValidationResult(ok=False, error="Unsupported config operation")

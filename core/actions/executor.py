@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import webbrowser
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from core.actions.audit import ActionAuditLogger
+from core.actions.changes import ChangeLedger
 from core.actions.models import ActionRequest, ActionResult, ApplicationConfig, ConfirmationPreview, ValidationResult
 from core.documents.scanner import DocumentScanner
 from core.actions.policy import ActionPolicy
@@ -20,6 +22,8 @@ from core.observability.request_context import current_request_id
 from core.permissions.models import PermissionRequest
 from core.permissions.policy import PermissionPolicy
 from core.permissions.targets import hosts_in, paths_in
+
+logger = logging.getLogger(__name__)
 
 
 class SystemAdapter:
@@ -70,6 +74,7 @@ class PendingAction:
     expires_at: datetime
     follow_up_request: ActionRequest | None
     confirmation_preview: ConfirmationPreview | None
+    changes: tuple[str, ...] = ()
 
 
 class ActionExecutor:
@@ -81,12 +86,15 @@ class ActionExecutor:
         context: ActionExecutionContext,
         confirmation_ttl_seconds: int = 120,
         permissions: PermissionPolicy | None = None,
+        ledger: ChangeLedger | None = None,
     ) -> None:
         self.registry = registry
         self.policy = policy
         self.audit = audit
         self.context = context
         self.permissions = permissions
+        self.ledger = ledger
+        self.last_change_id: str | None = None
         self.confirmation_ttl_seconds = confirmation_ttl_seconds
         self._pending_action: PendingAction | None = None
         self._expired_confirmation_notice = False
@@ -176,9 +184,14 @@ class ActionExecutor:
                 expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.confirmation_ttl_seconds),
                 follow_up_request=request.follow_up,
                 confirmation_preview=validation.confirmation_preview,
+                changes=tuple(validation.changes),
             )
             self._expired_confirmation_notice = False
             description = self._describe_request(validated_request, validation.resolved_target)
+            if any(bool(getattr(definition, "irreversible", False)) for definition in definitions):
+                description += "\n\nThis cannot be undone."
+            elif validation.changes:
+                description += "\n\nThe file is copied first, so /undo can put it back."
             result = ActionResult(
                 status="pending_confirmation",
                 message=(
@@ -194,7 +207,7 @@ class ActionExecutor:
             self._log(request, result, tool=tool_name)
             return result
 
-        result = self._execute_validated(validated_request, validation.resolved_target)
+        result = self._execute_validated(validated_request, validation.resolved_target, changes=tuple(validation.changes))
         self._log(request, result, tool=tool_name)
         return result
 
@@ -223,7 +236,7 @@ class ActionExecutor:
             self._log(request, result)
             return result
 
-        result = self._execute_validated(pending.validated_request, pending.resolved_target)
+        result = self._execute_validated(pending.validated_request, pending.resolved_target, changes=pending.changes)
         if result.status == "success" and pending.follow_up_request is not None:
             follow_up_result = self.execute(pending.follow_up_request)
             result = ActionResult(
@@ -310,7 +323,7 @@ class ActionExecutor:
             )
         )
 
-    def _execute_validated(self, request: ActionRequest, resolved_target: str | None) -> ActionResult:
+    def _execute_validated(self, request: ActionRequest, resolved_target: str | None, changes: tuple[str, ...] = ()) -> ActionResult:
         action = self.registry.get(request.action)
         if action is None:
             return ActionResult(
@@ -321,8 +334,21 @@ class ActionExecutor:
                 error="unknown_action",
             )
 
+        change_id = self._snapshot(request, changes)
         try:
             result = action.execute(request, self.context)
+            if change_id is not None and result.status == "success":
+                self.last_change_id = change_id
+                result = ActionResult(
+                    status=result.status,
+                    message=f"{result.message}\n(/undo puts the previous file back)",
+                    action=result.action,
+                    resolved_target=result.resolved_target,
+                    error=result.error,
+                    confirmation_preview=result.confirmation_preview,
+                    results=result.results,
+                    created_at=result.created_at,
+                )
         except Exception as error:
             result = ActionResult(
                 status="failed",
@@ -332,6 +358,16 @@ class ActionExecutor:
                 error=str(error),
             )
         return result
+
+    def _snapshot(self, request: ActionRequest, changes: tuple[str, ...]) -> str | None:
+        if self.ledger is None or not changes:
+            return None
+        try:
+            record = self.ledger.snapshot(request.action, changes, reason=request.reason)
+        except OSError as error:
+            logger.warning("Could not copy %s before %s: %s", ", ".join(changes), request.action, error)
+            return None
+        return record.id if record is not None else None
 
     def _log(self, request: ActionRequest, result: ActionResult, tool: str | None = None) -> None:
         self.audit.log(
