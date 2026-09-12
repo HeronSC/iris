@@ -31,6 +31,7 @@ class MemoryStatus(str, Enum):
     REJECTED = "rejected"
     ACCEPTED = "accepted"
     SUPERSEDED = "superseded"
+    RETIRED = "retired"
 
 
 DEFAULT_STATUS: dict[MemoryKind, MemoryStatus] = {

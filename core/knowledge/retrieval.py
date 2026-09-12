@@ -68,7 +68,7 @@ class KnowledgeRetriever:
                 f"SELECT {columns} FROM memories_fts f "
                 "JOIN memories m ON m.sequence = f.rowid "
                 f"WHERE memories_fts MATCH ? AND {' AND '.join(clauses)} "
-                "ORDER BY bm25(memories_fts) LIMIT ?"
+                "ORDER BY bm25(memories_fts), m.sequence DESC LIMIT ?"
             )
             args: list[Any] = [match, *params, limit]
         else:
@@ -99,7 +99,7 @@ class KnowledgeRetriever:
                 )
                 for record in candidates
             ),
-            key=lambda item: (-item.score, item.record.created_at),
+            key=lambda item: (-item.score, _newest_first(item.record)),
         )
         relevant = scored
         if query_tokens and query.minimum_text_match > 0:
@@ -182,6 +182,10 @@ def _match_expression(text: str) -> str:
     return " OR ".join('"' + term.replace('"', '""') + '"' for term in terms)
 
 
+def _newest_first(record: MemoryRecord) -> tuple[int, ...]:
+    return tuple(-ord(char) for char in record.created_at)
+
+
 def _filters(query: KnowledgeQuery, *, table: str = "") -> tuple[list[str], list[Any]]:
     at = f"{table}." if table else ""
     clauses: list[str] = []
@@ -202,8 +206,8 @@ def _filters(query: KnowledgeQuery, *, table: str = "") -> tuple[list[str], list
         clauses.append(f"{at}status IN ({', '.join('?' * len(query.statuses))})")
         params.extend(MemoryStatus(status).value for status in query.statuses)
     elif not query.include_superseded:
-        clauses.append(f"{at}status != ?")
-        params.append(MemoryStatus.SUPERSEDED.value)
+        clauses.append(f"{at}status NOT IN (?, ?)")
+        params.extend([MemoryStatus.SUPERSEDED.value, MemoryStatus.RETIRED.value])
 
     if query.scopes:
         clauses.append(f"{at}scope IN ({', '.join('?' * len(query.scopes))})")

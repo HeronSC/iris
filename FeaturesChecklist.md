@@ -100,9 +100,25 @@ single feature is what made those features look larger than they are.
 	ranks a little above a global one on equal text, so the project's memory wins ties. A new
 	project inherits only the global records; nothing is copied. The trading bot, corrections
 	and the MCP server still write global records, which is right for them.
-- [ ] Handle conflicting or superseded facts: which one wins, and whether the old one is kept.
-- [ ] Decide a forgetting policy: expiry, decay, relevance pruning, or never forget.
-- [ ] Let the user browse, correct, and delete memories directly, not only through conversation.
+- [x] Handle conflicting or superseded facts: which one wins, and whether the old one is kept.
+	**Built 2026-09-12:** `/knowledge fact [@scope] <topic> <statement>` records a fact and
+	reports earlier facts on the topic that read alike (token similarity over a threshold, same
+	or global scope, `core/knowledge/facts.py`); an identical statement is refused with the id it
+	already has. Until someone decides, both stay and the newer one ranks first (equal text now
+	breaks ties newest-first in retrieval). `/knowledge supersede <id> <new statement>` decides:
+	the new record replaces the old, keeps its topic and scope, and the old stays as history with
+	status superseded, out of recall.
+- [x] Decide a forgetting policy: expiry, decay, relevance pruning, or never forget. **Decided
+	and built 2026-09-12:** facts, decisions, hypotheses and knowledge are never pruned -- a wrong
+	one is superseded or retired by hand. Observations and outcomes fade in ranking with age
+	(the recency weight) and can be retired in bulk with `/knowledge prune <days>` after a
+	preview, `confirm` to apply. Nothing is ever deleted: a new status `retired` hides a record
+	from recall, listings, counts and the default export while the row stays for history.
+- [~] Let the user browse, correct, and delete memories directly, not only through conversation.
+	`/knowledge browse [topic] [n]` lists records newest first with id, kind, status, scope and
+	text; `/knowledge forget <id> <why>` retires one (the reason is required and echoed);
+	`/knowledge supersede` corrects one. Direct editing in the window, not through commands, is
+	still to build.
 - [x] Export and back up memory in a readable format (11). **Built 2026-09-12:** `/knowledge
 	export [folder]` writes `Data\Exports\knowledge-<stamp>.md` -- every live record grouped by
 	topic with its kind, status, date, source, content and id, superseded records left out -- and a

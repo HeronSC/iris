@@ -25,6 +25,7 @@ _STATUS_PRIOR: dict[MemoryStatus, float] = {
     MemoryStatus.TESTING: 0.08,
     MemoryStatus.PROPOSED: 0.05,
     MemoryStatus.REJECTED: 0.0,
+    MemoryStatus.RETIRED: 0.0,
     MemoryStatus.SUPERSEDED: 0.0,
 }
 

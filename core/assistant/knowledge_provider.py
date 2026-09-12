@@ -97,7 +97,7 @@ class KnowledgeRecallProvider(KnowledgeProvider):
 
         statuses: tuple[MemoryStatus, ...] = ()
         if not request_obj.include_rejected:
-            statuses = tuple(s for s in MemoryStatus if s not in {MemoryStatus.REJECTED, MemoryStatus.SUPERSEDED})
+            statuses = tuple(s for s in MemoryStatus if s not in {MemoryStatus.REJECTED, MemoryStatus.SUPERSEDED, MemoryStatus.RETIRED})
 
         result = self.retriever.retrieve(
             KnowledgeQuery(

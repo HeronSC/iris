@@ -8,6 +8,7 @@ from typing import Any, Callable
 from core.assistant.output import OutputSink, emit_output
 from core.knowledge import KnowledgeError, MemoryKind, MemoryStatus
 from core.knowledge.export import export_memory
+from core.knowledge.facts import POLICY, FactService, describe_record
 from core.knowledge.scopes import SCOPE_WORDS, describe_scope, resolve_scope
 from core.knowledge.review import KnowledgeReviewWorkflow
 
@@ -16,7 +17,8 @@ _USAGE = (
     "open [topic] | hypothesize <topic> <claim> | "
     "evidence <hypothesis> for|against <id> [note] | testing [topic] | "
     "pending | review | show <id> | why <id> | "
-    "approve <id> [note] | decline <id> <reason> | topics | scopes | embeddings [index] | export [folder]. "
+    "approve <id> [note] | decline <id> <reason> | topics | scopes | embeddings [index] | export [folder] | "
+    "fact [@scope] <topic> <statement> | supersede <id> <new statement> | forget <id> <why> | browse [topic] [n] | prune <days> [confirm]. "
     "Prefix what you record with @project or @session to keep it out of other projects."
 )
 
@@ -42,6 +44,13 @@ class KnowledgeCommandHandler:
         self.embeddings = embeddings
         self.export_folder = Path(export_folder) if export_folder else None
         self.scope_resolver = scope_resolver
+        self._facts: FactService | None = None
+
+    @property
+    def facts(self) -> FactService:
+        if self._facts is None:
+            self._facts = FactService(self.workflow.graph.records)
+        return self._facts
 
     def _scope_for(self, word: str | None) -> str:
         if self.scope_resolver is None:
@@ -89,6 +98,16 @@ class KnowledgeCommandHandler:
             return self._topics()
         if command == "scopes":
             return self._scopes()
+        if command == "fact":
+            return self._fact(argument, rest)
+        if command == "supersede":
+            return self._supersede(argument, rest)
+        if command == "forget":
+            return self._forget(argument, rest)
+        if command == "browse":
+            return self._browse(argument, rest)
+        if command == "prune":
+            return self._prune(argument, rest)
         if command in {"show", "why"}:
             return self._show(argument, why=command == "why")
         if command == "approve":
@@ -117,6 +136,87 @@ class KnowledgeCommandHandler:
         lines = ["Records by scope:"] + [f"- {describe_scope(scope)}: {count}" for scope, count in counts.items()]
         lines.append("A new project sees only the global records; @project and @session keep a record to one project or one conversation.")
         emit_output(self.output, "\n".join(lines))
+        return True
+
+    def _fact(self, argument: str, rest: str) -> bool:
+        scope_word, topic, content = self._split_scope(argument, rest)
+        if not topic or not content:
+            emit_output(self.output, "Usage: /knowledge fact [@project|@session] <topic> <statement>", "error")
+            return True
+        try:
+            scope = self._scope_for(scope_word)
+        except ValueError as error:
+            emit_output(self.output, str(error), "error")
+            return True
+        record, conflicts = self.facts.record(topic, content, source=f"user:{self.actor}", scope=scope)
+        emit_output(self.output, f"Recorded fact {record.id[:8]} in {record.topic} ({describe_scope(scope)}).")
+        if conflicts:
+            emit_output(self.output, f"It may conflict with {len(conflicts)} earlier fact{'s' if len(conflicts) != 1 else ''}:")
+            for conflict in conflicts[:5]:
+                emit_output(self.output, "  " + conflict.describe())
+            emit_output(self.output, f"Both stay and the newer one ranks first. /knowledge supersede {conflicts[0].record.id[:8]} {content[:40]}... replaces the old one instead.")
+        return True
+
+    def _supersede(self, argument: str, rest: str) -> bool:
+        if not argument or not rest.strip():
+            emit_output(self.output, "Usage: /knowledge supersede <id> <new statement>", "error")
+            return True
+        old = self._resolve(argument)
+        if old is None:
+            return True
+        replacement = self.facts.supersede(old.id, rest, source=f"user:{self.actor}")
+        emit_output(self.output, f"{replacement.id[:8]} now replaces {old.id[:8]} in {old.topic}; the old record stays as history.")
+        emit_output(self.output, f"  was: {old.content}")
+        emit_output(self.output, f"  now: {replacement.content}")
+        return True
+
+    def _forget(self, argument: str, rest: str) -> bool:
+        if not argument or not rest.strip():
+            emit_output(self.output, "Usage: /knowledge forget <id> <why>", "error")
+            return True
+        record = self._resolve(argument)
+        if record is None:
+            return True
+        self.facts.retire(record.id, reason=rest)
+        emit_output(self.output, f"Retired {record.id[:8]} ({record.kind.value} in {record.topic}): {record.content[:80]}")
+        emit_output(self.output, f"  why: {rest.strip()}. It stays in the database and the export, and is no longer recalled.")
+        return True
+
+    def _browse(self, argument: str, rest: str) -> bool:
+        topic = None
+        limit = 20
+        for token in [argument, *rest.split()]:
+            if token.isdigit():
+                limit = max(1, min(200, int(token)))
+            elif token:
+                topic = token
+        records = self.facts.browse(topic, limit=limit)
+        if not records:
+            emit_output(self.output, "No records" + (f" in {topic}" if topic else "") + ".")
+            return True
+        emit_output(self.output, f"{len(records)} record{'s' if len(records) != 1 else ''}" + (f" in {topic}" if topic else ", newest first") + ":")
+        for record in records:
+            emit_output(self.output, describe_record(record))
+        emit_output(self.output, "/knowledge show <id> for one, /knowledge forget <id> <why> to retire, /knowledge supersede <id> <text> to replace.")
+        return True
+
+    def _prune(self, argument: str, rest: str) -> bool:
+        if not argument.isdigit():
+            emit_output(self.output, "Usage: /knowledge prune <days> [confirm] -- " + POLICY, "error")
+            return True
+        days = int(argument)
+        if rest.strip().lower() == "confirm":
+            retired = self.facts.prune(days)
+            emit_output(self.output, f"Retired {len(retired)} observation(s) and outcome(s) older than {days} days. They stay in the database and the export.")
+            return True
+        candidates = self.facts.prune_candidates(days)
+        if not candidates:
+            emit_output(self.output, f"Nothing to prune: no observations or outcomes older than {days} days.")
+            return True
+        emit_output(self.output, f"{len(candidates)} observation(s) and outcome(s) are older than {days} days; the oldest: ")
+        for record in candidates[:5]:
+            emit_output(self.output, describe_record(record))
+        emit_output(self.output, f"/knowledge prune {days} confirm retires them. " + POLICY)
         return True
 
     def _export(self, argument: str) -> bool:

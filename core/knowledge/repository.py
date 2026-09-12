@@ -111,8 +111,8 @@ class KnowledgeRepository:
             clauses.append("kind = ?")
             params.append(MemoryKind(kind).value)
         if not include_superseded:
-            clauses.append("status != ?")
-            params.append(MemoryStatus.SUPERSEDED.value)
+            clauses.append("status NOT IN (?, ?)")
+            params.extend([MemoryStatus.SUPERSEDED.value, MemoryStatus.RETIRED.value])
         params.append(max(1, int(limit)))
         with self.database.connect() as conn:
             rows = conn.execute(
@@ -162,9 +162,17 @@ class KnowledgeRepository:
             ).fetchall()
         return [record_from_row(row) for row in rows]
 
+    def recent(self, *, limit: int = 20, include_hidden: bool = False) -> list[MemoryRecord]:
+        clause = "" if include_hidden else "WHERE status NOT IN (?, ?)"
+        params: list[Any] = [] if include_hidden else [MemoryStatus.SUPERSEDED.value, MemoryStatus.RETIRED.value]
+        params.append(max(1, int(limit)))
+        with self.database.connect() as conn:
+            rows = conn.execute(f"SELECT {MEMORY_COLUMNS} FROM memories {clause} ORDER BY sequence DESC LIMIT ?", params).fetchall()
+        return [record_from_row(row) for row in rows]
+
     def count_by_scope(self) -> dict[str, int]:
         with self.database.connect() as conn:
-            rows = conn.execute("SELECT scope, COUNT(*) FROM memories WHERE status != 'superseded' GROUP BY scope ORDER BY scope").fetchall()
+            rows = conn.execute("SELECT scope, COUNT(*) FROM memories WHERE status NOT IN ('superseded', 'retired') GROUP BY scope ORDER BY scope").fetchall()
         return {str(row[0]): int(row[1]) for row in rows}
 
     def count(self) -> int:
@@ -172,8 +180,8 @@ class KnowledgeRepository:
             return int(conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0])
 
     def list_all(self, *, include_superseded: bool = False, limit: int = 100000, offset: int = 0) -> list[MemoryRecord]:
-        clause = "" if include_superseded else "WHERE status != ?"
-        params: list[Any] = [] if include_superseded else [MemoryStatus.SUPERSEDED.value]
+        clause = "" if include_superseded else "WHERE status NOT IN (?, ?)"
+        params: list[Any] = [] if include_superseded else [MemoryStatus.SUPERSEDED.value, MemoryStatus.RETIRED.value]
         params.extend([max(1, int(limit)), max(0, int(offset))])
         with self.database.connect() as conn:
             rows = conn.execute(
