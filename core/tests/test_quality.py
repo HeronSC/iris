@@ -109,7 +109,7 @@ class CorrectionTests(unittest.TestCase):
         for _ in range(3):
             self.handler.handle("/correct Use Fahrenheit, not Celsius", {})
         self.assertIn("3th time", self.output[-1])
-        self.assertIn("/knowledge observe iris/principles", self.output[-1])
+        self.assertIn("/principles add", self.output[-1])
         self.handler.handle("/corrections", {})
         self.assertIn("(x3)", self.output[-1])
         self.assertIn("Repeated enough to be principles", self.output[-1])

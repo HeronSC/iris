@@ -44,6 +44,9 @@ from core.actions.changes import ChangeLedger
 from core.assistant.backup_command import BackupCommandHandler
 from core.assistant.changes_command import ChangesCommandHandler
 from core.assistant.context_command import ContextCommandHandler
+from core.assistant.learning import LearningLoop
+from core.assistant.principles_command import PrinciplesCommandHandler
+from core.knowledge.principles import PrincipleService
 from core.assistant.tool_progress import describe_tool_event
 from core.assistant.stop_command import StopCommandHandler
 from core.cameras import CameraService
@@ -199,6 +202,7 @@ class IrisApplication:
         self.context_service = None
         self.workflow_handler: CommandHandler = _NoopCommandHandler()
         self.corrections_handler: CommandHandler = _NoopCommandHandler()
+        self.principles_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
         self.attached_host: dict[str, Any] | None = None
 
@@ -508,12 +512,16 @@ class IrisApplication:
         self.tools_handler = ToolsCommandHandler(self.tool_registry, self.mcp_manager, output=self._sink)
         self.latency_budget = LatencyBudget.from_config(self.config)
         self.models_handler = ModelsCommandHandler(self.model_router, self.request_metrics, output=self._sink, budget=self.latency_budget)
+        self.principles = PrincipleService(self.knowledge.records)
+        self.learning = LearningLoop(self.knowledge, request_id=lambda: getattr(self, "last_request_id", None))
+        self.principles_handler = PrinciplesCommandHandler(self.principles, output=self._sink, actor=str(self.config.get("assistant_user", "user")))
         self.corrections_handler = CorrectionsCommandHandler(
             self.knowledge,
             last_request_id=lambda: getattr(self, "last_request_id", None),
             last_user_message=lambda: getattr(self, "_last_user_message", ""),
             last_answer=lambda: getattr(getattr(self, "_last_coordinator_turn", None), "text", "") or "",
             output=self._sink,
+            principles=self.principles,
         )
         self.permissions_handler = PermissionsCommandHandler(
             self.permissions, self.secrets, audit=self.audit_stream, output=self._sink
@@ -537,11 +545,12 @@ class IrisApplication:
         self.workflow_handler = WorkflowCommandHandler(self.workflows, output=self._sink)
         self.schedule_handler = ScheduleCommandHandler(self.schedules, output=self._sink)
         self.backup_handler = BackupCommandHandler(self.backups, output=self._sink)
-        self.changes_handler = ChangesCommandHandler(self.changes, output=self._sink)
+        self.changes_handler = ChangesCommandHandler(self.changes, output=self._sink, on_undo=self.learning.note_undo)
         self.stop_handler = StopCommandHandler(self.halt, self.release, output=self._sink)
         self.context_handler = ContextCommandHandler(self.context_service, output=self._sink)
         self.coordinator.context_provider = self._screen_prompt
         self.coordinator.on_tool_event = self._on_tool_event
+        self.coordinator.principles_provider = self.principles.active_lines
         self.context_service.start()
         self.why_handler = WhyCommandHandler(
             log_file=log_dir_for(self.config) / LOG_FILE_NAME,
@@ -716,6 +725,8 @@ class IrisApplication:
             if self._handle_slash_command(self.workflow_handler, stripped, status, command_prefixes=("/workflow", "/workflows")):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.corrections_handler, stripped, status, command_prefixes=("/correct", "/corrections")):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.principles_handler, stripped, status, command_prefixes=("/principles",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)
@@ -1163,6 +1174,11 @@ class IrisApplication:
         return intent in {"find_files", "read_file", "count_files", "select_pending_result"}
 
     def _on_tool_event(self, event: dict[str, Any]) -> None:
+        learning = getattr(self, "learning", None)
+        if learning is not None:
+            noted = learning.note_tool_event(event)
+            if noted is not None:
+                self._emit_message(MessageRole.SYSTEM, f"Noted for later: {noted.content}")
         if self._active_event_handler is None:
             return
         self._emit_message(MessageRole.PROGRESS, describe_tool_event(event), IrisStatus.THINKING)

@@ -173,16 +173,31 @@ single feature is what made those features look larger than they are.
 - [x] When Iris is corrected, capture why the correction was made. **Built 2026-09-12:**
 	`/correct <why>` records an observation under `iris/corrections` with the request id, what was
 	asked and what was answered, so the why sits beside the what. `/corrections` lists them.
-- [~] Turn repeated corrections into reusable principles. The third time the same correction is
-	made, `/correct` says so and offers the line that turns it into a principle
-	(`/knowledge observe iris/principles ...`); `/corrections` groups the repeats. Making that
-	automatic, and feeding the principles into prompts, is still to do.
-- [ ] Keep those principles in a list the user can read, edit, and switch off.
-- [ ] Close the loop automatically where the outcome is observable without being told —
-	a build failed, a file was reverted, an answer was rejected.
-- [ ] Learn BC architecture and design preferences over time.
-- [ ] Say what it does not know, and record the gap as an open question rather than guessing.
-- [ ] Framework evaluation: use the single list in 2.1.
+- [x] Turn repeated corrections into reusable principles. **Built 2026-09-12:** the third time
+	the same correction is made, `/correct` makes it a principle itself
+	(`core/knowledge/principles.py`, a knowledge record under `iris/principles` with the
+	correction count as its origin) and says which number it got; a repeat after that says the
+	principle already covers it. The principles that are on go into every system prompt as
+	"Working principles the user has set from past corrections".
+- [x] Keep those principles in a list the user can read, edit, and switch off. `/principles`
+	lists them numbered with on/off and origin; `/principles add <text>`, `/principles off <n>`,
+	`/principles on <n>`, `/principles edit <n> <text>` (the old wording stays as history).
+- [x] Close the loop automatically where the outcome is observable without being told —
+	a build failed, a file was reverted, an answer was rejected. **Built 2026-09-12:**
+	`core/assistant/learning.py` records under `iris/corrections`, where `/corrections` counts
+	repeats, when `/undo` reverts an Iris change ("The user undid Iris's change: update_config
+	on config.json") and when a compile within fifteen minutes of an Iris edit fails ("Iris's
+	edit (edit_file on Sync.al) failed to compile: ..."); the window says "Noted for later" as it
+	happens. A rejected answer still needs `/correct`; Iris cannot see a silent rejection.
+- [~] Learn BC architecture and design preferences over time. The mechanism is in place --
+	principles from corrections, `/project decide` and project decisions in the prompt, facts
+	under a topic -- and it fills as the user works; nothing infers a preference from code that
+	was not commented on.
+- [x] Say what it does not know, and record the gap as an open question rather than guessing.
+	**Built 2026-09-12:** the system prompt says to say so plainly and call `record_gap`; the
+	tool stores the question once under `iris/open-questions` with what was tried;
+	`/knowledge gaps` lists them and `/knowledge outcome <id> <answer>` closes one.
+- [x] Framework evaluation: use the single list in 2.1. Pointer; that list is done.
 
 ### 2.3 Plugin and Tool Architecture
 

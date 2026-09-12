@@ -17,6 +17,7 @@ from core.assistant.llm_client import LLMClient
 from core.agent.graph import AgentResult, IrisAgent
 from core.assistant.request_kinds import is_code_request
 from core.conversation.context_builder import ContextBuilder
+from core.knowledge.principles import principles_block
 from core.conversation.persistent_memory import PreparedMemoryContext, TopicMemoryService, diagnostics_to_text
 from core.conversation.request_pipeline import RequestPipeline, RequestPipelineResult
 from core.conversation.request_trace import RequestTraceLogger
@@ -96,6 +97,7 @@ class AssistantCoordinator:
         self._turn_cache: dict[str, Any] = {}
         self.context_provider: Callable[[], str] | None = None
         self.on_tool_event: Callable[[dict[str, Any]], None] | None = None
+        self.principles_provider: Callable[[], list[str]] | None = None
         audit_path = self.config.get("audit_path") if isinstance(self.config, dict) else None
         if isinstance(audit_path, str):
             audit_path = Path(audit_path)
@@ -815,6 +817,9 @@ class AssistantCoordinator:
         screen = self._screen_context()
         if screen:
             context = context + "\n\nWhat the user is looking at (resolve 'this', 'here', 'the file I have open' against it):\n" + screen
+        principles = self._principles_block()
+        if principles:
+            context = context + "\n\n" + principles
         return (
             f"You are {self.assistant_name}, a personal assistant.\n\n"
             "Default to the most likely ordinary-language interpretation when one meaning is clearly dominant.\n"
@@ -830,10 +835,21 @@ class AssistantCoordinator:
             "Silently correct obvious ordinary-language spelling mistakes when intent is clear.\n"
             "Do not autocorrect file paths, filenames, commands, identifiers, code, or quoted text.\n"
             "Do not claim to know information that is not present.\n"
+            "When something is not known and no tool can find it, say so plainly and call record_gap with the question instead of guessing.\n"
             "Follow the user's stated working preferences.\n"
             "Ask for clarification when a required detail is missing.\n\n"
             f"User context:\n{context}"
         )
+
+    def _principles_block(self) -> str:
+        provider = self.principles_provider
+        if provider is None:
+            return ""
+        try:
+            return principles_block(provider() or [])
+        except Exception as error:
+            logger.debug("Principles unavailable: %s", error)
+            return ""
 
     def _screen_context(self) -> str:
         provider = self.context_provider

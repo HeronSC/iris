@@ -13,9 +13,10 @@ USAGE = "Usage: /changes [n]  ·  /undo [change id]"
 
 class ChangesCommandHandler:
 
-    def __init__(self, ledger: ChangeLedger, output: OutputSink | None = None) -> None:
+    def __init__(self, ledger: ChangeLedger, output: OutputSink | None = None, on_undo: Any = None) -> None:
         self.ledger = ledger
         self.output = output
+        self.on_undo = on_undo
 
     def handle(self, user_input: str, state: dict[str, Any]) -> bool:
         _ = state
@@ -49,4 +50,9 @@ class ChangesCommandHandler:
         if report is None:
             emit_output(self.output, f"No change matches {change_id}." if change_id else "Nothing to undo.")
             return
-        emit_output(self.output, report.summary + ("" if report.ok else "") + "\nRestart Iris if the change was to config.json.")
+        if self.on_undo is not None and report.ok:
+            try:
+                self.on_undo(report)
+            except Exception:
+                pass
+        emit_output(self.output, report.summary + "\nRestart Iris if the change was to config.json.")

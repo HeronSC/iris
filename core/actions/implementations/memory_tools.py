@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
+from core.assistant.learning import LearningLoop
 from core.knowledge.facts import FactService, describe_record
 from core.knowledge.models import MemoryKind
 from core.knowledge.scopes import GLOBAL
@@ -78,6 +79,44 @@ class MemoryBrowseAction:
         return ActionResult(status="success", message="\n".join(lines), action=self.name, resolved_target=arguments.get("topic"), results=(result,))
 
 
-MEMORY_ACTIONS = (MemoryBrowseAction,)
+class GapArguments(BaseModel):
+    question: str = Field(description="The question Iris could not answer, as a full sentence")
+    context: str = Field(default="", description="What was tried or why it is unknown")
 
-__all__ = ["MEMORY_ACTIONS", "MemoryBrowseAction"]
+
+class RecordGapAction:
+
+    name = "record_gap"
+    definition = ToolDefinition(
+        name="record_gap",
+        description="Record something Iris does not know as an open question, instead of guessing. Use it after saying plainly that the answer is not known and no tool found it. The user closes it later with /knowledge outcome.",
+        arguments=GapArguments,
+        permission=PermissionLevel.WRITE,
+        keywords=("i do not know", "unknown", "open question", "cannot find out", "record the gap"),
+    )
+
+    def validate(self, request: ActionRequest, context: object) -> ValidationResult:
+        try:
+            arguments = GapArguments.model_validate(request.arguments)
+        except Exception as error:
+            return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
+        if getattr(context, "knowledge", None) is None:
+            return ValidationResult(ok=False, error=NO_SERVICE)
+        if not arguments.question.strip():
+            return ValidationResult(ok=False, error="The question is empty")
+        return ValidationResult(ok=True, resolved_target=arguments.question[:80], resolved_arguments={"question": " ".join(arguments.question.split()), "context": arguments.context.strip()})
+
+    def execute(self, request: ActionRequest, context: object) -> ActionResult:
+        knowledge = getattr(context, "knowledge", None)
+        if knowledge is None:
+            return ActionResult(status="failed", message=NO_SERVICE, action=self.name, error="no_service")
+        record = LearningLoop(knowledge).record_gap(str(request.arguments.get("question") or ""), context=str(request.arguments.get("context") or ""))
+        if record is None:
+            return ActionResult(status="failed", message="The question was empty.", action=self.name, error="empty")
+        message = f"Recorded as an open question ({record.id[:8]}): {record.content}. /knowledge gaps lists them; /knowledge outcome {record.id[:8]} <answer> closes it."
+        return ActionResult(status="success", message=message, action=self.name, resolved_target=record.id, results=(status("pending", message, source=Source("record_gap", "memory", record.id)),))
+
+
+MEMORY_ACTIONS = (MemoryBrowseAction, RecordGapAction)
+
+__all__ = ["MEMORY_ACTIONS", "MemoryBrowseAction", "RecordGapAction"]

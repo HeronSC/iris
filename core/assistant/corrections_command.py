@@ -30,8 +30,10 @@ class CorrectionsCommandHandler:
         last_user_message: Callable[[], str],
         last_answer: Callable[[], str],
         output: OutputSink | None = None,
+        principles: Any = None,
     ) -> None:
         self.knowledge = knowledge
+        self.principles = principles
         self.last_request_id = last_request_id
         self.last_user_message = last_user_message
         self.last_answer = last_answer
@@ -70,10 +72,14 @@ class CorrectionsCommandHandler:
         repeats = self._repeats(normalize(reason))
         lines = [f"Kept: {reason} ({record.id[:8]})."]
         if repeats >= REPEAT_THRESHOLD:
-            lines.append(
-                f"That is the {repeats}th time this has come up. It may be a principle: "
-                f"/knowledge observe iris/principles {reason}"
-            )
+            if self.principles is not None:
+                principle, created = self.principles.add(reason, source="user:correction", origin=f"{repeats} corrections")
+                if created:
+                    lines.append(f"That is the {repeats}th time this has come up, so it is now principle {principle.number} and goes into every prompt. /principles off {principle.number} stops it.")
+                else:
+                    lines.append(f"That is the {repeats}th time this has come up; principle {principle.number} already covers it.")
+            else:
+                lines.append(f"That is the {repeats}th time this has come up. It may be a principle: /principles add {reason}")
         emit_output(self.output, "\n".join(lines))
 
     def _repeats(self, normalized: str) -> int:

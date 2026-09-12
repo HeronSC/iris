@@ -9,6 +9,7 @@ from core.assistant.output import OutputSink, emit_output
 from core.knowledge import KnowledgeError, MemoryKind, MemoryStatus
 from core.knowledge.export import export_memory
 from core.knowledge.facts import POLICY, FactService, describe_record
+from core.knowledge.principles import GAP_TOPIC
 from core.knowledge.scopes import SCOPE_WORDS, describe_scope, resolve_scope
 from core.knowledge.review import KnowledgeReviewWorkflow
 
@@ -18,7 +19,7 @@ _USAGE = (
     "evidence <hypothesis> for|against <id> [note] | testing [topic] | "
     "pending | review | show <id> | why <id> | "
     "approve <id> [note] | decline <id> <reason> | topics | scopes | embeddings [index] | export [folder] | "
-    "fact [@scope] <topic> <statement> | supersede <id> <new statement> | forget <id> <why> | browse [topic] [n] | prune <days> [confirm]. "
+    "fact [@scope] <topic> <statement> | supersede <id> <new statement> | forget <id> <why> | browse [topic] [n] | prune <days> [confirm] | gaps. "
     "Prefix what you record with @project or @session to keep it out of other projects."
 )
 
@@ -98,6 +99,8 @@ class KnowledgeCommandHandler:
             return self._topics()
         if command == "scopes":
             return self._scopes()
+        if command == "gaps":
+            return self._gaps()
         if command == "fact":
             return self._fact(argument, rest)
         if command == "supersede":
@@ -127,6 +130,18 @@ class KnowledgeCommandHandler:
             head, _sep, rest = content.strip().partition(" ")
             return topic[1:].lower(), head, rest.strip()
         return None, topic, content
+
+    def _gaps(self) -> bool:
+        found = self.workflow.open_observations(topic=GAP_TOPIC)
+        if not found:
+            emit_output(self.output, "No open questions. Iris records one with record_gap when it cannot answer.")
+            return True
+        emit_output(self.output, f"{len(found)} open question{'s' if len(found) != 1 else ''}:")
+        for item in found:
+            context = str(item.data.get("context") or "").strip()
+            emit_output(self.output, f"- {item.id[:8]}  {item.created_at[:10]}  {item.content}" + (f"\n    {context[:120]}" if context else ""))
+        emit_output(self.output, "Close one with /knowledge outcome <id> <what the answer turned out to be>.")
+        return True
 
     def _scopes(self) -> bool:
         counts = self.workflow.graph.records.count_by_scope()

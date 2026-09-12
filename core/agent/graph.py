@@ -390,7 +390,8 @@ class IrisAgent:
         started = time.perf_counter()
         result = self._dispatch(name, arguments, user_message)
         self._audit_tool(name, arguments, result)
-        self._notify_tool({"phase": "end", "name": name, "status": result.get("status"), "error": result.get("error"), "ms": (time.perf_counter() - started) * 1000})
+        summary = str(result.get("message") or "").strip().splitlines()
+        self._notify_tool({"phase": "end", "name": name, "status": result.get("status"), "error": result.get("error"), "ms": (time.perf_counter() - started) * 1000, "summary": summary[0] if summary else "", "target": str(result.get("resolved_target") or arguments.get("path") or arguments.get("range") or "")})
         return result
 
     def _notify_tool(self, event: dict[str, Any]) -> None:
