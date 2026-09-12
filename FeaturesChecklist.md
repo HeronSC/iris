@@ -827,7 +827,11 @@ Presentation moved to 2.7 and 6. This section is about getting good information.
 - [x] Search across documents. -> `core/documents/search_service.py`
 - [x] Handle scanned documents and images of text (OCR). Built 2026-09-10 for PDF pages with
 	no text layer -> `core/documents/ocr.py`; images on their own are not indexed yet.
-- [ ] Handle PowerPoint, saved email (.msg/.eml), and Markdown.
+- [~] Handle PowerPoint, saved email (.msg/.eml), and Markdown. **Built 2026-09-12:** `.eml`
+	through the stdlib `email` package (`core/documents/extractors/eml_extractor.py`) -- From, To,
+	Cc, Date, Subject, the plain body or the HTML body stripped to text, attachment names listed.
+	Markdown was already indexed as text. PowerPoint (`python-pptx`) and `.msg` (`extract-msg`)
+	are dependency decisions, still open.
 - [~] Preserve the structure worth having: headings, tables, and page numbers for citation.
 	Pages are marked `[page N]` in PDF text, Word tables render as rows, Excel as sheet/rows;
 	headings are not distinguished from paragraphs.

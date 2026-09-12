@@ -83,6 +83,7 @@ from core.conversation.persistent_memory import MemoryConfig, TopicMemoryService
 from core.documents.catalog import DocumentCatalog
 from core.documents.extractors.csv_extractor import CsvExtractor
 from core.documents.extractors.docx_extractor import DocxExtractor
+from core.documents.extractors.eml_extractor import EmlExtractor
 from core.documents.extractors.excel_extractor import ExcelExtractor
 from core.documents.extractors.pdf_extractor import PdfExtractor
 from core.documents.extractors.text_extractor import TextExtractor
@@ -392,6 +393,7 @@ class IrisApplication:
                 CsvExtractor(),
                 DocxExtractor(),
                 ExcelExtractor(),
+                EmlExtractor(),
                 PdfExtractor(ocr=self._build_ocr()),
             ],
         )
