@@ -7,13 +7,15 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import PurePath
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 from core.results.models import Result, ResultKind
 
 MAX_TABLE_ROWS = 200
 
 OPEN_SCHEME = "iris://open"
+RUN_SCHEME = "iris://run"
+COMPOSE_SCHEME = "iris://compose"
 CONFIRM_URL = "iris://confirm"
 CANCEL_URL = "iris://cancel"
 
@@ -48,6 +50,8 @@ table.result-table { border-collapse: collapse; width: 100%; font-size: 0.95em; 
 table.result-table th, table.result-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
 table.result-table th { background: var(--code-bg); }
 table.result-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.result-table td.actions { white-space: nowrap; font-size: 0.85em; }
+table.result-table td.actions a { text-decoration: none; }
 .table-note { color: var(--muted); font-size: 0.85em; margin-top: 4px; }
 pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; overflow-x: auto; font: 12.5px/1.45 Consolas, "Cascadia Mono", monospace; margin: 0; }
 pre.diff { padding: 0; }
@@ -96,6 +100,33 @@ def escape(value: Any) -> str:
 
 def open_url(path: str) -> str:
     return f"{OPEN_SCHEME}?path={quote(str(path), safe='')}"
+
+
+def run_url(command: str) -> str:
+    return f"{RUN_SCHEME}?cmd={quote(str(command), safe='')}"
+
+
+def compose_url(text: str) -> str:
+    return f"{COMPOSE_SCHEME}?text={quote(str(text), safe='')}"
+
+
+def parse_iris_url(url: str) -> tuple[str, str] | None:
+    text = str(url or "")
+    if not text.startswith("iris://"):
+        return None
+    if text == CONFIRM_URL:
+        return "run", "/confirm"
+    if text == CANCEL_URL:
+        return "run", "/cancel"
+    parts = urlsplit(text)
+    query = parse_qs(parts.query)
+    if text.startswith(OPEN_SCHEME):
+        return "open", query.get("path", [""])[0]
+    if text.startswith(RUN_SCHEME):
+        return "run", query.get("cmd", [""])[0]
+    if text.startswith(COMPOSE_SCHEME):
+        return "compose", query.get("text", [""])[0]
+    return None
 
 
 def _is_web_url(value: str) -> bool:
@@ -166,10 +197,15 @@ def _render_text(result: Result, markdown: MarkdownConverter | None) -> str:
 def _render_table(result: Result) -> str:
     columns: Sequence[Any] = result.data["columns"]
     rows: Sequence[Sequence[Any]] = result.data["rows"]
-    head = "".join(f"<th>{escape(column)}</th>" for column in columns)
+    actions = result.data.get("row_actions")
+    has_actions = isinstance(actions, list) and any(actions)
+    head = "".join(f"<th>{escape(column)}</th>" for column in columns) + ("<th></th>" if has_actions else "")
     body: list[str] = []
-    for row in rows[:MAX_TABLE_ROWS]:
+    for index, row in enumerate(rows[:MAX_TABLE_ROWS]):
         cells = "".join(f'<td class="num">{escape(_cell(value))}</td>' if _is_number(value) else f"<td>{escape(_cell(value))}</td>" for value in row)
+        if has_actions:
+            links = actions[index] if index < len(actions) and isinstance(actions[index], list) else []
+            cells += '<td class="actions">' + " · ".join(f'<a href="{escape(item.get("href", ""))}">{escape(item.get("label", ""))}</a>' for item in links if isinstance(item, dict) and item.get("href")) + "</td>"
         body.append(f"<tr>{cells}</tr>")
     note = f'<div class="table-note">{len(rows) - MAX_TABLE_ROWS} more row(s) not shown</div>' if len(rows) > MAX_TABLE_ROWS else ""
     return f'<table class="result-table"><thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table>{note}'
@@ -444,7 +480,12 @@ def render_page(body: str, *, title: str | None = None, theme: str = "light") ->
 
 __all__ = [
     "CANCEL_URL",
+    "COMPOSE_SCHEME",
     "CONFIRM_URL",
+    "RUN_SCHEME",
+    "compose_url",
+    "parse_iris_url",
+    "run_url",
     "MAX_TABLE_ROWS",
     "OPEN_SCHEME",
     "STYLE",

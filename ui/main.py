@@ -365,6 +365,7 @@ class IrisWindow(QMainWindow):
         self.file_ops_panel = FileOperationsPanel(self)
         self.results_panel = ResultsPanel(self, base_dir=workspace_root)
         self.results_panel.commandRequested.connect(self._submit_command)
+        self.results_panel.composeRequested.connect(self._compose_command)
         self.details_stack = QStackedWidget()
         self.details_stack.addWidget(self.details_view)
         self.details_stack.addWidget(self.file_ops_panel)
@@ -1155,6 +1156,13 @@ class IrisWindow(QMainWindow):
 
     def _cancel_pending_action(self) -> None:
         self._submit_command("/cancel")
+
+    def _compose_command(self, text: str) -> None:
+        self.input_box.setPlainText(text)
+        cursor = self.input_box.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.input_box.setTextCursor(cursor)
+        self.input_box.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _submit_command(self, command_text: str) -> None:
         self.input_box.setPlainText(command_text)

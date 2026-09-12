@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
 
 from PySide6.QtCore import QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QPalette, QTextDocument
@@ -14,7 +13,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QWidget
 
 #! @allow-local-import
-from core.results.html import CANCEL_URL, CONFIRM_URL, OPEN_SCHEME, render_approval_bar, render_page, render_results
+from core.results.html import parse_iris_url, render_approval_bar, render_page, render_results
 #! @allow-local-import
 from core.results.models import from_json_list
 
@@ -38,19 +37,21 @@ def current_theme() -> str:
 
 class ResultsPage(QWebEnginePage):
     commandRequested = Signal(str)
+    composeRequested = Signal(str)
     openRequested = Signal(str)
 
     def acceptNavigationRequest(self, url: QUrl, navigation_type: QWebEnginePage.NavigationType, is_main_frame: bool) -> bool:
         text = url.toString()
         if url.scheme() == "iris":
-            if text == CONFIRM_URL:
-                self.commandRequested.emit("/confirm")
-            elif text == CANCEL_URL:
-                self.commandRequested.emit("/cancel")
-            elif text.startswith(OPEN_SCHEME):
-                target = parse_qs(urlsplit(text).query).get("path", [""])[0]
-                if target:
-                    self.openRequested.emit(target)
+            parsed = parse_iris_url(text)
+            if parsed is not None and parsed[1]:
+                kind, payload = parsed
+                if kind == "run":
+                    self.commandRequested.emit(payload)
+                elif kind == "compose":
+                    self.composeRequested.emit(payload)
+                elif kind == "open":
+                    self.openRequested.emit(payload)
             return False
         if navigation_type == QWebEnginePage.NavigationType.NavigationTypeLinkClicked:
             QDesktopServices.openUrl(url)
@@ -63,11 +64,13 @@ class ResultsPage(QWebEnginePage):
 
 class ResultsPanel(QWebEngineView):
     commandRequested = Signal(str)
+    composeRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None, *, base_dir: Path | None = None) -> None:
         super().__init__(parent)
         self._page = ResultsPage(self)
         self._page.commandRequested.connect(self.commandRequested)
+        self._page.composeRequested.connect(self.composeRequested)
         self._page.openRequested.connect(self.open_path)
         self.setPage(self._page)
         settings = self._page.settings()

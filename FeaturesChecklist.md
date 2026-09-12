@@ -114,11 +114,15 @@ single feature is what made those features look larger than they are.
 	(the recency weight) and can be retired in bulk with `/knowledge prune <days>` after a
 	preview, `confirm` to apply. Nothing is ever deleted: a new status `retired` hides a record
 	from recall, listings, counts and the default export while the row stays for history.
-- [~] Let the user browse, correct, and delete memories directly, not only through conversation.
+- [x] Let the user browse, correct, and delete memories directly, not only through conversation.
 	`/knowledge browse [topic] [n]` lists records newest first with id, kind, status, scope and
 	text; `/knowledge forget <id> <why>` retires one (the reason is required and echoed);
-	`/knowledge supersede` corrects one. Direct editing in the window, not through commands, is
-	still to build.
+	`/knowledge supersede` corrects one. **In the window, 2026-09-12:** the `memory_browse` tool
+	returns the records as a table whose rows carry show, why, supersede and forget links; show
+	and why run at once, supersede and forget put the command in the input box with the id
+	filled in so the reason or the new text is typed by the user. Any table result can carry
+	such row actions (`row_actions` in its data), and the panel now understands `iris://run`
+	and `iris://compose` links.
 - [x] Export and back up memory in a readable format (11). **Built 2026-09-12:** `/knowledge
 	export [folder]` writes `Data\Exports\knowledge-<stamp>.md` -- every live record grouped by
 	topic with its kind, status, date, source, content and id, superseded records left out -- and a

@@ -14,6 +14,7 @@ from core.actions.implementations.clipboard import ClipboardAction
 from core.actions.implementations.active_context import ActiveContextAction
 from core.actions.implementations.code_tools import CODE_ACTIONS
 from core.actions.implementations.excel_tools import EXCEL_ACTIONS
+from core.actions.implementations.memory_tools import MEMORY_ACTIONS
 from core.actions.implementations.network_tools import NETWORK_ACTIONS
 from core.actions.implementations.project_tools import PROJECT_ACTIONS
 from core.actions.implementations.fetch_web_page import FetchWebPageAction
@@ -125,6 +126,7 @@ def build_action_layer(
     project_service: Any = None,
     active_project_id: Any = None,
     excel_service: Any = None,
+    knowledge: Any = None,
 ) -> ActionLayer:
     registry_of_tools = tool_registry or ToolRegistry()
     action_registry = ActionRegistry(registry_of_tools)
@@ -157,6 +159,8 @@ def build_action_layer(
         action_registry.register(system_action())
     for network_action in NETWORK_ACTIONS:
         action_registry.register(network_action())
+    for memory_action in MEMORY_ACTIONS:
+        action_registry.register(memory_action())
 
     documents = document_config or document_search_config(config)
     applications, alias_map = application_maps(config)
@@ -182,6 +186,7 @@ def build_action_layer(
             project_service=project_service,
             active_project_id=active_project_id,
             excel_service=excel_service,
+            knowledge=knowledge,
         ),
     )
     return ActionLayer(

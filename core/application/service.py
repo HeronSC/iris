@@ -435,6 +435,7 @@ class IrisApplication:
             code_service=self.code_service,
             project_service=self.project_service,
             active_project_id=lambda: self.state.get("active_project_id") if isinstance(getattr(self, "state", None), dict) else None,
+            knowledge=self.knowledge,
             audit_folder=self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit",
             permissions=self.permissions,
             ledger=self.changes,
