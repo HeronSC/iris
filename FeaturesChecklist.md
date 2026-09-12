@@ -844,9 +844,19 @@ rules out every hosted speech API, which leaves a short, good list.
 
 ### 7.2 Network and Infrastructure
 
-- [ ] Network diagnostics: ping, DNS, traceroute, port checks, throughput.
-- [ ] Device discovery.
-- [ ] Connectivity troubleshooting.
+- [~] Network diagnostics: ping, DNS, traceroute, port checks, throughput. **Built 2026-09-12:**
+	`core/network/probes.py` wraps `ping`, `tracert`, `arp`, `socket` and two PowerShell
+	cmdlets (default route, DNS servers), parsed rather than echoed; tools `network_check`
+	(DNS timing, ping loss and latency, optional TCP port), `network_trace` (hops as a table),
+	`network_status`, `network_devices`. Throughput is not measured: it needs a download
+	target, which is a decision about what leaves the machine.
+- [~] Device discovery. `network_devices` lists what the ARP table has seen per interface,
+	broadcast and multicast rows dropped. Passive, so a quiet device is missing until it is
+	pinged; active scanning and names wait for the UniFi client list below.
+- [x] Connectivity troubleshooting. `network_status` checks the layers in order -- an interface
+	with an address, the gateway answering pings, DNS servers configured, a public name
+	resolving, a TCP path to the internet -- and names the first thing that fails. The
+	`gateway_unreachable` watcher kind (8.2) uses the same probes.
 - [ ] UniFi / Ubiquiti Dream Machine integration.
 - [ ] Start read-only with:
 	network status, connected clients, device health, logs, traffic/issues.
@@ -892,7 +902,8 @@ rules out every hosted speech API, which leaves a short, good list.
 	and channels. Ten kinds today: disk free, RAM, CPU, VRAM, service stopped, drive unhealthy,
 	new event-log errors, path changed, path missing, host unreachable.
 - [x] Watch PC health (7.1). -> disk_free_below, memory_percent_above, cpu_percent_above, vram_percent_above, drive_unhealthy, event_log_errors.
-- [~] Watch network problems (7.2). -> host_unreachable (TCP port); nothing gateway-aware yet.
+- [x] Watch network problems (7.2). -> host_unreachable (TCP port) and, since 2026-09-12,
+	gateway_unreachable (pings the default route).
 - [ ] Watch development builds and pipelines (3.3).
 - [ ] Watch cameras. Camera-specific behaviour is in 9.1; this is the delivery side.
 - [~] Watch files and folders (2.6). -> path_changed / path_missing by polling for notification

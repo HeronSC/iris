@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from core.network.probes import NetworkProbes
 from core.system import probes
 from core.system.probes import human_bytes
 
@@ -170,6 +171,17 @@ def host_unreachable(params: dict[str, Any], _baseline: Any) -> CheckResult:
         return CheckResult(True, f"{host}:{port} is unreachable ({error})", False)
 
 
+def gateway_unreachable(params: dict[str, Any], _baseline: Any) -> CheckResult:
+    network = params.get("probes") or NetworkProbes()
+    gateway = network.gateway()
+    if not gateway:
+        return CheckResult(True, "No default gateway is configured", None)
+    result = network.ping(gateway, count=int(params.get("count", 2)), timeout_ms=int(params.get("timeout_ms", 800)))
+    if result.reachable:
+        return CheckResult(False, f"Gateway {gateway} answers in {result.avg_ms} ms", result.avg_ms)
+    return CheckResult(True, f"Gateway {gateway} does not answer pings ({result.note or 'timed out'})", None)
+
+
 KINDS: dict[str, CheckKind] = {
     kind.name: kind
     for kind in (
@@ -183,6 +195,7 @@ KINDS: dict[str, CheckKind] = {
         CheckKind("path_changed", "A file or folder changes", {"path": "file or folder"}, path_changed, needs_baseline=True),
         CheckKind("path_missing", "A file or folder disappears", {"path": "file or folder"}, path_missing),
         CheckKind("host_unreachable", "A host stops answering on a TCP port", {"host": "name or ip", "port": "port (default 443)"}, host_unreachable),
+        CheckKind("gateway_unreachable", "The default gateway stops answering pings", {"count": "pings per check (default 2)"}, gateway_unreachable),
     )
 }
 

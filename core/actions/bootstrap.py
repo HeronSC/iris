@@ -14,6 +14,7 @@ from core.actions.implementations.clipboard import ClipboardAction
 from core.actions.implementations.active_context import ActiveContextAction
 from core.actions.implementations.code_tools import CODE_ACTIONS
 from core.actions.implementations.excel_tools import EXCEL_ACTIONS
+from core.actions.implementations.network_tools import NETWORK_ACTIONS
 from core.actions.implementations.project_tools import PROJECT_ACTIONS
 from core.actions.implementations.fetch_web_page import FetchWebPageAction
 from core.actions.implementations.web_search import WebSearchAction
@@ -154,6 +155,8 @@ def build_action_layer(
         action_registry.register(excel_action())
     for system_action in SYSTEM_ACTIONS:
         action_registry.register(system_action())
+    for network_action in NETWORK_ACTIONS:
+        action_registry.register(network_action())
 
     documents = document_config or document_search_config(config)
     applications, alias_map = application_maps(config)
