@@ -12,6 +12,7 @@ from core.actions.executor import ActionExecutionContext, ActionExecutor, System
 from core.actions.implementations.add_document_root import AddDocumentRootAction
 from core.actions.implementations.clipboard import ClipboardAction
 from core.actions.implementations.fetch_web_page import FetchWebPageAction
+from core.actions.implementations.web_search import WebSearchAction
 from core.actions.implementations.launch_application import LaunchApplicationAction
 from core.actions.implementations.open_file import OpenFileAction
 from core.actions.implementations.open_folder import OpenFolderAction, ShowInExplorerAction
@@ -27,6 +28,7 @@ from core.documents.models import DocumentSearchConfig
 from core.permissions.policy import PermissionPolicy
 from core.tools.registry import ToolRegistry
 from core.web.fetch import PageFetcher
+from core.web.search import DEFAULT_SEARCH_URL, SearchClient
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,18 @@ def page_fetcher_from(config: dict[str, Any]) -> PageFetcher:
     )
 
 
+def search_client_from(config: dict[str, Any]) -> SearchClient:
+    web_cfg = config.get("web", {}) if isinstance(config.get("web"), dict) else {}
+    general = config.get("general_knowledge", {}) if isinstance(config.get("general_knowledge"), dict) else {}
+    return SearchClient(
+        str(web_cfg.get("search_url") or DEFAULT_SEARCH_URL),
+        timeout_seconds=float(web_cfg.get("search_timeout_seconds", 12.0)),
+        cache_ttl_seconds=float(web_cfg.get("cache_ttl_seconds", 600.0)),
+        language=str(web_cfg.get("search_language") or "en-US"),
+        user_agent=str(web_cfg.get("user_agent") or general.get("user_agent") or "Iris/1.0 (local desktop assistant)"),
+    )
+
+
 def build_action_layer(
     config: dict[str, Any],
     *,
@@ -114,6 +128,7 @@ def build_action_layer(
         action_registry.register(action)
     fetcher = page_fetcher_from(config)
     action_registry.register(FetchWebPageAction(fetcher))
+    action_registry.register(WebSearchAction(search_client_from(config)))
     for system_action in SYSTEM_ACTIONS:
         action_registry.register(system_action())
 

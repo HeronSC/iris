@@ -571,12 +571,18 @@ Presentation moved to 2.7 and 6. This section is about getting good information.
 
 - [~] Focused lookups already work for weather, news, stocks, time, and definitions
 	-> `core/assistant/general_knowledge_router.py`. General research does not.
-- [ ] General web research.
-- [ ] Technical information search.
-- [ ] Documentation research.
-- [ ] Image search.
-- [ ] Video search.
-- [ ] News and current information.
+- [x] General web research. **Built 2026-09-12:** `web_search` (`core/actions/implementations/
+	web_search.py`) over `core/web/search.py`, a client for the SearXNG JSON API -- query,
+	category, optional time range, results deduplicated by URL and ranked by SearXNG's score,
+	every hit cited with its URL and date, cached ten minutes. Read-only, outbound, no
+	confirmation. Follow with `fetch_web_page` to read a hit.
+- [x] Technical information search. Same tool; the model picks `general` and follows with a fetch.
+- [x] Documentation research. Same tool.
+- [x] Image search. `category: images` returns image results (thumbnail shown, the page opens on
+	click) so the panel (6) shows a grid of pictures rather than a list of links.
+- [x] Video search. `category: videos` returns link cards with the page and snippet; playback
+	stays in the browser.
+- [x] News and current information. `category: news`, with `time_range` for recency.
 - [x] Fetch and extract page content, not just search snippets. -> `core/web/fetch.py`, the
 	`fetch_web_page` tool. Built 2026-09-10.
 - [ ] Compare multiple sources, and say when they disagree.
@@ -585,14 +591,19 @@ Presentation moved to 2.7 and 6. This section is about getting good information.
 	the date retrieved.
 - [~] Cache results, and respect rate limits and site terms. Page fetches are cached for ten
 	minutes and throttled to one request per host per second; nothing reads robots.txt yet.
-- [ ] Return structured results per 2.7, so the UI can show thumbnails, previews, and cards.
-- [ ] **Decided 2026-09-10:** general search through a self-hosted SearXNG container — keyless,
+- [x] Return structured results per 2.7, so the UI can show thumbnails, previews, and cards.
+	Search hits are link and image results; unresponsive engines arrive as a warning status.
+- [x] **Decided 2026-09-10, running 2026-09-12:** general search through a self-hosted SearXNG container — keyless,
 	web/images/videos/news in one JSON API, and only the query leaves the machine, under SearXNG's
 	identity rather than yours. Docker Desktop 29.5 is installed (the engine was not running at
 	review time; starting it is a phase step). It is the one long-running service Iris depends on.
 	Passed over: Tavily and similar (LLM-backed server-side — no other AI, 1), `ddgs` (scrapes
 	DuckDuckGo; ToS-grey and brittle), Brave Search API (clean, but keyed and identity-bearing;
-	the fallback if the container ever proves a burden).
+	the fallback if the container ever proves a burden). **Running 2026-09-12:** `docker/
+	docker-compose.yml` and `docker/searxng/settings.yml` (JSON format on, limiter off, bound to
+	127.0.0.1:8888 only); Docker Desktop had to be switched to Linux containers. `web.search_url`
+	in `config.json` overrides the address. When the container is down the tool fails with the
+	compose command to start it, so the answer says what is wrong rather than guessing.
 - [x] **Decided and built 2026-09-10:** fetch with `httpx`, extract with `trafilatura` (installed) — clean
 	text, title, author, date. Every result cites the final URL and fetch time (2.7). Guards: http(s)
 	only, no credentials in the URL, no loopback/private/link-local hosts (the LAN and Iris's own
@@ -649,13 +660,16 @@ Rendering only. *What* gets rendered is defined in 2.7.
 - [ ] Design the UI as the central interface for all Iris capabilities.
 - [~] Render every result type from 2.7: rich response panels, image previews, video previews,
 	syntax-highlighted code, diffs, file previews, tables, and search result cards. **Built
+	2026-09-12, second pass:** file search results are cards in the web panel too, grouped by
+	folder, each name opening the file and each folder heading opening the folder; the older tree
+	panel now only shows indexing progress. **First pass,
 	2026-09-12:** the detail panel is a `QWebEngineView` (`ui/results_panel.py`) showing HTML from
 	`core/results/html.py`, one renderer per kind -- tables with numeric columns aligned, bar and
 	line charts as inline SVG, diffs coloured by line, code blocks, file cards with Open and
 	Folder, images and video served from disk, link cards with byline, status badges. The renderer
 	is core code with no Qt in it, so the HTTP surface can serve the same page later. Still to do:
-	search result cards (the older file tree panel shows those), and syntax colouring inside code
-	blocks (`pygments` is in the dev venv only through pytest; using it is a dependency decision).
+	syntax colouring inside code blocks (`pygments` is in the dev venv only through pytest; using
+	it is a dependency decision).
 - [x] Stream responses as they generate, and let the user stop a running request. Built
 	2026-09-10: the coordinator streams the main answer through `on_delta`, the service turns
 	fragments into `IrisEvent.delta`, the desktop window rewrites the placeholder bubble as text
