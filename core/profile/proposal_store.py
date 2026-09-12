@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/profile/proposal_store.py
+
+from __future__ import annotations
 
 import json
 import shutil
@@ -9,7 +11,7 @@ from typing import Any
 from core.profile.proposal import MemoryProposal
 
 
-class ProposalStoreError(Exception):
+class ProposalStoreError(RuntimeError):
     pass
 
 

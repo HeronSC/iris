@@ -12,7 +12,7 @@ import ollama
 from core.llm.models import LLMRequest, LLMResponse, LLMUsage, ToolCall
 
 
-class OllamaClientError(Exception):
+class OllamaClientError(RuntimeError):
     pass
 
 

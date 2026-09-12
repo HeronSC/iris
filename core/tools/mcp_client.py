@@ -149,7 +149,7 @@ class McpCallResult:
     results: tuple[Any, ...] = ()
 
 
-class McpServerError(Exception):
+class McpServerError(RuntimeError):
     pass
 
 

@@ -16,7 +16,7 @@ from typing import Any
 from urllib import error as urllib_error, request
 
 
-class ProviderExecutionError(Exception):
+class ProviderExecutionError(RuntimeError):
     def __init__(self, message: str, *, unavailable: bool = True) -> None:
         super().__init__(message)
         self.unavailable = unavailable

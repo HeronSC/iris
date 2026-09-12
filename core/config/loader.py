@@ -13,7 +13,7 @@ from core.documents.models import DocumentSearchRoot, normalize_config_token, no
 logger = logging.getLogger(__name__)
 
 
-class ConfigError(Exception):
+class ConfigError(RuntimeError):
     pass
 
 

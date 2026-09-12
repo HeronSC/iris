@@ -16,7 +16,7 @@ DEFAULT_SERVICE = "Iris"
 ENVIRONMENT_PREFIX = "IRIS_SECRET_"
 
 
-class SecretError(Exception):
+class SecretError(RuntimeError):
     pass
 
 

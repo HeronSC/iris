@@ -14,7 +14,7 @@ from core.profile.proposal_store import MemoryProposalStore
 from core.profile.writer import MemoryWriter
 
 
-class MemoryUpdateError(Exception):
+class MemoryUpdateError(RuntimeError):
     pass
 
 

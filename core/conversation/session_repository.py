@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/conversation/session_repository.py
+
+from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
@@ -9,7 +11,7 @@ from uuid import uuid4
 from core.conversation.session import ConversationSession
 
 
-class SessionRepositoryError(Exception):
+class SessionRepositoryError(RuntimeError):
     pass
 
 
@@ -172,14 +174,6 @@ class SessionRepository:
         return self.sessions_folder / f"{session_id}.json"
 
     def _generate_session_id(self) -> str:
-        """A readable session id that is unique on disk.
-
-        The suffix used to be microseconds mod 10000, which gave the id only
-        10ms of resolution. The system clock is coarse enough that consecutive
-        calls routinely report the same microsecond, so two sessions created in
-        quick succession got the same id and the second silently overwrote the
-        first. The suffix is now a counter over ids already taken this second.
-        """
         base = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         for counter in range(10000):
             candidate = f"{base}-{counter:04d}"

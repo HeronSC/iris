@@ -1,3 +1,5 @@
+# File: core/profile/loader.py
+
 from __future__ import annotations
 
 import json
@@ -5,7 +7,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 
-class AssistantMemoryError(Exception):
+class AssistantMemoryError(RuntimeError):
     pass
 
 
