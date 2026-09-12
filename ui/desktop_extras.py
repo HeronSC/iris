@@ -6,11 +6,12 @@ import ctypes
 import ctypes.wintypes
 import logging
 import sys
+from collections.abc import Sequence
 from typing import Callable
 
-from PySide6.QtCore import QAbstractNativeEventFilter, QObject, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidget
+from PySide6.QtCore import QAbstractNativeEventFilter, QEvent, QObject, Qt, Signal
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QSystemTrayIcon, QVBoxLayout, QWidget
 
 logger = logging.getLogger(__name__)
 
@@ -181,3 +182,178 @@ class TrayController(QObject):
 
 
 __all__ = ["DEFAULT_HOTKEY", "GlobalHotkey", "HOTKEY_ID", "TrayController", "WM_HOTKEY", "make_icon", "parse_hotkey"]
+
+
+def apply_dark_palette(application: QApplication) -> QPalette:
+    palette = QPalette()
+    base = QColor(30, 30, 32)
+    panel = QColor(40, 40, 44)
+    text = QColor(228, 228, 230)
+    accent = QColor(78, 140, 220)
+    palette.setColor(QPalette.ColorRole.Window, base)
+    palette.setColor(QPalette.ColorRole.WindowText, text)
+    palette.setColor(QPalette.ColorRole.Base, panel)
+    palette.setColor(QPalette.ColorRole.AlternateBase, base)
+    palette.setColor(QPalette.ColorRole.ToolTipBase, panel)
+    palette.setColor(QPalette.ColorRole.ToolTipText, text)
+    palette.setColor(QPalette.ColorRole.Text, text)
+    palette.setColor(QPalette.ColorRole.Button, panel)
+    palette.setColor(QPalette.ColorRole.ButtonText, text)
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 120, 120))
+    palette.setColor(QPalette.ColorRole.Highlight, accent)
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.Link, QColor(120, 170, 240))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(140, 140, 146))
+    palette.setColor(QPalette.ColorRole.Mid, QColor(150, 150, 156))
+    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(120, 120, 126))
+    application.setStyle("Fusion")
+    application.setPalette(palette)
+    return palette
+
+
+class QuickInput(QDialog):
+    submitted = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None, *, placeholder: str = "Ask Iris...") -> None:
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        self.setModal(False)
+        self.setMinimumWidth(560)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        self.edit = QLineEdit(self)
+        self.edit.setPlaceholderText(placeholder)
+        self.edit.setClearButtonEnabled(True)
+        font = self.edit.font()
+        font.setPointSize(max(12, font.pointSize() + 3))
+        self.edit.setFont(font)
+        self.edit.returnPressed.connect(self._submit)
+        layout.addWidget(self.edit)
+        self.hint = QLabel("Enter sends to Iris; Esc closes", self)
+        self.hint.setStyleSheet("color: palette(mid); font-size: 11px;")
+        layout.addWidget(self.hint)
+
+    def open_centered(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            area = screen.availableGeometry()
+            self.adjustSize()
+            self.move(area.center().x() - self.width() // 2, area.top() + area.height() // 4)
+        self.edit.clear()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.edit.setFocus()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.hide()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _submit(self) -> None:
+        text = self.edit.text().strip()
+        if not text:
+            return
+        self.hide()
+        self.submitted.emit(text)
+
+
+class CommandPalette(QDialog):
+    chosen = Signal(str)
+
+    def __init__(self, commands: Sequence[tuple[str, str]], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Commands")
+        self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        self.setMinimumSize(520, 360)
+        self.commands = [(str(command), str(summary)) for command, summary in commands]
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        self.filter = QLineEdit(self)
+        self.filter.setPlaceholderText("Type to filter commands")
+        self.filter.textChanged.connect(self.refresh)
+        self.filter.returnPressed.connect(self._choose_current)
+        self.filter.installEventFilter(self)
+        layout.addWidget(self.filter)
+        self.list = QListWidget(self)
+        self.list.itemActivated.connect(lambda _item: self._choose_current())
+        layout.addWidget(self.list)
+        self.refresh("")
+
+    def refresh(self, needle: str) -> None:
+        wanted = needle.strip().casefold()
+        self.list.clear()
+        for command, summary in self.commands:
+            if wanted and wanted not in command.casefold() and wanted not in summary.casefold():
+                continue
+            item = QListWidgetItem(f"{command}    {summary}")
+            item.setData(Qt.ItemDataRole.UserRole, command)
+            self.list.addItem(item)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+
+    def visible_commands(self) -> list[str]:
+        return [str(self.list.item(index).data(Qt.ItemDataRole.UserRole)) for index in range(self.list.count())]
+
+    def open_at(self, anchor: QWidget | None = None) -> None:
+        if anchor is not None:
+            corner = anchor.mapToGlobal(anchor.rect().topLeft())
+            self.move(corner.x(), max(0, corner.y() - self.height()))
+        self.filter.clear()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.filter.setFocus()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.filter and event.type() == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+            step = 1 if event.key() == Qt.Key.Key_Down else -1
+            row = self.list.currentRow() + step
+            if 0 <= row < self.list.count():
+                self.list.setCurrentRow(row)
+            return True
+        return super().eventFilter(watched, event)
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.hide()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _choose_current(self) -> None:
+        item = self.list.currentItem()
+        if item is None:
+            return
+        self.hide()
+        self.chosen.emit(str(item.data(Qt.ItemDataRole.UserRole)))
+
+
+PALETTE_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("/help", "List the commands"),
+    ("/session list", "Recent sessions"),
+    ("/session new", "Start a fresh session"),
+    ("/session search ", "Find an earlier session by words"),
+    ("/project", "Show the active project"),
+    ("/project list", "All projects"),
+    ("/knowledge browse", "Browse what Iris remembers"),
+    ("/knowledge gaps", "Questions Iris could not answer"),
+    ("/principles", "House rules Iris follows"),
+    ("/corrections", "Corrections Iris has taken"),
+    ("/tools", "Tools available right now"),
+    ("/models", "Model routes and what is pulled"),
+    ("/context", "What Iris sees on screen"),
+    ("/search ", "Find files by words"),
+    ("/index status", "Document index state"),
+    ("/watch list", "Active watchers"),
+    ("/schedule list", "Scheduled jobs"),
+    ("/backup now", "Back up the data folder"),
+    ("/changes", "Recent file edits, with undo"),
+    ("/why", "Why the last answer came out that way"),
+    ("/permissions", "Tool permission rules"),
+    ("/eval", "Run the saved request checks"),
+    ("/stop", "Stop the current work"),
+)

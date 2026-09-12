@@ -909,16 +909,23 @@ Rendering only. *What* gets rendered is defined in 2.7.
 	**Built 2026-09-12:** a tray icon (`ui/desktop_extras.py`) with Show, Hide to tray, "Close to
 	tray instead of quitting" (remembered in QSettings) and Quit; a global hotkey, Ctrl+Alt+I by
 	default (`window/hotkey` in QSettings), registered with `RegisterHotKey` and caught by a
-	native event filter, that brings the window to the front and focuses the input. The small
-	always-available input is not built.
-- [ ] Keyboard-first navigation and a command palette.
+	native event filter, that brings the window to the front and focuses the input. **Added
+	2026-09-12:** the small always-available input -- when the window is not in front, the hotkey
+	opens a one-line popup (`QuickInput`) centred on the screen; Enter sends the text to Iris and
+	brings the window forward, Esc closes it. `window/hotkey_popup` = false in QSettings makes the
+	hotkey only raise the window.
+- [~] Keyboard-first navigation and a command palette. **Built 2026-09-12:** Ctrl+K opens a
+	command palette (`CommandPalette`) over the input -- type to filter, arrows to move, Enter to
+	run; commands that take an argument are put in the input box with the cursor at the end. The
+	list is static (`PALETTE_COMMANDS`); the rest of the window still needs the mouse.
 - [~] Show sources, and let the user open the underlying file, page, or record in one click.
 	**Built 2026-09-12:** every card shows its source and the time it was made; a web source opens
 	in the browser and a path opens in its Windows default app through an `iris://open` link the
 	panel intercepts, with no JavaScript enabled in the view. Records (memory ids) do not open yet.
-- [~] Dark mode and readable defaults at the screen sizes actually used. The result panel
-	follows the Qt palette (light and dark token sets, 2026-09-12); the rest of the window is
-	stock Qt widgets.
+- [x] Dark mode and readable defaults at the screen sizes actually used. The result panel
+	follows the Qt palette (light and dark token sets, 2026-09-12). **Added 2026-09-12:** the whole
+	window runs on the Fusion style with a dark palette (`apply_dark_palette`) by default;
+	`window/theme` = light in QSettings keeps the stock look.
 - [~] **Decided 2026-09-10:** stay on PySide6, and render the result panels in an embedded
 	`QWebEngineView` — `QtWebEngineWidgets` is already present in the installed PySide6 6.11.
 	Streaming arrived with the `ollama` client change (2.4) and is wired (above); the web view

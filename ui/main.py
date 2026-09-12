@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -53,7 +54,7 @@ from core.results.html import render_confirmation, render_search_results
 #! @allow-local-import
 from ui.results_panel import ResultsPanel, markdown_to_html, results_fragment
 #! @allow-local-import
-from ui.desktop_extras import DEFAULT_HOTKEY, GlobalHotkey, TrayController, make_icon
+from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, CommandPalette, GlobalHotkey, QuickInput, TrayController, apply_dark_palette, make_icon
 #! @allow-local-import
 from core.assistant.why_command import describe_activity
 #! @allow-local-import
@@ -417,12 +418,43 @@ class IrisWindow(QMainWindow):
         self.tray.hideRequested.connect(self.hide)
         self.tray.quitRequested.connect(self._quit_from_tray)
         self.tray.start()
-        self.hotkey = GlobalHotkey(self.bring_to_front)
+        self.quick_input = QuickInput(self)
+        self.quick_input.submitted.connect(self._submit_from_popup)
+        self.palette_dialog = CommandPalette(PALETTE_COMMANDS, self)
+        self.palette_dialog.chosen.connect(self._choose_palette_command)
+        QShortcut(QKeySequence("Ctrl+K"), self, activated=self.open_palette)
+        self.hotkey = GlobalHotkey(self.on_hotkey)
         application = QApplication.instance()
         if application is not None:
             application.installNativeEventFilter(self.hotkey)
         self.hotkey.register(str(self.settings.value("window/hotkey") or DEFAULT_HOTKEY))
         self._start_engine_initialization()
+
+    def on_hotkey(self) -> None:
+        if self.isActiveWindow() and self.isVisible() and not self.isMinimized():
+            self._focus_input_box()
+            return
+        if str(self.settings.value("window/hotkey_popup") or "true").lower() in {"true", "1"}:
+            self.quick_input.open_centered()
+            return
+        self.bring_to_front()
+
+    def _submit_from_popup(self, text: str) -> None:
+        self.bring_to_front()
+        self._submit_command(text)
+
+    def open_palette(self) -> None:
+        self.palette_dialog.open_at(self.input_box)
+
+    def _choose_palette_command(self, command: str) -> None:
+        if command.endswith(" "):
+            self.input_box.setPlainText(command)
+            self._focus_input_box()
+            cursor = self.input_box.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self.input_box.setTextCursor(cursor)
+            return
+        self._submit_command(command)
 
     def bring_to_front(self) -> None:
         if self.isMinimized():
@@ -1301,6 +1333,8 @@ def _resolve_config_path(argv: list[str]) -> tuple[Path, list[str]]:
 def main() -> None:
     config_path, qt_argv = _resolve_config_path(sys.argv[1:])
     app = QApplication([sys.argv[0], *qt_argv])
+    if str(QSettings("Iris", "IrisUI").value("window/theme") or "dark").lower() == "dark":
+        apply_dark_palette(app)
     configure_logging(log_dir_for(None, config_path))
     window = IrisWindow(config_path)
     if window._start_maximized:
