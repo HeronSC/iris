@@ -137,9 +137,19 @@ class ALWorkspace:
         }
 
 
+JSONC_COMMENT = re.compile(r"^\s*//.*$", re.MULTILINE)
+JSONC_TRAILING_COMMA = re.compile(r",(\s*[}\]])")
+
+
+def parse_jsonc(text: str) -> Any:
+    cleaned = JSONC_COMMENT.sub("", text)
+    cleaned = JSONC_TRAILING_COMMA.sub(r"", cleaned)
+    return json.loads(cleaned)
+
+
 def _read_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
+        return parse_jsonc(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as error:
         logger.warning("Could not read %s: %s", path, error)
         return None
@@ -238,6 +248,7 @@ __all__ = [
     "LaunchConfig",
     "PackageInfo",
     "find_workspace_by_name",
+    "parse_jsonc",
     "find_workspace_root",
     "find_workspaces",
     "load_workspace",

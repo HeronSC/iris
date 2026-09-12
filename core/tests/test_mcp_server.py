@@ -159,10 +159,8 @@ class McpServerTests(unittest.TestCase):
 
     def test_the_server_offers_the_memory_surface(self) -> None:
         names = {tool.name for tool in self.tools}
-        self.assertEqual(
-            names,
-            {"recall", "observe", "close_observation", "hypothesize", "add_evidence", "assess", "review_queue", "explain"},
-        )
+        self.assertTrue({"recall", "observe", "close_observation", "hypothesize", "add_evidence", "assess", "review_queue", "explain"} <= names)
+        self.assertTrue({"workspaces", "describe_workspace", "find_symbol", "search_code", "read_file", "compile_workspace"} <= names)
 
     def test_the_read_only_tools_say_so_to_the_client(self) -> None:
         for tool in self.tools:

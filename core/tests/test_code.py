@@ -18,7 +18,7 @@ from core.actions.models import ActionRequest
 from core.code import CodeService
 from core.code.search import RipgrepSearch, SearchToolMissing
 from core.code.symbols import SymbolIndex, package_symbols, parse_source
-from core.code.workspace import find_workspace_by_name, find_workspace_root, load_workspace, parse_package_name
+from core.code.workspace import find_workspace_by_name, find_workspace_root, load_workspace, parse_jsonc, parse_package_name
 from core.results.models import ResultKind
 
 APP_JSON = {
@@ -199,6 +199,17 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(find_workspace_by_name("kloter farms bc projects", [self.root]), self.project)
         self.assertEqual(find_workspace_by_name("Mammoth Projects", [self.root]), self.project)
         self.assertIsNone(find_workspace_by_name("Nope", [self.root]))
+
+    def test_vs_code_json_with_comments_and_trailing_commas_is_read(self) -> None:
+        text = "{
+  // the sandbox
+  \"configurations\": [
+    {\"name\": \"BC\", \"type\": \"al\",},
+  ],
+}"
+        self.assertEqual(parse_jsonc(text)["configurations"][0]["name"], "BC")
+        (self.project / ".vscode" / "launch.json").write_text(text, encoding="utf-8")
+        self.assertEqual([item.name for item in load_workspace(self.project).launch], ["BC"])
 
     def test_package_names_parse(self) -> None:
         info = parse_package_name(Path("Elephas Corporation_Mammoth Common_28.4.0.1.app"))

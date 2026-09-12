@@ -7,7 +7,10 @@ from typing import Any, Sequence
 
 import structlog
 
+from core.actions.bootstrap import documents_roots_for
+from core.code import CodeService
 from core.host.knowledge import IrisKnowledgeService
+from core.mcp_server.code_tools import IrisCodeTools
 from core.mcp_server.tools import IrisMcpTools
 from core.observability import configure_logging, log_dir_for
 
@@ -20,10 +23,14 @@ INSTRUCTIONS = (
     "close_observation record what happened; hypothesize and add_evidence build a claim the "
     "evidence has to support; assess scores records against accepted rules; review_queue shows what "
     "is waiting on a person. Iris never accepts a hypothesis on its own -- reaching supported is "
-    "arithmetic, accepting it is a decision someone makes."
+    "arithmetic, accepting it is a decision someone makes. For Business Central AL work: workspaces "
+    "lists the AL projects Iris may read, describe_workspace reads app.json and the packages, "
+    "find_symbol looks up an object with its fields, events and subscribers, search_code greps the "
+    "sources, read_file shows a numbered window, compile_workspace runs alc.exe with the workspace's "
+    "analyzers and returns every diagnostic."
 )
 
-READ_ONLY = {"recall", "review_queue", "explain"}
+READ_ONLY = {"recall", "review_queue", "explain", "workspaces", "describe_workspace", "find_symbol", "search_code", "read_file"}
 
 
 def build_tools(service: IrisKnowledgeService, client: str = "mcp") -> IrisMcpTools:
@@ -37,13 +44,28 @@ def build_tools(service: IrisKnowledgeService, client: str = "mcp") -> IrisMcpTo
     )
 
 
-def build_server(service: IrisKnowledgeService, client: str = "mcp") -> Any:
+def build_code_tools(service: IrisKnowledgeService, client: str = "mcp", code_service: CodeService | None = None) -> IrisCodeTools:
+    config = getattr(service, "config", None)
+    config = config if isinstance(config, dict) else {}
+    roots = documents_roots_for(config) if config else []
+    code_cfg = config.get("code", {}) if isinstance(config.get("code"), dict) else {}
+    data_root = getattr(service, "data_root", None)
+    return IrisCodeTools(
+        code_service or CodeService(roots, cache_dir=(Path(data_root) / "Index" / "al_symbols") if data_root else None, alc_path=code_cfg.get("alc_path") or None),
+        allowed_roots=roots,
+        auditor=getattr(service, "tool_auditor", None),
+        client=client,
+    )
+
+
+def build_server(service: IrisKnowledgeService, client: str = "mcp", code_service: CodeService | None = None) -> Any:
     #! @allow-local-import
     from mcp.server.mcpserver import MCPServer
     #! @allow-local-import
     from mcp.types import ToolAnnotations
 
     tools = build_tools(service, client=client)
+    code_tools = build_code_tools(service, client=client, code_service=code_service)
     server = MCPServer(name=SERVER_NAME, instructions=INSTRUCTIONS, version="1")
 
     def register(name: str, handler: Any, description: str) -> None:
@@ -87,6 +109,31 @@ def build_server(service: IrisKnowledgeService, client: str = "mcp") -> Any:
     register("assess", assess, "Score records against the rules Iris has accepted, with the reasoning.")
     register("review_queue", review_queue, "Hypotheses waiting on a person, and those still under test.")
     register("explain", explain, "Where a memory came from and what it rests on.")
+
+    def workspaces() -> dict[str, Any]:
+        return code_tools.workspaces()
+
+    def describe_workspace(path: str | None = None) -> dict[str, Any]:
+        return code_tools.describe_workspace(path)
+
+    def find_symbol(name: str, kind: str | None = None, detail: str = "summary", path: str | None = None) -> dict[str, Any]:
+        return code_tools.find_symbol(name, kind=kind, detail=detail, path=path)
+
+    def search_code(pattern: str, path: str | None = None, glob: str | None = None, regex: bool = False, max_results: int = 40) -> dict[str, Any]:
+        return code_tools.search_code(pattern, path=path, glob=glob, regex=regex, max_results=max_results)
+
+    def read_file(path: str, start_line: int = 1, max_lines: int = 200) -> dict[str, Any]:
+        return code_tools.read_file(path, start_line=start_line, max_lines=max_lines)
+
+    def compile_workspace(path: str | None = None, analyzers: bool = True, max_diagnostics: int = 40) -> dict[str, Any]:
+        return code_tools.compile_workspace(path, analyzers=analyzers, max_diagnostics=max_diagnostics)
+
+    register("workspaces", workspaces, "The Business Central AL workspaces Iris may read: name, publisher, version, root.")
+    register("describe_workspace", describe_workspace, "An AL workspace's app.json, launch targets, symbol packages and object counts; the one at or above a path, or by name.")
+    register("find_symbol", find_symbol, "Look up an AL object by name, id or prefix: fields, procedures, events, subscribers in the workspace, extensions targeting it. detail is summary, fields, events, procedures or all.")
+    register("search_code", search_code, "Search a workspace's sources with ripgrep: file, line and the matching line.")
+    register("read_file", read_file, "A numbered window of a text file inside the folders Iris may read.")
+    register("compile_workspace", compile_workspace, "Compile an AL workspace with alc.exe and its analyzers; every error and warning with file, line and code. The .app goes to Iris's build folder.")
     return server
 
 
@@ -98,4 +145,4 @@ def main(config_path: str | Path | None = None, client: str = "mcp") -> int:
     return 0
 
 
-__all__ = ["INSTRUCTIONS", "SERVER_NAME", "build_server", "build_tools", "main"]
+__all__ = ["INSTRUCTIONS", "SERVER_NAME", "build_code_tools", "build_server", "build_tools", "main"]
