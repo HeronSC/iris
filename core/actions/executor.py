@@ -66,6 +66,8 @@ class ActionExecutionContext:
     document_scanner: DocumentScanner | None = None
     context_service: Any = None
     code_service: Any = None
+    project_service: Any = None
+    active_project_id: Any = None
 
 
 @dataclass(frozen=True)

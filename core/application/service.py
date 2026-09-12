@@ -46,6 +46,7 @@ from core.assistant.changes_command import ChangesCommandHandler
 from core.assistant.context_command import ContextCommandHandler
 from core.assistant.stop_command import StopCommandHandler
 from core.code import CodeService
+from core.projects import ProjectService
 from core.context import build_context_service
 from core.assistant.corrections_command import CorrectionsCommandHandler
 from core.assistant.workflow_command import WorkflowCommandHandler
@@ -286,7 +287,8 @@ class IrisApplication:
                 KnowledgeRecallProvider(self.knowledge_retriever)
             )
 
-        self.project_handler: CommandHandler = ProjectCommandHandler(output=self._sink)
+        self.project_service = ProjectService(Path(self.config["memory_path"]), store=self.store)
+        self.project_handler: CommandHandler = ProjectCommandHandler(output=self._sink, service=self.project_service)
         self.save_handler: CommandHandler = SaveCommandHandler(output=self._sink)
         proposal_store = MemoryProposalStore(self.config.get("proposal_path") or Path(__file__).resolve().parents[1] / "memory" / "proposals")
         audit_folder = Path(self.config.get("audit_path") or Path(__file__).resolve().parents[1] / "audit")
@@ -421,11 +423,16 @@ class IrisApplication:
             cache_dir=Path(self.config["memory_path"]).parent / "Index" / "al_symbols",
             context_service=self.context_service,
         )
+        self.project_service.ledger = self.changes
+        self.project_service.context_service = self.context_service
+        self.project_service.code_service = self.code_service
         action_layer = build_action_layer(
             self.config,
             catalog=document_catalog,
             context_service=self.context_service,
             code_service=self.code_service,
+            project_service=self.project_service,
+            active_project_id=lambda: self.state.get("active_project_id") if isinstance(getattr(self, "state", None), dict) else None,
             audit_folder=self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit",
             permissions=self.permissions,
             ledger=self.changes,
@@ -844,6 +851,15 @@ class IrisApplication:
                 parts.append(code_service.prompt_line())
             except Exception as error:
                 logger.debug("Code context unavailable: %s", error)
+        projects = getattr(self, "project_service", None)
+        state = getattr(self, "state", None)
+        if projects is not None and isinstance(state, dict) and not state.get("active_project_id"):
+            try:
+                inferred, reason = projects.infer()
+            except Exception as error:
+                inferred, reason = None, str(error)
+            if inferred is not None:
+                parts.append(f"- Likely project (not switched to; /project use adopts it): {inferred.get('name')}, because {reason}")
         return "\n".join(part for part in parts if part)
 
     def health(self) -> dict[str, Any]:

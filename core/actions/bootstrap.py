@@ -13,6 +13,7 @@ from core.actions.implementations.add_document_root import AddDocumentRootAction
 from core.actions.implementations.clipboard import ClipboardAction
 from core.actions.implementations.active_context import ActiveContextAction
 from core.actions.implementations.code_tools import CODE_ACTIONS
+from core.actions.implementations.project_tools import PROJECT_ACTIONS
 from core.actions.implementations.fetch_web_page import FetchWebPageAction
 from core.actions.implementations.web_search import WebSearchAction
 from core.actions.implementations.launch_application import LaunchApplicationAction
@@ -114,6 +115,8 @@ def build_action_layer(
     tool_registry: ToolRegistry | None = None,
     context_service: Any = None,
     code_service: Any = None,
+    project_service: Any = None,
+    active_project_id: Any = None,
 ) -> ActionLayer:
     registry_of_tools = tool_registry or ToolRegistry()
     action_registry = ActionRegistry(registry_of_tools)
@@ -136,6 +139,8 @@ def build_action_layer(
     action_registry.register(ActiveContextAction())
     for code_action in CODE_ACTIONS:
         action_registry.register(code_action())
+    for project_action in PROJECT_ACTIONS:
+        action_registry.register(project_action())
     for system_action in SYSTEM_ACTIONS:
         action_registry.register(system_action())
 
@@ -160,6 +165,8 @@ def build_action_layer(
             document_scanner=scanner,
             context_service=context_service,
             code_service=code_service,
+            project_service=project_service,
+            active_project_id=active_project_id,
         ),
     )
     return ActionLayer(

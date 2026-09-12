@@ -453,10 +453,15 @@ Git-specific items moved to 3.3.
 
 ### 3.3 Git and Azure DevOps
 
-- [ ] Repository awareness (moved here from 3.2).
-- [ ] Commits and history (moved here from 3.2).
-- [ ] Branches.
-- [ ] Diff and blame on demand.
+- [x] Repository awareness (moved here from 3.2). **Verified 2026-09-12:** the git MCP server
+	starts (the client resolves `uvx` from `~/.local/bin` itself) and registers twelve tools;
+	`git_status` and `git_show` cover this. Bound to `E:\AI\iris` in `config.json`; other
+	repositories need their own `mcp_servers` entry or the `repo_path` argument.
+- [x] Commits and history (moved here from 3.2). `git_log`, `git_show`.
+- [x] Branches. `git_branch` to list; `git_create_branch` and `git_checkout` go through confirm.
+- [~] Diff and blame on demand. `git_diff`, `git_diff_staged`, `git_diff_unstaged` render as
+	diff results (2.7). The reference server has no blame; that waits for a second server or a
+	wrapped `git blame`.
 - [ ] Pull requests: list, read, comment, create.
 - [ ] Build status and pipelines.
 - [ ] Work items: read, link to commits and PRs, update.
@@ -465,7 +470,7 @@ Git-specific items moved to 3.3.
 - [~] **Decided 2026-09-10:** Iris's first two MCP servers (2.3) — `mcp-server-git` (the reference
 	server, via `uvx`) and Microsoft's official `@azure-devops/mcp` (via `npx`). Both pass through
 	the confirm/audit spine, so a commit or a work-item update still gets a preview. Read-only
-	surfaces first.
+	surfaces first. Git is running (above); Azure DevOps is not configured yet.
 - [ ] **Decided 2026-09-10:** Azure DevOps authenticates through `az login` (Entra). Iris stores no
 	secret; the CLI owns token refresh. `az` 2.87 is installed.
 - [ ] Passed over: GitPython/pygit2 and hand-wrapping `az devops` — the servers already exist and
@@ -473,15 +478,32 @@ Git-specific items moved to 3.3.
 
 ### 3.4 Project and Task Awareness
 
-- [ ] Define what a project *is*: a named record with folders, repos, an ADO area path, documents,
-	and people attached.
-- [ ] Track active projects.
-- [ ] Associate conversations, files, code, decisions, and tasks per project.
-- [ ] Switch projects explicitly, and infer the likely project from context (3.1).
+- [~] Define what a project *is*: a named record with folders, repos, an ADO area path, documents,
+	and people attached. **Built 2026-09-12:** `core/projects/service.py` owns
+	`Data\Memory\projects.json` -- id, name, status, summary, technologies, `paths.workspace /
+	repository / documents`, focus, decisions, tasks (`next_actions`). Every write is copied
+	first through the change ledger, so `/undo` puts it back. An ADO area path and people are
+	still to add; nothing reads them yet.
+- [x] Track active projects. `/project list`, `/project <name>`, `/project new <name>`,
+	`/project clear`; the active project is per session as before.
+- [~] Associate conversations, files, code, decisions, and tasks per project. Sessions carry
+	`project_id`; folders are linked with `/project link workspace|repository|documents <path>`;
+	decisions and tasks live on the record (`/project decide`, `/project task add`, the
+	`project_update` tool). Individual files and knowledge records are not tagged yet.
+- [x] Switch projects explicitly, and infer the likely project from context (3.1). Inference
+	(`ProjectService.infer`): the window's target path inside a linked folder, then the AL
+	workspace in view (linked root or matching name), then the window title. `/project` says what
+	is in view and why; `/project use` adopts it; the system prompt names the likely project
+	without switching.
 - [ ] Scope memory per project (2.1).
-- [ ] Remember current project state.
-- [ ] Track unfinished work.
-- [ ] Surface relevant prior decisions automatically.
+- [~] Remember current project state. Focus, decisions, open tasks and last-opened date are on
+	the record and in the prompt when the project is active. What was being done in the last
+	session is not summarised into it yet.
+- [x] Track unfinished work. `/project tasks`, `/project task add <text>`, `/project task done
+	<n>`, and the `active_project` / `project_update` tools; open tasks appear in the prompt.
+- [~] Surface relevant prior decisions automatically. The active project's decisions are in the
+	system prompt on every turn (`context_builder`), so the model can cite them; ranking by
+	relevance to the request is not done.
 - [ ] **Decided 2026-09-10:** where a project names an Azure DevOps area path, its tasks are a
 	*view* over ADO work items through the ADO MCP server (3.3); otherwise Iris keeps a local list.
 	One list per project, never two. The project record already has `paths.repository / workspace /

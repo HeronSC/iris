@@ -1,3 +1,5 @@
+# File: core/profile/store.py
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -65,6 +67,9 @@ class MemoryStore:
             if needle in str(project.get("name", "")).lower()
             or needle in str(project.get("summary", "")).lower()
         ]
+
+    def replace_section(self, key: str, data: dict[str, Any]) -> None:
+        self._memory_data[key] = data
 
     def to_dict(self) -> dict[str, Any]:
         return deepcopy(self._memory_data)

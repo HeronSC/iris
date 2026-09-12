@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/conversation/context_builder.py
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -56,6 +58,12 @@ class ContextBuilder:
                     lines.append(f"- Current focus: {project['current_focus']}")
                 if project.get("technologies"):
                     lines.append(f"- Technologies: {', '.join(project['technologies'])}")
+                decisions = [str(item.get("decision")) for item in project.get("decisions", []) if isinstance(item, dict) and item.get("decision") and item.get("status", "active") == "active"]
+                if decisions:
+                    lines.append("- Decisions: " + "; ".join(decisions[:6]))
+                tasks = [item for item in project.get("next_actions", []) if isinstance(item, dict) and item.get("text") and item.get("status", "open") == "open"]
+                if tasks:
+                    lines.append("- Open tasks: " + "; ".join(f"{item.get('id')}. {item['text']}" for item in tasks[:8]))
 
         if session_summary:
             lines.append("")
