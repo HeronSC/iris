@@ -1,4 +1,4 @@
-# File: core/mcp_server/service.py
+# File: core/host/knowledge.py
 
 from __future__ import annotations
 
@@ -33,6 +33,8 @@ class IrisKnowledgeService:
         memory_config = MemoryConfig.from_config(self.config)
         knowledge_path = self.config.get("knowledge_path") or memory_config.database_path.parent / "knowledge.db"
         database = SQLiteDatabase(knowledge_path)
+        self.database = database
+        self.data_root = Path(self.config["memory_path"]).parent
         self.knowledge = KnowledgeGraph(database)
         self.hypotheses = HypothesisTracker(self.knowledge)
         self.model_router = ModelRouter(
@@ -62,6 +64,7 @@ class IrisKnowledgeService:
             "assistant": str(self.config.get("assistant_name", "Iris")),
             "records": self.knowledge.records.count(),
             "embeddings": self.embedding_index.available,
+            "database": self.database.verify().summary,
         }
 
 

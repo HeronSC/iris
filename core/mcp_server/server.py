@@ -7,7 +7,7 @@ from typing import Any, Sequence
 
 import structlog
 
-from core.mcp_server.service import IrisKnowledgeService
+from core.host.knowledge import IrisKnowledgeService
 from core.mcp_server.tools import IrisMcpTools
 from core.observability import configure_logging, log_dir_for
 

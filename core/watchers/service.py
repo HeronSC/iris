@@ -45,6 +45,7 @@ class WatcherService:
         self._lock = threading.RLock()
         self._scheduler: Any = None
         self.load()
+        self._loaded_stamp = self._definitions_stamp()
 
 
     def load(self) -> None:
@@ -64,6 +65,27 @@ class WatcherService:
                     self._states[watcher_id] = WatcherState.from_json(payload)
             for watcher_id in self._definitions:
                 self._states.setdefault(watcher_id, WatcherState())
+
+    def reload_if_changed(self) -> bool:
+        stamp = self._definitions_stamp()
+        if stamp == self._loaded_stamp:
+            return False
+        self.load()
+        self._loaded_stamp = stamp
+        if self._scheduler is not None:
+            for definition in self.definitions():
+                if definition.enabled:
+                    self._schedule(definition)
+                else:
+                    self._unschedule(definition.id)
+        return True
+
+    def _definitions_stamp(self) -> tuple[float, int] | None:
+        try:
+            stat = self.definitions_path.stat()
+        except OSError:
+            return None
+        return (stat.st_mtime, stat.st_size)
 
     def save(self) -> None:
         with self._lock:

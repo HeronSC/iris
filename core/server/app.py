@@ -39,6 +39,10 @@ logger = structlog.get_logger(__name__)
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
+HEALTH_DETAIL_KEYS = frozenset(
+    {"host", "checked_at", "models", "indexed", "databases", "watchers", "schedules", "http", "backups", "broken"}
+)
+
 
 def _record_out(record: MemoryRecord) -> RecordOut:
     return RecordOut(
@@ -132,11 +136,13 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
 
     @api.get("/health", response_model=Health)
     def health() -> Health:
+        report = app_service.health() if callable(getattr(app_service, "health", None)) else {}
         return Health(
-            status="ok",
+            status=str(report.get("status", "ok")),
             records=app_service.knowledge.records.count(),
             assistant=str(app_service.config.get("assistant_name", "Iris")),
             contract=CONTRACT,
+            **{key: value for key, value in report.items() if key in HEALTH_DETAIL_KEYS},
         )
 
     @api.post("/observations", response_model=BatchAccepted, status_code=201)

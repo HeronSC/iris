@@ -893,11 +893,24 @@ How Iris runs day to day. None of this was in the original document, but every i
 real thing in the repo: `Launch-Iris.cmd`, `deploy_phase4.ps1`, `package_release.ps1`, `serve.py`,
 and the `Data/` tree.
 
-- [ ] **Decided 2026-09-10:** a headless Windows service hosts the parts that must run when no
-	window is open — APScheduler watchers, the MQTT listener, the HTTP surface — and the Qt window
-	is a client of it. `win32serviceutil` from the pinned `pywin32`; no new dependency. Today Iris
-	is a console launcher (`Launch-Iris.cmd`) with no startup entry at all.
-- [ ] Start with Windows, survive a reboot, and recover from a crash.
+- [x] **Decided 2026-09-10, built 2026-09-12:** a headless host runs the parts that must run when
+	no window is open -- the watchers, the scheduled jobs, the HTTP surface -- and the Qt window is a
+	client of it. `core/host/service.py` (`IrisHost`) holds the knowledge layer, watchers, schedules,
+	backups and uvicorn in one process with no model chat loop and no window; the MQTT listener
+	joins it when 9.1 starts. `iris_service.py install|start|stop|remove` wraps it in
+	`win32serviceutil` from the pinned `pywin32` (no new dependency; `install` sets automatic
+	start and `sc failure` restart-on-crash), and `iris_service.py --console` /
+	`Run-Iris-Service.cmd` runs the same host in a window on any machine, which is how it is
+	tested. The desktop probes `/health` at startup and, when the host answers, does not start its
+	own watchers or schedules and says so in its first lines. Watcher and schedule definitions are
+	re-read when their files change, so `/watch add` in the window takes effect in the service
+	within its heartbeat rather than at its next restart. Toasts are not a service channel --
+	session 0 has no desktop -- so the host delivers to the inbox and the log and the window
+	shows what arrived.
+- [~] Start with Windows, survive a reboot, and recover from a crash. The service installs with
+	automatic start and a restart-on-failure policy (5 s, 30 s, 60 s, reset daily), which is the
+	Windows half. Still to verify on the machine itself: that the first boot after
+	`iris_service.py install` brings the host up before the desktop opens.
 - [ ] **Decided and done 2026-09-10:** one `requirements.txt` at the root for dev (`.venv`) and
 	release (`Runtime\venv`). `core/requirements.txt` and `ui/requirements.txt` are removed and
 	`deploy_phase4.ps1` now installs from the root file — before this, the release build read
@@ -947,7 +960,13 @@ and the `Data/` tree.
 	never for a fresh file. Alembic/yoyo would still be more machinery than problem.
 - [ ] An update mechanism that does not lose data or config.
 - [ ] Resource limits: do not hold the GPU or thrash the disk while the user is working.
-- [ ] Health check: what is up, which model is loaded, what is indexed, what is broken.
+- [x] Health check: what is up, which model is loaded, what is indexed, what is broken. **Built
+	2026-09-12:** `/health` on either host now says which host answered, the configured model and
+	which routes are pulled (from the router's cached view -- a health check that waits on Ollama's
+	full timeout is not a health check), record, vector and document counts, quick_check per
+	database, watcher and schedule state, the newest backup, and a `broken` list; `status` is
+	`degraded` whenever that list is not empty. -> `core/host/health.py`, one builder for the
+	service, the desktop, and the MCP server.
 - [ ] **Open:** is Iris ever reachable from a phone or another machine? That answer drives the UI
 	choice in 6 and the auth story in 10.
 

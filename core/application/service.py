@@ -113,8 +113,10 @@ from core.permissions.policy import PermissionPolicy
 from core.permissions.secrets import SecretStore
 from core.tools.audit import ToolAuditor
 from core.tools.registry import ToolRegistry
-from core.scheduler.jobs import DATABASE_BACKUP, HYPOTHESIS_REVIEW, build_jobs
-from core.scheduler.models import JobDefinition
+from core.host.health import HOST_DESKTOP, HOST_SERVICE, health_report
+from core.host.service import probe_host
+from core.scheduler.defaults import ensure_default_jobs
+from core.scheduler.jobs import build_jobs
 from core.scheduler.service import ScheduleService
 from core.watchers import InboxNotifier, LogNotifier, QuietHours, ToastNotifier, WatcherService
 from core.watchers.checks import register_kinds
@@ -186,6 +188,7 @@ class IrisApplication:
         self.schedule_handler: CommandHandler = _NoopCommandHandler()
         self.backup_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
+        self.attached_host: dict[str, Any] | None = None
 
     def initialize(self, event_handler: EventHandler | None = None) -> None:
         self.event_handler = event_handler
@@ -341,6 +344,7 @@ class IrisApplication:
         )
         document_db = SQLiteDatabase(document_cfg.get("catalog_path") or Path(__file__).resolve().parents[1] / "index" / "documents.db")
         document_catalog = DocumentCatalog(document_db)
+        self.document_catalog = document_catalog
         data_root = Path(self.config["memory_path"]).parent
         backup_databases = {"knowledge": knowledge_database, "documents": document_db}
         if self.request_metrics is not None:
@@ -547,8 +551,18 @@ class IrisApplication:
             IrisMessage(MessageRole.SYSTEM, "Assistant memory loaded."),
             IrisMessage(MessageRole.SYSTEM, f"Configured Ollama model: {self.config['model']}"),
             IrisMessage(MessageRole.SYSTEM, f"Ollama endpoint: {self.config['llm_server']}"),
-            IrisMessage(MessageRole.SYSTEM, "Iris is ready."),
         ]
+        attached = getattr(self, "attached_host", None)
+        if attached is not None and attached.get("host") == HOST_SERVICE:
+            watching = (attached.get("watchers") or {}).get("defined", 0)
+            scheduled = (attached.get("schedules") or {}).get("defined", 0)
+            self.startup_messages.append(
+                IrisMessage(
+                    MessageRole.SYSTEM,
+                    f"The Iris service is running ({watching} watchers, {scheduled} scheduled jobs); this window is a client of it.",
+                )
+            )
+        self.startup_messages.append(IrisMessage(MessageRole.SYSTEM, "Iris is ready."))
         self.initialized = True
         if self.event_handler is not None:
             for message in self.startup_messages:
@@ -793,23 +807,11 @@ class IrisApplication:
             quiet_hours=quiet,
             audit=self.audit_stream,
         )
-        self.schedules.ensure(
-            JobDefinition(
-                job=HYPOTHESIS_REVIEW,
-                name="Re-appraise hypotheses",
-                cron="0 6 * * *",
-                id="hypothesis-review",
-            )
-        )
-        self.schedules.ensure(
-            JobDefinition(
-                job=DATABASE_BACKUP,
-                name="Back up Data",
-                cron="0 3 * * *",
-                id="database-backup",
-                channels=("inbox", "log"),
-            )
-        )
+        ensure_default_jobs(self.schedules)
+        self.attached_host = probe_host()
+        if self.attached_host is not None and self.attached_host.get("host") == HOST_SERVICE:
+            logger.info("iris host is running; this window is a client of it")
+            return service
         if bool(notifications_cfg.get("enabled", True)):
             try:
                 service.start()
@@ -820,6 +822,9 @@ class IrisApplication:
             except Exception as error:
                 logger.warning("Scheduled jobs could not start", error=str(error))
         return service
+
+    def health(self) -> dict[str, Any]:
+        return health_report(self, host=HOST_DESKTOP)
 
     def _build_ocr(self) -> OcrService | None:
         readers: list[Any] = []

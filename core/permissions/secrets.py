@@ -117,9 +117,9 @@ class SecretStore:
         except Exception as error:
             logger.warning("No usable credential store: %s", error)
             return None
-        name = type(backend).__name__.lower()
-        if "fail" in name or "null" in name:
-            logger.info("No credential store on this machine (%s)", type(backend).__name__)
+        qualified = f"{type(backend).__module__}.{type(backend).__name__}".lower()
+        if ".fail." in qualified or ".null." in qualified:
+            logger.info("No credential store on this machine (%s)", qualified)
             return None
         return keyring
 

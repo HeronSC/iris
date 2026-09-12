@@ -175,3 +175,13 @@ class Health(BaseModel):
     records: int
     assistant: str
     contract: str
+    host: str | None = None
+    checked_at: str | None = None
+    models: dict[str, Any] = Field(default_factory=dict)
+    indexed: dict[str, Any] = Field(default_factory=dict)
+    databases: dict[str, str] = Field(default_factory=dict)
+    watchers: dict[str, Any] = Field(default_factory=dict)
+    schedules: dict[str, Any] = Field(default_factory=dict)
+    http: dict[str, Any] = Field(default_factory=dict)
+    backups: str | None = None
+    broken: list[str] = Field(default_factory=list)
