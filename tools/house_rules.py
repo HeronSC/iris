@@ -87,7 +87,7 @@ def rule_no_triple_quotes(txt: str) -> list[str]:
     errs: list[str] = []
     try:
         tree = ast.parse(txt)
-    except Exception:
+    except (OSError, ValueError, RuntimeError, TypeError):
         return errs
     if (
         tree.body
@@ -226,7 +226,7 @@ def check_file(path: Path) -> list[str]:
     try:
         if path.resolve() == Path(__file__).resolve():
             return []
-    except Exception:
+    except (OSError, ValueError, RuntimeError, TypeError):
         pass
 
     txt = read_text(path)

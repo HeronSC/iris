@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/assistant/workflows.py
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -91,7 +93,7 @@ class MemoryReviewWorkflow:
             if normalized_decision in {"approve", "approved"}:
                 try:
                     self.update_service.apply_proposal(proposal)
-                except Exception:
+                except (OSError, ValueError, RuntimeError, TypeError):
                     continue
                 self.proposal_store.approve(proposal.id)
                 approved_count = approved_count + 1
@@ -115,7 +117,7 @@ class MemoryReviewWorkflow:
             return True, ""
         except ProposalStoreError as error:
             return False, str(error)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             if approve:
                 return False, f"Could not apply proposal {proposal_id}: {error}"
             return False, str(error)

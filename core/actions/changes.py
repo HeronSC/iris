@@ -221,7 +221,7 @@ class ChangeLedger:
                     data={"change_id": report.change.id, "restored": list(report.restored), "removed": list(report.removed)},
                 )
             )
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Could not record an undo: %s", error)
 
 

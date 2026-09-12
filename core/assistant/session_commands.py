@@ -159,7 +159,7 @@ class SessionCommandHandler:
                 continue
             try:
                 session = self.repository.get_session(session_id)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 continue
             if session is None:
                 continue

@@ -71,7 +71,7 @@ class ProjectService:
         if self.ledger is not None and self.path is not None:
             try:
                 self.ledger.snapshot("project", [self.path], reason=reason)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.debug("Project snapshot not taken: %s", error)
         data.setdefault("metadata", {})["updated_at"] = _today()
         if self.path is not None:
@@ -249,7 +249,7 @@ class ProjectService:
         if context is not None and not getattr(context, "paused", False):
             try:
                 current = context.current()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 current = None
         if current is None:
             return None, "nothing is in view"
@@ -261,7 +261,7 @@ class ProjectService:
         if self.code_service is not None:
             try:
                 workspace = self.code_service.active_workspace()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 workspace = None
         if workspace is not None:
             project = self.project_for_path(workspace.root)

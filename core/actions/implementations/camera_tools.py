@@ -87,7 +87,7 @@ class CameraAlertsAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = AlertArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         _service_obj, problem = _ready(context)
         if problem:
@@ -143,7 +143,7 @@ class CameraSnapshotAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = SnapshotArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         _service_obj, problem = _ready(context)
         if problem:

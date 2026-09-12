@@ -92,7 +92,7 @@ class CodeService:
             return None
         try:
             current = service.current()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return None
         if current is None:
             return None
@@ -128,7 +128,7 @@ class CodeService:
             return None
         try:
             current = service.current()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return None
         if current is None:
             return None

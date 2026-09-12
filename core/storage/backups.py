@@ -94,7 +94,7 @@ class BackupService:
                 if not report.ok:
                     raise RuntimeError(f"copy failed quick_check: {report.summary}")
                 databases[name] = copy
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 failures[name] = str(error)
                 logger.warning("Backup of %s failed: %s", name, error)
         for name, folder in self.folders.items():
@@ -104,7 +104,7 @@ class BackupService:
                 target = run / name
                 shutil.copytree(folder, target, ignore=shutil.ignore_patterns(*SKIP_IN_FOLDERS), dirs_exist_ok=True)
                 folders[name] = target
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 failures[name] = str(error)
                 logger.warning("Backup of %s failed: %s", name, error)
         pruned = self._prune(keep_run=run)
@@ -154,7 +154,7 @@ class BackupService:
                 shutil.copy2(copy, live)
                 database.verify(force=True)
                 restored.append(name)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 failures[name] = str(error)
                 logger.warning("Restore of %s failed: %s", name, error)
         for name, folder in self.folders.items():
@@ -168,7 +168,7 @@ class BackupService:
                     set_aside[name] = aside
                 shutil.copytree(copy, folder)
                 restored.append(name)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 failures[name] = str(error)
                 logger.warning("Restore of %s failed: %s", name, error)
         return RestoreReport(run=source, restored=tuple(restored), set_aside=set_aside, failures=failures)

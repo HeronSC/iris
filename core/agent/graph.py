@@ -118,7 +118,7 @@ class IrisAgent:
         if self._saver_context is not None:
             try:
                 self._saver_context.__exit__(None, None, None)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
             self._saver_context = None
 
@@ -404,7 +404,7 @@ class IrisAgent:
             return
         try:
             callback(event)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Tool progress callback failed: %s", error)
 
     def _dispatch(self, name: str, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
@@ -446,7 +446,7 @@ class IrisAgent:
             return
         try:
             self.tool_auditor.record(name, arguments, result, source="agent")
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Tool audit failed for %s: %s", name, error)
 
     def _run_command(self, definition: Any, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
@@ -498,7 +498,7 @@ class IrisAgent:
             return {"status": "failed", "error": "invalid_request", "message": f"I need a valid {name} request before I can continue."}
         try:
             route_result = router.execute_capability_request(name, request_obj)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Capability %s failed: %s", name, error)
             return {"status": "failed", "error": "capability_failed", "message": f"I could not execute the {name} capability."}
         if route_result is None or route_result.response is None:

@@ -160,7 +160,7 @@ class PageFetcher:
                     author = payload.get("author") or None
                     date = payload.get("date") or None
                     text = str(payload.get("text") or "").strip()
-            except Exception as error:
+            except (ImportError, OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Extraction failed for %s: %s", final_url, error)
             if not title:
                 title = _title_from_html(html)

@@ -50,7 +50,7 @@ class ExcelWorkbookAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = WorkbookArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         _service_obj, target, problem = _target(context, arguments.path)
         if problem:
@@ -63,7 +63,7 @@ class ExcelWorkbookAction:
             return ActionResult(status="failed", message=problem, action=self.name, error="workbook_unavailable")
         try:
             info = service.describe(target)
-        except (WorkbookUnavailable, Exception) as error:
+        except (WorkbookUnavailable, OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Could not read {target.name}: {error}", action=self.name, error="read_failed")
         source = Source("excel_workbook", "document", info.path)
         results: list[Result] = [text_result(info.describe(), source=source, title=info.name, format="text")]
@@ -97,7 +97,7 @@ class ExcelReadAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = ReadArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         _service_obj, target, problem = _target(context, arguments.path)
         if problem:
@@ -113,7 +113,7 @@ class ExcelReadAction:
             return ActionResult(status="failed", message=problem, action=self.name, error="workbook_unavailable")
         try:
             data = service.read(target, arguments.get("sheet") or None, arguments.get("range") or None, formulas=bool(arguments.get("formulas")), max_rows=int(arguments.get("max_rows") or 60))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Could not read {target.name}: {error}", action=self.name, error="read_failed")
         source = Source("excel_read", "document", f"{target.path}#{data.sheet}!{data.address}")
         width = data.width
@@ -154,7 +154,7 @@ class ExcelFindAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = FindArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         if not arguments.text.strip():
             return ValidationResult(ok=False, error="Say what to look for")
@@ -173,7 +173,7 @@ class ExcelFindAction:
         text = str(arguments.get("text") or "")
         try:
             hits = service.find(target, text, arguments.get("sheet") or None, limit=int(arguments.get("limit") or 50))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Could not search {target.name}: {error}", action=self.name, error="read_failed")
         source = Source("excel_find", "document", target.path)
         if not hits:
@@ -197,7 +197,7 @@ class ExcelCheckAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = WorkbookArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         _service_obj, target, problem = _target(context, arguments.path)
         if problem:
@@ -210,7 +210,7 @@ class ExcelCheckAction:
             return ActionResult(status="failed", message=problem, action=self.name, error="workbook_unavailable")
         try:
             hits = service.errors(target)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Could not check {target.name}: {error}", action=self.name, error="read_failed")
         source = Source("excel_check", "document", target.path)
         if not hits:
@@ -246,7 +246,7 @@ class ExcelWriteAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = WriteArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         service, target, problem = _target(context, arguments.path)
         if problem:
@@ -255,7 +255,7 @@ class ExcelWriteAction:
             preview = service.preview_write(target, arguments.sheet or None, arguments.range.strip(), arguments.values)
         except (WorkbookUnavailable, ExcelWriteRefused, ExcelBusy) as error:
             return ValidationResult(ok=False, error=str(error))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Could not read {target.name}: {error}")
         if preview["changed"] == 0:
             return ValidationResult(ok=False, error=f"{preview['label']} already holds those values; nothing to write.")
@@ -282,7 +282,7 @@ class ExcelWriteAction:
             report = service.write(target, arguments.get("sheet") or None, str(arguments.get("range") or ""), arguments.get("values"))
         except (WorkbookUnavailable, ExcelWriteRefused, ExcelBusy) as error:
             return ActionResult(status="failed", message=str(error), action=self.name, error="write_refused")
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Could not write to {target.name}: {error}", action=self.name, error="write_failed")
         label = f"{target.name} {report.sheet}!{report.address}"
         source = Source("excel_write", "document", f"{target.path}#{report.sheet}!{report.address}")

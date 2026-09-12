@@ -39,7 +39,7 @@ class FetchWebPageAction:
             url = self.fetcher.check_url(arguments.url)
         except UrlRejected as error:
             return ValidationResult(ok=False, error=str(error))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         return ValidationResult(ok=True, resolved_target=url, resolved_arguments={"url": url, "max_chars": arguments.max_chars})
 
@@ -50,7 +50,7 @@ class FetchWebPageAction:
             page = self.fetcher.fetch(url)
         except UrlRejected as error:
             return ActionResult(status="failed", message=str(error), action=self.name, resolved_target=url, error="url_rejected")
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Could not fetch {url}: {error}", action=self.name, resolved_target=url, error="fetch_failed")
         if not page.text.strip():
             return ActionResult(

@@ -53,6 +53,6 @@ class ChangesCommandHandler:
         if self.on_undo is not None and report.ok:
             try:
                 self.on_undo(report)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
         emit_output(self.output, report.summary + "\nRestart Iris if the change was to config.json.")

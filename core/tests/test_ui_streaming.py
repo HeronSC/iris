@@ -17,7 +17,7 @@ try:
     from PySide6.QtWidgets import QApplication
 
     _PYSIDE_AVAILABLE = True
-except Exception:  # pragma: no cover - environment without Qt
+except ImportError:  # pragma: no cover - environment without Qt
     QApplication = None  # type: ignore[assignment]
     _PYSIDE_AVAILABLE = False
 

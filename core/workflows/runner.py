@@ -34,7 +34,7 @@ def _with_timeout(call: Callable[[], dict[str, Any]], seconds: float) -> dict[st
     def work() -> None:
         try:
             box["outcome"] = call()
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             box["outcome"] = {"status": "failed", "error": type(error).__name__, "message": str(error)}
 
     thread = threading.Thread(target=work, name="workflow-step", daemon=True)
@@ -200,7 +200,7 @@ class WorkflowRunner:
             return StepOutcome(step_id=step.id, tool=step.tool, status="preview", message="No preview available for this tool", arguments=arguments)
         try:
             outcome = self.preview(step.tool, arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return StepOutcome(step_id=step.id, tool=step.tool, status="failed", error=type(error).__name__, message=str(error), arguments=arguments)
         return StepOutcome(
             step_id=step.id,

@@ -381,7 +381,7 @@ class UpdateConfigAction:
             with config_path.open("w", encoding="utf-8") as handle:
                 json.dump(config, handle, indent=2)
                 handle.write("\n")
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Failed to write config: {error}", action=self.name, error="config_write_failed")
 
         self._reload_runtime_config(context, config_path)
@@ -392,7 +392,7 @@ class UpdateConfigAction:
         try:
             with config_path.open("r", encoding="utf-8-sig") as handle:
                 config = json.load(handle)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return {}
         return config if isinstance(config, dict) else {}
 

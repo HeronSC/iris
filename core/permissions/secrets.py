@@ -56,7 +56,7 @@ class SecretStore:
         if backend is not None:
             try:
                 value = backend.get_password(self.service, name)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Credential store unavailable for %s: %s", name, error)
                 value = None
             if value:
@@ -84,7 +84,7 @@ class SecretStore:
             try:
                 backend.delete_password(self.service, name)
                 removed = True
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.info("Nothing to delete for %s: %s", name, error)
         self._forget(name)
         return removed
@@ -114,7 +114,7 @@ class SecretStore:
             return None
         try:
             backend = keyring.get_keyring()
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("No usable credential store: %s", error)
             return None
         qualified = f"{type(backend).__module__}.{type(backend).__name__}".lower()

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from core.actions.diffs import unified_text_diff
 from core.actions.executor import path_is_allowed
-from core.actions.models import ActionRequest, ActionResult, ConfirmationPreview, ValidationResult
+from core.actions.models import (
+    ActionRequest,
+    ActionResult,
+    ConfirmationPreview,
+    ValidationResult,
+)
 from core.results.models import Result, Source, code, status
 from core.results.models import diff as diff_result
 from core.tools.models import PermissionLevel, ToolDefinition
@@ -91,7 +95,7 @@ class ReadFileAction:
             path = _resolve(context, arguments.path, must_exist=True)
         except FileRefused as error:
             return ValidationResult(ok=False, error=str(error))
-        except Exception as error:
+        except ValidationError as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         return ValidationResult(ok=True, resolved_target=str(path), resolved_arguments={"path": str(path), "start_line": arguments.start_line, "max_lines": arguments.max_lines})
 
@@ -143,7 +147,7 @@ class EditFileAction:
             return ValidationResult(ok=False, error=str(error))
         except OSError as error:
             return ValidationResult(ok=False, error=f"Could not read the file: {error}")
-        except Exception as error:
+        except ValidationError as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         if not arguments.old_text:
             return ValidationResult(ok=False, error="old_text is empty; use write_file to create or replace a whole file")
@@ -219,7 +223,7 @@ class WriteFileAction:
             path = _resolve(context, arguments.path, must_exist=False)
         except FileRefused as error:
             return ValidationResult(ok=False, error=str(error))
-        except Exception as error:
+        except ValidationError as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         exists = path.is_file()
         if exists and not arguments.overwrite:
@@ -273,4 +277,4 @@ class WriteFileAction:
 
 FILE_ACTIONS = (ReadFileAction, EditFileAction, WriteFileAction)
 
-__all__ = ["EditFileAction", "FILE_ACTIONS", "FileRefused", "ReadFileAction", "WriteFileAction"]
+__all__ = ["FILE_ACTIONS", "EditFileAction", "FileRefused", "ReadFileAction", "WriteFileAction"]

@@ -39,7 +39,7 @@ class MemoryBrowseAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = BrowseArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         if getattr(context, "knowledge", None) is None:
             return ValidationResult(ok=False, error=NO_SERVICE)
@@ -98,7 +98,7 @@ class RecordGapAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = GapArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         if getattr(context, "knowledge", None) is None:
             return ValidationResult(ok=False, error=NO_SERVICE)

@@ -46,7 +46,7 @@ def resolve_shortcut(path: Path) -> str | None:
 
         shell = win32com.client.Dispatch("WScript.Shell")
         return str(shell.CreateShortcut(str(path)).TargetPath or "")
-    except Exception:
+    except (ImportError, OSError, ValueError, RuntimeError, TypeError):
         return None
 
 

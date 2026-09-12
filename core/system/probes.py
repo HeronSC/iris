@@ -215,7 +215,7 @@ def disk_usage(root: str, *, top: int = 15, time_budget_seconds: float = 20.0) -
 
         stats = psutil.disk_usage(str(base))
         usage = {"total": stats.total, "used": stats.used, "free": stats.free, "percent": stats.percent}
-    except Exception:
+    except (ImportError, OSError, ValueError, RuntimeError, TypeError):
         usage = None
     return {"root": str(base), "entries": entries[: max(1, top)], "measured": total, "usage": usage, "truncated": truncated, "skipped": skipped}
 
@@ -254,7 +254,7 @@ def drive_health() -> list[dict[str, Any]]:
             "Get-PhysicalDisk | Get-StorageReliabilityCounter | Select-Object DeviceId, Temperature, Wear, ReadErrorsTotal, WriteErrorsTotal, PowerOnHours | ConvertTo-Json -Compress"
         )):
             counters[str(row.get("DeviceId"))] = row
-    except Exception:
+    except (OSError, ValueError, RuntimeError, TypeError):
         counters = {}
     predictions = {}
     try:
@@ -262,7 +262,7 @@ def drive_health() -> list[dict[str, Any]]:
             "Get-CimInstance -Namespace root\\wmi -ClassName MSStorageDriver_FailurePredictStatus | Select-Object InstanceName, PredictFailure | ConvertTo-Json -Compress"
         )):
             predictions[str(row.get("InstanceName", ""))] = bool(row.get("PredictFailure"))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, TypeError):
         predictions = {}
     result: list[dict[str, Any]] = []
     for disk in disks:

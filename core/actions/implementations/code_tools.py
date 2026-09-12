@@ -57,7 +57,7 @@ class RepoSearchAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = RepoSearchArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         if not arguments.pattern.strip():
             return ValidationResult(ok=False, error="The search pattern is empty")
@@ -121,7 +121,7 @@ class ALWorkspaceAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = ALWorkspaceArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         service = _service(context)
         if service is None:
@@ -175,7 +175,7 @@ class ALSymbolAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = ALSymbolArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         if not arguments.name.strip():
             return ValidationResult(ok=False, error="The object name is empty")
@@ -279,7 +279,7 @@ class ALCompileAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = ALCompileArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         service = _service(context)
         if service is None:
@@ -300,7 +300,7 @@ class ALCompileAction:
             report = service.compile(workspace, analyzers=bool(request.arguments.get("analyzers", True)))
         except FileNotFoundError as error:
             return ActionResult(status="failed", message=str(error), action=self.name, error="alc_missing")
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Compiling {workspace.name} failed to run: {error}", action=self.name, error="compile_failed")
         source = Source("al_compile", "tool", str(workspace.root))
         limit = int(request.arguments.get("max_diagnostics") or 40)
@@ -342,7 +342,7 @@ class ALReferencesAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = ALReferencesArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         name = arguments.name.strip().strip('"')
         if not name:

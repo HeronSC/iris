@@ -145,7 +145,7 @@ class DocumentScanner:
 
                         try:
                             extracted = self._store_extracted(file_path, absolute_path, stat)
-                        except Exception as error:
+                        except (OSError, ValueError, RuntimeError, TypeError) as error:
                             self.catalog.log_scan_error(absolute_path, str(error))
                             mark_directory_error(file_path.parent)
                             if self._directory_key(file_path.parent) in skipped_directories:
@@ -161,7 +161,7 @@ class DocumentScanner:
                             indexed_files = indexed_files + 1
                         else:
                             updated_files = updated_files + 1
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 root_had_walk_errors = True
                 self.catalog.log_scan_error(str(root_path), f"Unexpected scan traversal failure: {error}")
                 error_files = error_files + 1
@@ -288,7 +288,7 @@ class DocumentScanner:
             return "unchanged"
         try:
             extracted = self._store_extracted(file_path, absolute_path, stat)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             self.catalog.log_scan_error(absolute_path, str(error))
             return "error"
         if extracted.content_status == "error":

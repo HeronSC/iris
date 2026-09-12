@@ -188,7 +188,7 @@ class IndexCommandHandler:
         try:
             with self.config_path.open("r", encoding="utf-8-sig") as handle:
                 config = json.load(handle)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return False
 
         if not isinstance(config, dict):
@@ -217,7 +217,7 @@ class IndexCommandHandler:
                 with self.config_path.open("w", encoding="utf-8") as handle:
                     json.dump(config, handle, indent=2)
                     handle.write("\n")
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 return False
 
         self.scanner.config.roots.append(root)
@@ -229,7 +229,7 @@ class IndexCommandHandler:
 
         try:
             loaded = ConfigLoader(self.config_path).load()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return
 
         document_search = loaded.get("document_search", {}) if isinstance(loaded, dict) else {}

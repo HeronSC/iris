@@ -1,3 +1,5 @@
+# File: core/assistant/conversation_synonyms.py
+
 from __future__ import annotations
 
 import json
@@ -94,7 +96,7 @@ class ConversationSynonymStore:
         try:
             with self.store_path.open("r", encoding="utf-8-sig") as handle:
                 payload = json.load(handle)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             payload = self._default_payload()
             self._write_payload(payload)
             return payload

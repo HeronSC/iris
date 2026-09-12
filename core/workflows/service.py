@@ -225,7 +225,7 @@ class WorkflowService:
         if self.notify is not None and not run.dry_run and run.status in {"failed", "partial", "awaiting_approval", "blocked"}:
             try:
                 self.notify(run)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Workflow notification failed: %s", error)
         return run
 
@@ -253,7 +253,7 @@ class WorkflowService:
                     data={"workflow_id": run.workflow_id, "version": run.version, "steps": [item.status for item in run.steps], "dry_run": run.dry_run},
                 )
             )
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Could not record a workflow run: %s", error)
 
     def sync_schedules(self, schedules: Any) -> list[str]:

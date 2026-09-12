@@ -197,7 +197,7 @@ class ScheduleService:
         if scheduler is not None:
             try:
                 scheduler.shutdown(wait=False)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Scheduler shutdown: %s", error)
 
     @property
@@ -234,7 +234,7 @@ class ScheduleService:
             return
         try:
             self._scheduler.remove_job(f"job-{job_id}")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             pass
 
     def run(self, job_id: str) -> JobResult | None:
@@ -246,7 +246,7 @@ class ScheduleService:
             return self._finish(definition, JobResult(ok=False, summary=f"No handler for {definition.job}"))
         try:
             result = handler(dict(definition.params))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Scheduled job %s failed: %s", definition.label, error)
             result = JobResult(ok=False, summary=str(error))
         return self._finish(definition, result)
@@ -298,7 +298,7 @@ class ScheduleService:
                     data=dict(result.data),
                 )
             )
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Could not record a scheduled run: %s", error)
 
     def _notify(self, definition: JobDefinition, result: JobResult, now: datetime) -> None:
@@ -316,7 +316,7 @@ class ScheduleService:
                 continue
             try:
                 notifier.send(notification)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Notifier %s failed for %s: %s", channel, definition.label, error)
 
     def describe(self) -> list[dict[str, Any]]:

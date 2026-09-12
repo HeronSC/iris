@@ -42,7 +42,7 @@ class KnowledgeRecallProvider(KnowledgeProvider):
             return ()
         try:
             found = provider() if callable(provider) else provider
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return ()
         return tuple(str(item) for item in (found or ()))
 

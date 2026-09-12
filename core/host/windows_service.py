@@ -69,7 +69,7 @@ def service_class() -> Any:
             try:
                 self.host = IrisHost(config_path)
                 self.host.start()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 servicemanager.LogErrorMsg(f"{SERVICE_DISPLAY_NAME} could not start: {error}")
                 self.ReportServiceStatus(win32service.SERVICE_STOPPED)
                 return

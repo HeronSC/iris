@@ -74,7 +74,7 @@ class ExcelProvider:
             if selected is not None:
                 address = getattr(selected, "Address", None)
                 selection = str(address(False, False)) if callable(address) else (str(address) if address else None)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Excel COM lookup failed: %s", error)
             return ActiveContext(app="Excel", title=window.title, provider=self.name, target=_title_document(window.title, "Excel"), target_kind="workbook")
         extra: dict[str, Any] = {}

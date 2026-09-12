@@ -13,7 +13,7 @@ HOST_MCP = "mcp"
 def _safe(call: Any, default: Any = None) -> Any:
     try:
         return call()
-    except Exception:
+    except (OSError, ValueError, RuntimeError, TypeError):
         return default
 
 

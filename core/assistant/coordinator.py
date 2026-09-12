@@ -123,7 +123,7 @@ class AssistantCoordinator:
                 on_delta=on_delta,
                 cancel_event=cancel_event,
             )
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             prepared = self._turn_cache.get("prepared")
             if prepared is None:
                 prepared = {"record": self._turn_recorder(self._resolve_session())}
@@ -216,7 +216,7 @@ class AssistantCoordinator:
             return
         try:
             store.save_example(user_message, tool_name, dict(arguments), source="successful:agent")
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Could not save a tool example: %s", error)
 
     def parse_request(self, user_message: str) -> dict[str, Any]:
@@ -306,7 +306,7 @@ class AssistantCoordinator:
                 self._active_topic_id = str(prepared_memory.topic_id)
                 self._active_topic_title = prepared_memory.topic_name
                 self._log_memory_diagnostics(memory_diagnostics)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Persistent memory prepare failed: %s", error)
         llm_user_message = self._prepare_user_message_for_llm(user_message)
         system_prompt = self._build_system_prompt(llm_user_message, project_id, persistent_memory_context=persistent_memory_context)
@@ -847,7 +847,7 @@ class AssistantCoordinator:
             return ""
         try:
             return principles_block(provider() or [])
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Principles unavailable: %s", error)
             return ""
 
@@ -857,7 +857,7 @@ class AssistantCoordinator:
             return ""
         try:
             return (provider() or "").strip()
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Screen context unavailable: %s", error)
             return ""
 
@@ -1355,7 +1355,7 @@ class AssistantCoordinator:
             finalized_public_recall = self.topic_memory_service.finalize_assistant_turn(prepared_memory, response, topic_patch=topic_patch)
             if isinstance(finalized_public_recall, dict):
                 self._last_recalled_public_context = finalized_public_recall
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Persistent memory finalize failed: %s", error)
 
     def _maybe_update_session_summary(self) -> None:
@@ -1407,7 +1407,7 @@ class AssistantCoordinator:
             self._active_topic_id = str(prepared.topic_id)
             self._active_topic_title = prepared.topic_name
             self._log_memory_diagnostics(prepared.diagnostics)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Persistent memory turn persistence failed: %s", error)
 
     def _log_memory_diagnostics(self, payload: dict[str, Any]) -> None:
@@ -1423,7 +1423,7 @@ class AssistantCoordinator:
             return
         try:
             setter(self._default_weather_location())
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Could not apply router defaults: %s", error)
 
     def _default_weather_location(self) -> str:
@@ -1432,7 +1432,7 @@ class AssistantCoordinator:
         if callable(getter):
             try:
                 profile_source = getter()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 profile_source = None
         if not isinstance(profile_source, dict):
             return ""
@@ -1529,7 +1529,7 @@ class AssistantCoordinator:
             return f"The file could not be opened: {resolved}"
         try:
             _platform_start_file(str(resolved))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return f"The file could not be opened: {resolved} ({error})"
         return f"Opened {resolved}"
 

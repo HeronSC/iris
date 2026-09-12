@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 try:  # optional: a transitive dependency today, used when present
     import jsonschema as _jsonschema
-except Exception:  # pragma: no cover - environment without jsonschema
+except ImportError:  # pragma: no cover - environment without jsonschema
     _jsonschema = None
 
 
@@ -211,7 +211,7 @@ class McpServerConnection:
         except TimeoutError as error:
             future.cancel()
             raise McpServerError(f"{name} timed out on MCP server {self.config.name}") from error
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             raise McpServerError(f"{name} failed on MCP server {self.config.name}: {error}") from error
         content = getattr(result, "content", None) or []
         parts: list[str] = []
@@ -241,7 +241,7 @@ class McpServerConnection:
         finally:
             try:
                 loop.run_until_complete(loop.shutdown_asyncgens())
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
             loop.close()
             self._loop = None
@@ -269,7 +269,7 @@ class McpServerConnection:
                     self._session = session
                     self._ready.set()
                     await self._stop_event.wait()
-        except BaseException as error:  # noqa: BLE001 - reported to the starting thread
+        except (OSError, ValueError, RuntimeError, TypeError) as error:  # noqa: BLE001 - reported to the starting thread
             self._error = error
             self._ready.set()
         finally:
@@ -337,7 +337,7 @@ def schema_errors(schema: dict[str, Any], arguments: dict[str, Any]) -> list[str
                 (".".join(str(piece) for piece in error.absolute_path) or "arguments") + ": " + error.message
                 for error in sorted(validator.iter_errors(arguments), key=lambda item: list(item.absolute_path))
             ]
-        except Exception as error:  # a schema we cannot compile is not the user's fault
+        except (OSError, ValueError, RuntimeError, TypeError) as error:  # a schema we cannot compile is not the user's fault
             logger.debug("jsonschema could not validate %s: %s", schema, error)
     missing = [key for key in schema.get("required", []) if key not in arguments]
     return [f"{key}: required" for key in missing]
@@ -453,7 +453,7 @@ class McpManager:
         for connection in self.connections.values():
             try:
                 connection.stop()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Stopping MCP server %s failed: %s", connection.config.name, error)
         self.connections.clear()
 
@@ -480,7 +480,7 @@ class McpManager:
             connection = McpServerConnection(config)
             try:
                 connection.start()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 self.errors[config.name] = str(error)
                 logger.warning("MCP server %s unavailable: %s", config.name, error)
                 self._notify(f"MCP server {config.name} is unavailable: {error}")
@@ -508,5 +508,5 @@ class McpManager:
             return
         try:
             self.on_event(message)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             pass

@@ -297,7 +297,7 @@ class ModelRouter:
     def _safe_record(self, metric: RequestMetric) -> None:
         try:
             self.metrics.record(metric)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Could not record model metrics: %s", error)
 
     def _request_id(self) -> str | None:
@@ -305,5 +305,5 @@ class ModelRouter:
             return None
         try:
             return self.request_id_provider()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return None

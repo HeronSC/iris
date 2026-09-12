@@ -77,7 +77,7 @@ class WebSearchAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = WebSearchArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         query = " ".join(arguments.query.split())
         if not query:

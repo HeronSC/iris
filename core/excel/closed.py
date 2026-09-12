@@ -38,7 +38,7 @@ class ClosedExcel:
             return load_workbook(str(path), data_only=data_only, read_only=False)
         except PermissionError as error:
             raise WorkbookUnavailable(f"{path.name} is locked by another program (Excel or OneDrive); close it or wait for sync") from error
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             raise WorkbookUnavailable(f"Could not open {path.name}: {error}") from error
 
     def describe(self, path: Path) -> WorkbookInfo:

@@ -76,7 +76,7 @@ class ContextService:
                 continue
             try:
                 self.sample()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 self.last_error = str(error)
                 logger.debug("Context sample failed: %s", error)
 
@@ -100,7 +100,7 @@ class ContextService:
                 if not provider.matches(window):
                     continue
                 captured = provider.capture(window)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 self.last_error = f"{provider.name}: {error}"
                 logger.debug("Context provider %s failed: %s", provider.name, error)
                 continue
@@ -112,7 +112,7 @@ class ContextService:
         if not self.paused:
             try:
                 self.sample()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 self.last_error = str(error)
         with self._lock:
             return self._history[-1] if self._history else None
@@ -152,7 +152,7 @@ class ContextService:
             return
         try:
             self.audit.record(event, message)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Context audit failed: %s", error)
 
 

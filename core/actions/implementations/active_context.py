@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -34,7 +33,7 @@ class ActiveContextAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = ActiveContextArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         which = arguments.which.strip().lower() or "current"
         if which not in {"current", "previous", "history"}:

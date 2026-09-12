@@ -1,4 +1,4 @@
-﻿# File: core/profile/update_service.py
+# File: core/profile/update_service.py
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ class MemoryUpdateService:
             if self.memory_store is not None and hasattr(self.memory_store, "replace_data"):
                 self.memory_store.replace_data(after)
             return {"status": "applied", "before": before, "after": after}
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             self.audit_logger.log(
                 {
                     "timestamp": self._utc_now_iso(),

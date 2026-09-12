@@ -269,7 +269,7 @@ class NetworkProbes:
     def gateway(self) -> str | None:
         try:
             rows = self.powershell("Get-NetRoute -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4 | Sort-Object RouteMetric | Select-Object -First 3 NextHop, InterfaceAlias, RouteMetric | ConvertTo-Json -Compress")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             rows = None
         for row in (rows if isinstance(rows, list) else [rows] if rows else []):
             if isinstance(row, dict) and row.get("NextHop") and str(row["NextHop"]) != "0.0.0.0":
@@ -279,7 +279,7 @@ class NetworkProbes:
     def dns_servers(self) -> list[str]:
         try:
             rows = self.powershell("Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object InterfaceAlias, ServerAddresses | ConvertTo-Json -Compress")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             rows = None
         servers: list[str] = []
         for row in (rows if isinstance(rows, list) else [rows] if rows else []):

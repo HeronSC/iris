@@ -100,7 +100,7 @@ def temperatures(*, runner: Runner = run_powershell, gpu: Callable[[], list[dict
     if gpu is not None:
         try:
             gpus = [{"name": item.get("name"), "celsius": item.get("temperature_c")} for item in gpu()]
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             gpus = []
     return {"zones": zones, "fans": fans, "gpus": gpus}
 

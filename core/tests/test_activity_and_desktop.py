@@ -18,7 +18,7 @@ try:
     from PySide6.QtWidgets import QApplication
 
     _PYSIDE_AVAILABLE = True
-except Exception:
+except ImportError:
     QApplication = None
     _PYSIDE_AVAILABLE = False
 

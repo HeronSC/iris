@@ -123,7 +123,7 @@ class MemoryEmbeddingIndex:
             chunk = todo[start : start + batch]
             try:
                 vectors = self.embedder.embed([DOCUMENT_PREFIX + text for _, text in chunk], model=self.config.model)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 self.last_error = str(error)
                 logger.warning("Embedding stopped after %d records: %s", stored, error)
                 return stored
@@ -133,7 +133,7 @@ class MemoryEmbeddingIndex:
                 return stored
             try:
                 self.vectors.store(list(zip((sequence for sequence, _ in chunk), vectors)))
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 self.last_error = str(error)
                 logger.warning("Storing vectors stopped after %d records: %s", stored, error)
                 return stored

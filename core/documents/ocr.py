@@ -41,7 +41,7 @@ class WindowsOcr:
             from winocr import Language, OcrEngine
 
             return bool(OcrEngine.is_language_supported(Language(language)))
-        except Exception:
+        except ImportError:
             return False
 
     def read(self, image_png: bytes) -> str:
@@ -112,7 +112,7 @@ class OcrService:
         for reader in self.readers:
             try:
                 text = reader.read(image_png)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 errors.append(f"{getattr(reader, 'name', reader.__class__.__name__)}: {error}")
                 logger.warning("OCR reader %s failed: %s", getattr(reader, "name", reader), error)
                 continue

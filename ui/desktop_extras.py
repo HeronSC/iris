@@ -76,7 +76,7 @@ class GlobalHotkey(QAbstractNativeEventFilter):
             return False
         try:
             self.registered = bool(self._register(HOTKEY_ID, modifiers, key))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Hotkey %s could not be registered: %s", combination, error)
             self.registered = False
         self.combination = combination
@@ -88,7 +88,7 @@ class GlobalHotkey(QAbstractNativeEventFilter):
         if self.registered:
             try:
                 self._unregister(HOTKEY_ID)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.debug("Hotkey unregister failed: %s", error)
             self.registered = False
 
@@ -96,7 +96,7 @@ class GlobalHotkey(QAbstractNativeEventFilter):
         if self.registered and self.is_hotkey_message(message):
             try:
                 self.on_press()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Hotkey handler failed: %s", error)
             return True, 0
         return False, 0

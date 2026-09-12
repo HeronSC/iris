@@ -26,12 +26,12 @@ class ExcelExtractor:
         try:
             #! @allow-local-import
             from openpyxl import load_workbook
-        except Exception:
+        except ImportError:
             return ExtractedDocument(text="", content_status="text_unavailable", extractor=self.name, error="Install openpyxl for Excel extraction")
 
         try:
             workbook = load_workbook(str(path), read_only=True, data_only=True)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ExtractedDocument(text="", content_status="error", extractor=self.name, error=str(error))
 
         try:
@@ -69,12 +69,12 @@ class ExcelExtractor:
                 extractor=self.name,
                 error="Workbook was truncated" if truncated else None,
             )
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ExtractedDocument(text="", content_status="error", extractor=self.name, error=str(error))
         finally:
             try:
                 workbook.close()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
 
     @staticmethod

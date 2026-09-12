@@ -50,7 +50,7 @@ class DocumentSearchService:
             return {}
         try:
             return {hit.path: hit for hit in index.search(query_text, k=50)}
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Semantic document search unavailable: %s", error)
             return {}
 

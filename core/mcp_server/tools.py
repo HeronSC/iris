@@ -214,7 +214,7 @@ class IrisMcpTools:
                     source=self.source,
                     kind=ToolKind.MCP,
                 )
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Could not record an MCP call to %s: %s", name, error)
         return payload
 

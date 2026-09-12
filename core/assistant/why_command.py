@@ -226,7 +226,7 @@ class WhyCommandHandler:
             return []
         try:
             rows = self.metrics.recent(limit=200)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return []
         matching = [row for row in rows if row.get("request_id") == request_id]
         matching.reverse()
@@ -243,7 +243,7 @@ class WhyCommandHandler:
             return []
         try:
             return self.audit_stream.read(category=category, request_id=request_id, limit=50)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return []
 
     def _actions(self, request_id: str) -> list[dict[str, Any]]:
@@ -251,6 +251,6 @@ class WhyCommandHandler:
             return []
         try:
             rows = self.action_audit.read_recent(limit=200)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return []
         return [row for row in rows if row.get("request_id") == request_id]

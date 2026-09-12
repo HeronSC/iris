@@ -207,5 +207,5 @@ class OllamaClient:
         if self.usage_listener is not None:
             try:
                 self.usage_listener(request, response)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass

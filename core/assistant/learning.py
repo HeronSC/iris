@@ -38,7 +38,7 @@ class LearningLoop:
     def _record(self, topic: str, content: str, *, source: str, data: dict[str, Any] | None = None) -> MemoryRecord | None:
         try:
             return self.knowledge.records.add(MemoryRecord(kind=MemoryKind.OBSERVATION, topic=topic, content=content, source=source, source_ref=self._request_id(), data={"normalized": normalize(content), **(data or {})}))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Could not record %s: %s", topic, error)
             return None
 
@@ -76,7 +76,7 @@ class LearningLoop:
             for existing in self.knowledge.open_observations(GAP_TOPIC):
                 if str(existing.data.get("normalized", "")) == key:
                     return existing
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             pass
         return self._record(GAP_TOPIC, clean, source=source, data={"context": context[:500]})
 

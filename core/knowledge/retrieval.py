@@ -131,7 +131,7 @@ class KnowledgeRetriever:
         assert self.embeddings is not None
         try:
             hits = self.embeddings.search(query.text, k=min(limit, 200))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return {}, [], {"semantic_candidates": 0, "semantic_error": str(error)}
         if not hits:
             return {}, [], {"semantic_candidates": 0}

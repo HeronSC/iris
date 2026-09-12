@@ -26,14 +26,14 @@ class DocxExtractor:
             import docx
             #! @allow-local-import
             from docx.opc.exceptions import PackageNotFoundError
-        except Exception:
+        except ImportError:
             return ExtractedDocument(text="", content_status="text_unavailable", extractor=self.name, error="Install python-docx for Word extraction")
 
         try:
             document = docx.Document(str(path))
         except PackageNotFoundError as error:
             return ExtractedDocument(text="", content_status="error", extractor=self.name, error=f"Not a Word document: {error}")
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ExtractedDocument(text="", content_status="error", extractor=self.name, error=str(error))
 
         try:
@@ -52,7 +52,7 @@ class DocxExtractor:
             if not lines:
                 return ExtractedDocument(text="", content_status="text_unavailable", extractor=self.name, error="No text in document")
             return ExtractedDocument(text="\n".join(lines), content_status="indexed", extractor=self.name)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ExtractedDocument(text="", content_status="error", extractor=self.name, error=str(error))
 
     def _body_lines(self, document: object) -> list[str]:
@@ -123,6 +123,6 @@ class DocxExtractor:
                     text = " ".join(text.split())
                     if text:
                         notes.append(text)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return notes
         return notes

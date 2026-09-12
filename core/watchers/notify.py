@@ -34,7 +34,7 @@ class ToastNotifier:
         try:
             #! @allow-local-import
             import windows_toasts
-        except Exception:
+        except ImportError:
             return False
         return True
 

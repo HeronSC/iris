@@ -121,7 +121,7 @@ class ApiAuthenticator:
                         data={"status_code": status_code},
                     )
                 )
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Could not record a refused request: %s", error)
         return AuthOutcome(ok=False, status_code=status_code, reason=reason, audited=True)
 

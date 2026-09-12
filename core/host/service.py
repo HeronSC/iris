@@ -274,7 +274,7 @@ class IrisHost:
                         logger.info("reloaded definitions", service=name)
                         if name == "workflows":
                             self.workflows.sync_schedules(self.schedules)
-                except Exception as error:
+                except (OSError, ValueError, RuntimeError, TypeError) as error:
                     logger.warning("reload failed", service=name, error=str(error))
 
     def stop(self) -> None:
@@ -284,7 +284,7 @@ class IrisHost:
         for service in (self.watchers, self.schedules):
             try:
                 service.stop()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("stop failed", error=str(error))
         if self._server is not None:
             self._server.should_exit = True

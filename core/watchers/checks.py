@@ -188,7 +188,7 @@ def camera_offline(params: dict[str, Any], _baseline: Any, context: Any = None) 
         return CheckResult(False, getattr(service, "problem", None) or "Cameras are not configured", None)
     try:
         offline = service.offline()
-    except Exception as error:
+    except (OSError, ValueError, RuntimeError, TypeError) as error:
         return CheckResult(True, f"Blue Iris could not be asked: {error}", None)
     wanted = str(params.get("camera") or "").strip().casefold()
     if wanted:

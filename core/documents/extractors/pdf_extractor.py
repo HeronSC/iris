@@ -28,17 +28,17 @@ class PdfExtractor:
         try:
             #! @allow-local-import
             import pymupdf
-        except Exception:
+        except ImportError:
             return ExtractedDocument(text="", content_status="text_unavailable", extractor=self.name, error="Install pymupdf for PDF extraction")
 
         try:
             pymupdf.TOOLS.mupdf_display_errors(False)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             pass
 
         try:
             document = pymupdf.open(str(path))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ExtractedDocument(text="", content_status="error", extractor=self.name, error=str(error))
 
         try:
@@ -48,7 +48,7 @@ class PdfExtractor:
             for index in range(page_count):
                 try:
                     text = document[index].get_text("text") or ""
-                except Exception as error:
+                except (OSError, ValueError, RuntimeError, TypeError) as error:
                     logger.debug("PDF page %d of %s unreadable: %s", index + 1, path, error)
                     text = ""
                 if text.strip():
@@ -63,7 +63,7 @@ class PdfExtractor:
                     try:
                         image = document[index].get_pixmap(dpi=self.ocr_dpi).tobytes("png")
                         recognised = self.ocr.read(image)
-                    except Exception as error:
+                    except (OSError, ValueError, RuntimeError, TypeError) as error:
                         ocr_error = str(error)
                         logger.warning("OCR failed on page %d of %s: %s", index + 1, path, error)
                         break
@@ -83,7 +83,7 @@ class PdfExtractor:
             if len(document) > self.max_pages:
                 note = f"Only the first {self.max_pages} of {len(document)} pages were read"
             return ExtractedDocument(text="\n\n".join(fragments), content_status="indexed", extractor=self.name, error=note)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ExtractedDocument(text="", content_status="error", extractor=self.name, error=str(error))
         finally:
             document.close()

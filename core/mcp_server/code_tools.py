@@ -34,7 +34,7 @@ class IrisCodeTools:
         if self.auditor is not None:
             try:
                 self.auditor.record(action.name, arguments, payload, source=self.client)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
         return payload
 

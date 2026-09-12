@@ -232,7 +232,7 @@ class IrisApplication:
         metrics_path = self.config.get("metrics_path") or Path(self.config["memory_path"]).parent / "Metrics" / "metrics.db"
         try:
             self.request_metrics: RequestMetricsStore | None = RequestMetricsStore(SQLiteDatabase(metrics_path))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Model metrics disabled: %s", error)
             self.request_metrics = None
         self.model_router = ModelRouter(
@@ -408,7 +408,7 @@ class IrisApplication:
             )
             try:
                 self.document_watch.start()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Document change watching could not start", error=str(error))
                 self.document_watch = None
         self.index_handler: CommandHandler = IndexCommandHandler(
@@ -800,7 +800,7 @@ class IrisApplication:
                 replies=int(roles.get(MessageRole.ASSISTANT, 0)),
                 errors=int(roles.get(MessageRole.ERROR, 0)),
             )
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             pass
 
     def _embedding_catch_up(self) -> None:
@@ -814,7 +814,7 @@ class IrisApplication:
                         stored = index.index_pending()
                         if stored:
                             logger.info("embeddings", index=index.name, stored=stored, vectors=index.count())
-                    except Exception as error:
+                    except (OSError, ValueError, RuntimeError, TypeError) as error:
                         logger.warning("Embedding pass failed", index=index.name, error=str(error))
                 elif first:
                     logger.info("Embedding retrieval is off", index=index.name, status=index.status())
@@ -860,11 +860,11 @@ class IrisApplication:
         if bool(notifications_cfg.get("enabled", True)):
             try:
                 service.start()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Watchers could not start", error=str(error))
             try:
                 self.schedules.start()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Scheduled jobs could not start", error=str(error))
         return service
 
@@ -874,14 +874,14 @@ class IrisApplication:
         if code_service is not None:
             try:
                 parts.append(code_service.prompt_line())
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.debug("Code context unavailable: %s", error)
         projects = getattr(self, "project_service", None)
         state = getattr(self, "state", None)
         if projects is not None and isinstance(state, dict) and not state.get("active_project_id"):
             try:
                 inferred, reason = projects.infer()
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 inferred, reason = None, str(error)
             if inferred is not None:
                 parts.append(f"- Likely project (not switched to; /project use adopts it): {inferred.get('name')}, because {reason}")
@@ -992,7 +992,7 @@ class IrisApplication:
         try:
             for warning in self.model_router.check_routes():
                 logger.warning("Model routes: %s", warning)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Model route check failed: %s", error)
 
     def _register_capability_tools(self) -> None:
@@ -1023,7 +1023,7 @@ class IrisApplication:
         try:
             self._note_session_state()
             self.session_handler.handle("/session close", self.state)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             pass
         stop = getattr(self, "_embedding_stop", None)
         if stop is not None:
@@ -1035,31 +1035,31 @@ class IrisApplication:
         if context_service is not None:
             try:
                 context_service.stop()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
         watchers = getattr(self, "watchers", None)
         if watchers is not None:
             try:
                 watchers.stop()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
         schedules = getattr(self, "schedules", None)
         if schedules is not None:
             try:
                 schedules.stop()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
         document_watch = getattr(self, "document_watch", None)
         if document_watch is not None:
             try:
                 document_watch.stop()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
         mcp_manager = getattr(self, "mcp_manager", None)
         if mcp_manager is not None:
             try:
                 mcp_manager.stop()
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
         self.initialized = False
 
@@ -1471,7 +1471,7 @@ class IrisApplication:
         summary = session.summary or " | ".join(str(item.get("content", ""))[:120] for item in messages[-3:] if item.get("role") == "user")
         try:
             projects.note_session(project, session_id=str(session.id), title=session.title, summary=summary, messages=len(messages))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Session state not noted: %s", error)
 
     def _retention_job(self) -> Any:
@@ -1509,7 +1509,7 @@ class IrisApplication:
             return {}
         try:
             return summary(getattr(self, "last_request_id", None)) or {}
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Activity summary unavailable: %s", error)
             return {}
 

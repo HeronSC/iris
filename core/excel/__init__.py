@@ -63,7 +63,7 @@ class ExcelService:
             return None
         try:
             current = service.current()
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return None
         if current is None or getattr(current, "target_kind", None) != "workbook":
             return None

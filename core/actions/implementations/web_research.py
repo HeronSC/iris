@@ -46,7 +46,7 @@ class WebResearchAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = ResearchArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         query = " ".join(arguments.query.split())
         if not query:
@@ -75,7 +75,7 @@ class WebResearchAction:
                 break
             try:
                 page = self.fetcher.fetch(hit.url)
-            except (UrlRejected, Exception) as error:
+            except (UrlRejected, OSError, ValueError, RuntimeError, TypeError) as error:
                 skipped.append(f"{hit.url} ({str(error)[:60]})")
                 continue
             if not page.text.strip():

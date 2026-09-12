@@ -44,7 +44,7 @@ class DocumentWatchService:
         try:
             #! @allow-local-import
             import watchdog.observers
-        except Exception:
+        except ImportError:
             return False
         return True
 
@@ -66,7 +66,7 @@ class DocumentWatchService:
             try:
                 observer.stop()
                 observer.join(5)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Stopping the document watcher: %s", error)
         if self._worker is not None:
             self._worker.join(5)
@@ -95,7 +95,7 @@ class DocumentWatchService:
         for path in roots:
             try:
                 observer.schedule(handler, str(path), recursive=True)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Cannot watch %s: %s", path, error)
         observer.daemon = True
         observer.start()
@@ -105,7 +105,7 @@ class DocumentWatchService:
             try:
                 old.stop()
                 old.join(5)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pass
         logger.info("Watching %d document root(s) for changes", len(roots))
 
@@ -166,7 +166,7 @@ class DocumentWatchService:
             if result == "error":
                 return "errors"
             return "ignored"
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             self.stats["last_error"] = f"{path}: {error}"
             logger.warning("Change to %s could not be applied: %s", path, error)
             return "errors"
@@ -182,7 +182,7 @@ class DocumentWatchService:
         try:
             result = self.scanner.scan()
             logger.info("Safety-net rescan: %s", result)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             self.stats["last_error"] = f"rescan: {error}"
             logger.warning("Safety-net rescan failed: %s", error)
 

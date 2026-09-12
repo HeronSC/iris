@@ -22,7 +22,7 @@ def excel_application() -> Any | None:
     try:
         pythoncom.CoInitialize()
         return win32com.client.GetActiveObject("Excel.Application")
-    except Exception:
+    except (OSError, ValueError, RuntimeError, TypeError):
         return None
 
 
@@ -54,7 +54,7 @@ class LiveExcel:
     def app(self) -> Any | None:
         try:
             return self.application()
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Excel not reachable: %s", error)
             return None
 
@@ -66,7 +66,7 @@ class LiveExcel:
         try:
             for workbook in app.Workbooks:
                 found.append((str(workbook.Name), str(workbook.FullName)))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Listing workbooks failed: %s", error)
         return found
 
@@ -81,7 +81,7 @@ class LiveExcel:
             for workbook in app.Workbooks:
                 if str(workbook.FullName).casefold() == wanted or str(workbook.Name).casefold() == wanted or str(workbook.FullName).casefold().endswith(wanted):
                     return workbook
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.debug("Finding workbook failed: %s", error)
         return None
 
@@ -93,7 +93,7 @@ class LiveExcel:
             tables = tuple(str(table.Name) for table in sheet.ListObjects)
             try:
                 pivots = int(sheet.PivotTables().Count)
-            except Exception:
+            except (OSError, ValueError, RuntimeError, TypeError):
                 pivots = 0
             sheets.append(
                 SheetInfo(
@@ -110,7 +110,7 @@ class LiveExcel:
         try:
             for name in workbook.Names:
                 names[str(name.Name)] = str(name.RefersTo).lstrip("=")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             pass
         selection = None
         active_sheet = None
@@ -118,7 +118,7 @@ class LiveExcel:
             active_sheet = str(workbook.ActiveSheet.Name)
             if app is not None and app.ActiveWorkbook is not None and str(app.ActiveWorkbook.FullName) == str(workbook.FullName):
                 selection = str(app.Selection.Address(False, False))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             pass
         notes: list[str] = []
         if bool(getattr(workbook, "ReadOnly", False)):
@@ -282,7 +282,7 @@ class LiveWriter:
                 new_errors = tuple(hit for hit in self.reader.errors(workbook) if (hit.sheet, hit.address) not in errors_before)
         except ExcelWriteRefused:
             raise
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             if _busy(error):
                 raise ExcelBusy("Excel is busy, probably a cell being edited; finish it and try again") from error
             raise

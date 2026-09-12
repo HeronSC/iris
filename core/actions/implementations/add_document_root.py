@@ -8,9 +8,14 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from core.actions.executor import ActionExecutionContext
-from core.config.loader import ConfigLoader
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
-from core.config.document_search_mutations import build_confirmation_preview, ensure_document_search_section, ensure_root_entries, upsert_root_entry
+from core.config.document_search_mutations import (
+    build_confirmation_preview,
+    ensure_document_search_section,
+    ensure_root_entries,
+    upsert_root_entry,
+)
+from core.config.loader import ConfigLoader
 from core.tools.models import PermissionLevel, ToolDefinition
 
 
@@ -50,7 +55,7 @@ class AddDocumentRootAction:
         try:
             with config_path.open("r", encoding="utf-8-sig") as handle:
                 config = json.load(handle)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             config = {}
         if not isinstance(config, dict):
             config = {}
@@ -87,7 +92,7 @@ class AddDocumentRootAction:
         try:
             with config_path.open("r", encoding="utf-8-sig") as handle:
                 config = json.load(handle)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Failed to read config: {error}", action=self.name, error="config_read_failed")
 
         if not isinstance(config, dict):
@@ -101,7 +106,7 @@ class AddDocumentRootAction:
             with config_path.open("w", encoding="utf-8") as handle:
                 json.dump(config, handle, indent=2, ensure_ascii=False)
                 handle.write("\n")
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Failed to write config: {error}", action=self.name, error="config_write_failed")
 
         loaded = ConfigLoader(config_path).load()

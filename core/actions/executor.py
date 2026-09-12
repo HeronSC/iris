@@ -243,7 +243,7 @@ class ActionExecutor:
         def work() -> None:
             try:
                 outcome["result"] = action.execute(request, self.context)
-            except BaseException as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 outcome["error"] = error
 
         worker = threading.Thread(target=work, name=f"tool-{request.action}", daemon=True)
@@ -431,7 +431,7 @@ class ActionExecutor:
                     results=result.results,
                     created_at=result.created_at,
                 )
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             result = ActionResult(
                 status="failed",
                 message=f"Action failed: {error}",

@@ -161,7 +161,7 @@ class PermissionPolicy:
                     data={"rule": decision.rule, "paths": list(request.paths), "hosts": list(request.hosts)},
                 )
             )
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Permission audit failed for %s: %s", request.subject, error)
 
 

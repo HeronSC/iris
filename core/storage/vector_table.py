@@ -12,7 +12,7 @@ from core.storage.sqlite_database import SQLiteDatabase
 try:
     import numpy as _np
     from usearch.index import Index as _Index
-except Exception:
+except ImportError:
     _np = None
     _Index = None
 
@@ -135,7 +135,7 @@ class VectorTable:
         if self.index_path.exists():
             try:
                 index.load(str(self.index_path))
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Vector index %s unreadable, starting empty: %s", self.index_path, error)
                 index = self._new_index()
         self._index = index

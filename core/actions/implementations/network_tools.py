@@ -34,7 +34,7 @@ class _NetworkAction:
             return ValidationResult(ok=True, resolved_arguments={})
         try:
             parsed = self.arguments_model.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         host = getattr(parsed, "host", None)
         if host is not None and not _host_ok(host):
@@ -44,7 +44,7 @@ class _NetworkAction:
     def execute(self, request: ActionRequest, context: object) -> ActionResult:
         try:
             message, results = self.produce(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"{self.name} failed: {error}", action=self.name, error=str(error))
         return ActionResult(status="success", message=message, action=self.name, resolved_target=request.arguments.get("host"), results=results)
 

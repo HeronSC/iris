@@ -195,7 +195,7 @@ class DocumentEmbeddingIndex:
                         raise RuntimeError(f"embedder returned {len(vectors)} vectors for {len(batch)} chunks")
                     rows.extend(zip(ids[start : start + len(batch)], vectors))
                 self.vectors.store(rows)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 self.last_error = str(error)
                 logger.warning("Document embedding stopped at %s after %d documents: %s", path, indexed, error)
                 self._forget(ids)
@@ -224,7 +224,7 @@ class DocumentEmbeddingIndex:
         if existing:
             try:
                 self.vectors.delete(existing)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Could not drop old vectors for %s: %s", path, error)
         return ids
 
@@ -236,7 +236,7 @@ class DocumentEmbeddingIndex:
             conn.commit()
         try:
             self.vectors.delete(chunk_ids)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Could not delete %d stale vectors: %s", len(chunk_ids), error)
 
 

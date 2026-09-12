@@ -1,3 +1,5 @@
+# File: core/assistant/intent_example_store.py
+
 from __future__ import annotations
 
 import json
@@ -88,7 +90,7 @@ class IntentExampleStore:
         try:
             with self.store_path.open("r", encoding="utf-8-sig") as handle:
                 payload = json.load(handle)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return {"schema_version": 1, "examples": []}
         if not isinstance(payload, dict):
             return {"schema_version": 1, "examples": []}

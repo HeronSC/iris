@@ -32,7 +32,7 @@ class CameraService:
         if secrets is not None:
             try:
                 password = secrets.get(secret_name) or ""
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Could not read %s: %s", secret_name, error)
         if not password:
             return cls(None, configured=False, problem=f"Blue Iris password is not set: /secrets set {secret_name} <value>")

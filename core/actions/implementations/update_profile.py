@@ -59,7 +59,7 @@ class UpdateProfileAction:
         try:
             with profile_path.open("r", encoding="utf-8-sig") as handle:
                 profile_payload = json.load(handle)
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             profile_payload = {}
         if not isinstance(profile_payload, dict):
             profile_payload = {}
@@ -94,7 +94,7 @@ class UpdateProfileAction:
         try:
             with profile_path.open("r", encoding="utf-8-sig") as handle:
                 profile_payload = json.load(handle)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Failed to read profile memory: {error}", action=self.name, error="profile_read_failed")
 
         if not isinstance(profile_payload, dict):
@@ -115,7 +115,7 @@ class UpdateProfileAction:
             with profile_path.open("w", encoding="utf-8") as handle:
                 json.dump(profile_payload, handle, indent=2, ensure_ascii=False)
                 handle.write("\n")
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ActionResult(status="failed", message=f"Failed to write profile memory: {error}", action=self.name, error="profile_write_failed")
 
         updated_keys = ", ".join(sorted(updates.keys()))

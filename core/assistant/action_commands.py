@@ -433,7 +433,7 @@ class ActionCommandHandler:
             return []
         try:
             return list(catalog.find(app_name, limit=5))
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             self._emit(f"Could not scan installed programs: {error}")
             return []
 
@@ -443,7 +443,7 @@ class ActionCommandHandler:
             return False
         try:
             folders = list(finder(name))
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             return False
         if not folders:
             return False

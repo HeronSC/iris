@@ -56,7 +56,7 @@ class GitBlameAction:
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
         try:
             arguments = BlameArguments.model_validate(request.arguments)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
         if not self.git:
             return ValidationResult(ok=False, error="git is not installed or not on PATH")

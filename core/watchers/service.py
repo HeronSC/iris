@@ -203,7 +203,7 @@ class WatcherService:
         if scheduler is not None:
             try:
                 scheduler.shutdown(wait=False)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Scheduler shutdown: %s", error)
 
     @property
@@ -232,7 +232,7 @@ class WatcherService:
             return
         try:
             self._scheduler.remove_job(f"watcher-{watcher_id}")
-        except Exception:
+        except (OSError, ValueError, RuntimeError, TypeError):
             pass
 
 
@@ -263,7 +263,7 @@ class WatcherService:
         now = self.clock()
         try:
             result = run_check(definition.kind, definition.params, baseline, self.context)
-        except Exception as error:
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
             with self._lock:
                 state.failures += 1
                 state.last_error = str(error)
@@ -288,7 +288,7 @@ class WatcherService:
                 try:
                     if not result.clear_when(result.value):
                         triggered = True
-                except Exception:
+                except (OSError, ValueError, RuntimeError, TypeError):
                     pass
             if first_run:
                 triggered = False
@@ -333,7 +333,7 @@ class WatcherService:
             try:
                 notifier.send(notification)
                 delivered.append(channel)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Notifier %s failed for %s: %s", channel, definition.label, error)
         final = Notification(**{**notification.__dict__, "delivered_to": tuple(delivered), "deferred": quiet and "toast" in definition.channels})
         if final.deferred:
@@ -342,7 +342,7 @@ class WatcherService:
         for listener in list(self.listeners):
             try:
                 listener(final)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Watcher listener failed for %s: %s", definition.label, error)
         return final
 
@@ -370,7 +370,7 @@ class WatcherService:
         if toast is not None:
             try:
                 toast.send(digest)
-            except Exception as error:
+            except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Digest toast failed: %s", error)
         return digest
 
