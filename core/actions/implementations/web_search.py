@@ -66,6 +66,8 @@ class WebSearchAction:
         arguments=WebSearchArguments,
         permission=PermissionLevel.READ,
         outbound=True,
+        timeout_seconds=30.0,
+        cost="seconds; the query leaves this machine through SearXNG",
         keywords=("search", "google", "look up", "look online", "find online", "web search", "on the web", "images of", "pictures of", "videos of", "news about", "latest news", "documentation for"),
     )
 

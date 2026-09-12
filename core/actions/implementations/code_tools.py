@@ -49,6 +49,7 @@ class RepoSearchAction:
         description="Search source code for text or a regular expression with ripgrep, inside the AL workspace in view or a named folder. Returns file, line and the matching line.",
         arguments=RepoSearchArguments,
         permission=PermissionLevel.READ,
+        cost="seconds",
         keywords=("grep", "search the code", "search code", "in the code", "in the repo", "where is", "find usages", "references to", "who calls", "uses of"),
     )
 
@@ -269,6 +270,8 @@ class ALCompileAction:
         description="Compile the Business Central AL workspace with the AL compiler from the VS Code extension and return every error and warning with file, line and code. The .app goes to Iris's own build folder; the workspace is not touched.",
         arguments=ALCompileArguments,
         permission=PermissionLevel.EXECUTE,
+        timeout_seconds=660.0,
+        cost="seconds to a minute; runs the compiler",
         keywords=("compile", "build the extension", "build the app", "does it compile", "compiler errors", "alc", "code analysis", "codecop"),
     )
 

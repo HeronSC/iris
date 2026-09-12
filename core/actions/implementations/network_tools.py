@@ -98,6 +98,7 @@ class NetworkCheckAction(_NetworkAction):
         arguments=CheckArguments,
         permission=PermissionLevel.READ,
         outbound=True,
+        cost="seconds; sends pings",
         keywords=("ping", "reach", "reachable", "resolve", "dns lookup", "port open", "is up", "is down", "latency", "responding"),
     )
     arguments_model = CheckArguments
@@ -132,6 +133,8 @@ class NetworkTraceAction(_NetworkAction):
         arguments=TraceArguments,
         permission=PermissionLevel.READ,
         outbound=True,
+        timeout_seconds=180.0,
+        cost="up to a minute; sends packets to every hop",
         keywords=("traceroute", "tracert", "trace the route", "which hop", "where does it stop", "route to"),
     )
     arguments_model = TraceArguments

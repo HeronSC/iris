@@ -386,6 +386,10 @@ class IrisAgent:
         return LLMResponse(content=str(text or "").strip())
 
     def _run_tool(self, name: str, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
+        executor = self.action_executor
+        turn = getattr(self, "_turn", None) or {}
+        if executor is not None and hasattr(executor, "cancel_event"):
+            executor.cancel_event = turn.get("cancel_event")
         self._notify_tool({"phase": "start", "name": name, "arguments": dict(arguments)})
         started = time.perf_counter()
         result = self._dispatch(name, arguments, user_message)

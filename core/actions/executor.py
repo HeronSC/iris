@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import threading
+import time
 import webbrowser
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -84,6 +86,10 @@ class PendingAction:
     changes: tuple[str, ...] = ()
 
 
+DEFAULT_TOOL_TIMEOUT_SECONDS = 120.0
+CANCEL_POLL_SECONDS = 0.05
+
+
 class ActionExecutor:
     def __init__(
         self,
@@ -94,6 +100,7 @@ class ActionExecutor:
         confirmation_ttl_seconds: int = 120,
         permissions: PermissionPolicy | None = None,
         ledger: ChangeLedger | None = None,
+        default_timeout_seconds: float = DEFAULT_TOOL_TIMEOUT_SECONDS,
     ) -> None:
         self.registry = registry
         self.policy = policy
@@ -102,6 +109,8 @@ class ActionExecutor:
         self.permissions = permissions
         self.ledger = ledger
         self.last_change_id: str | None = None
+        self.default_timeout_seconds = default_timeout_seconds
+        self.cancel_event: threading.Event | None = None
         self.confirmation_ttl_seconds = confirmation_ttl_seconds
         self._pending_action: PendingAction | None = None
         self._expired_confirmation_notice = False
@@ -221,6 +230,36 @@ class ActionExecutor:
         result = self._execute_validated(validated_request, validation.resolved_target, changes=tuple(validation.changes))
         self._log(request, result, tool=tool_name)
         return result
+
+    def _timeout_for(self, name: str) -> float:
+        definition = self.registry.definition(name)
+        declared = getattr(definition, "timeout_seconds", None) if definition is not None else None
+        return float(declared) if declared else float(self.default_timeout_seconds)
+
+    def _run_with_limits(self, action: Any, request: ActionRequest, resolved_target: str | None) -> ActionResult:
+        timeout = self._timeout_for(request.action)
+        outcome: dict[str, Any] = {}
+
+        def work() -> None:
+            try:
+                outcome["result"] = action.execute(request, self.context)
+            except BaseException as error:
+                outcome["error"] = error
+
+        worker = threading.Thread(target=work, name=f"tool-{request.action}", daemon=True)
+        worker.start()
+        deadline = time.monotonic() + timeout
+        while worker.is_alive():
+            cancel = self.cancel_event
+            if cancel is not None and cancel.is_set():
+                return ActionResult(status="cancelled", message=f"{request.action} was cancelled; whatever it had started may still finish in the background.", action=request.action, resolved_target=resolved_target, error="cancelled")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return ActionResult(status="failed", message=f"{request.action} did not finish within {timeout:.0f} s and was abandoned.", action=request.action, resolved_target=resolved_target, error="timeout")
+            worker.join(min(CANCEL_POLL_SECONDS, max(remaining, 0.01)))
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["result"]
 
     def preview(self, request: ActionRequest) -> dict[str, Any]:
         resolved = self.registry.resolve(request)
@@ -379,7 +418,7 @@ class ActionExecutor:
 
         change_id = self._snapshot(request, changes)
         try:
-            result = action.execute(request, self.context)
+            result = self._run_with_limits(action, request, resolved_target)
             if change_id is not None and result.status == "success":
                 self.last_change_id = change_id
                 result = ActionResult(

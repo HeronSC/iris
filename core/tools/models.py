@@ -1,16 +1,5 @@
 # File: core/tools/models.py
 
-"""The one tool definition.
-
-A ``ToolDefinition`` is the only place a tool is declared: what it is called,
-what it does, what arguments it takes (a pydantic model, or a raw JSON Schema
-for tools that arrive with one, such as MCP servers), what permission level it
-needs, and whether a user has to confirm it before it runs.
-
-Native actions, the knowledge providers, and MCP tools all register the same
-shape. The model sees the definition through ``to_spec()``; the executor
-enforces it through ``requires_confirmation`` and ``permission``.
-"""
 
 from __future__ import annotations
 
@@ -37,7 +26,7 @@ class ToolKind(str, Enum):
 
 
 class ToolArgumentError(ValueError):
-    """Raised when a tool's arguments do not satisfy its declared schema."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -53,21 +42,13 @@ class ToolDefinition:
     bind: dict[str, Any] = field(default_factory=dict)
     version: str = "1"
     expose_to_model: bool = True
-    #: True when running the tool sends something off this machine. Section 10
-    #: caps outbound work, and it can only do that if a tool says it is outbound
-    #: rather than the policy keeping a list of tool names that will go stale.
     outbound: bool = False
-    #: True when what the tool does cannot be put back by /undo -- what was on
-    #: the clipboard, a message already sent. The confirmation says so plainly.
     irreversible: bool = False
     source: str = "native"
     handler: Any = None
-    #: Words or short phrases in a request that make this tool worth offering to
-    #: the model. The router's gate checks them (whole words, singular or plural)
-    #: before spending a model call; the tool's name words count automatically.
     keywords: tuple[str, ...] = ()
-
-    # -- schema -----------------------------------------------------------
+    timeout_seconds: float | None = None
+    cost: str = ""
 
     def parameters_schema(self) -> dict[str, Any]:
         if self.arguments is not None:
@@ -84,14 +65,7 @@ class ToolDefinition:
     def to_spec(self) -> ToolSpec:
         return ToolSpec(name=self.name, description=self.description, parameters=self.parameters_schema())
 
-    # -- arguments ---------------------------------------------------------
-
     def validate_arguments(self, raw: dict[str, Any] | None) -> dict[str, Any]:
-        """Coerce ``raw`` to the declared shape and merge any bound arguments.
-
-        Returns a plain dict ready for an ``ActionRequest``. Raises
-        ``ToolArgumentError`` when the arguments do not fit.
-        """
         payload = dict(raw or {})
         if self.arguments is not None:
             try:
@@ -108,7 +82,6 @@ class ToolDefinition:
 
     @property
     def target_action(self) -> str:
-        """The action the executor runs: the bound action for a facet, else this tool."""
         return self.action or self.name
 
     @property
