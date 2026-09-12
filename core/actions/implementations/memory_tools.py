@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
 from core.assistant.learning import LearningLoop
-from core.knowledge.facts import FactService, describe_record
-from core.knowledge.models import MemoryKind
+from core.knowledge.facts import FactService, describe_record, find_conflicts
+from core.knowledge.models import MemoryKind, MemoryRecord
 from core.knowledge.scopes import GLOBAL
 from core.results.html import compose_url, run_url
 from core.results.models import Source, status, table
@@ -117,6 +117,53 @@ class RecordGapAction:
         return ActionResult(status="success", message=message, action=self.name, resolved_target=record.id, results=(status("pending", message, source=Source("record_gap", "memory", record.id)),))
 
 
-MEMORY_ACTIONS = (MemoryBrowseAction, RecordGapAction)
+class NoteArguments(BaseModel):
+    topic: str = Field(description="Where it belongs, such as research/bc-licensing or home/network")
+    text: str = Field(description="The finding, in one or two sentences")
+    url: str | None = Field(default=None, description="The page it came from, when it came from the web")
 
-__all__ = ["MEMORY_ACTIONS", "MemoryBrowseAction", "RecordGapAction"]
+
+class MemoryNoteAction:
+
+    name = "memory_note"
+    definition = ToolDefinition(
+        name="memory_note",
+        description="Keep a finding in Iris's memory as a fact under a topic, with its source URL when it came from the web. Use when the user says to remember or keep something, or when a research answer is worth keeping.",
+        arguments=NoteArguments,
+        permission=PermissionLevel.WRITE,
+        keywords=("remember this", "keep that", "note that", "save this finding", "make a note", "remember that"),
+    )
+
+    def validate(self, request: ActionRequest, context: object) -> ValidationResult:
+        try:
+            arguments = NoteArguments.model_validate(request.arguments)
+        except ValidationError as error:
+            return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
+        if getattr(context, "knowledge", None) is None:
+            return ValidationResult(ok=False, error=NO_SERVICE)
+        if not arguments.text.strip() or not arguments.topic.strip():
+            return ValidationResult(ok=False, error="A note needs a topic and text")
+        return ValidationResult(ok=True, resolved_target=arguments.topic.strip().lower(), resolved_arguments={"topic": arguments.topic.strip().lower(), "text": " ".join(arguments.text.split()), "url": (arguments.url or "").strip() or None})
+
+    def execute(self, request: ActionRequest, context: object) -> ActionResult:
+        knowledge = getattr(context, "knowledge", None)
+        if knowledge is None:
+            return ActionResult(status="failed", message=NO_SERVICE, action=self.name, error="no_service")
+        url = request.arguments.get("url")
+        topic = str(request.arguments["topic"])
+        content = str(request.arguments["text"])
+        conflicts = find_conflicts(knowledge.records, topic, content, scope=GLOBAL)
+        same = next((item for item in conflicts if item.similarity >= 1.0), None)
+        if same is not None:
+            message = f"Already kept as {same.record.id[:8]}: {same.record.content[:80]}"
+            return ActionResult(status="failed", message=message, action=self.name, error="duplicate")
+        record = knowledge.records.add(MemoryRecord(kind=MemoryKind.FACT, topic=topic, content=content, source="web" if url else "iris:note", source_ref=url, scope=GLOBAL))
+        message = f"Kept as {record.id[:8]} under {record.topic}" + (f" (source {url})" if url else "") + "."
+        if conflicts:
+            message += f" It may conflict with {len(conflicts)} earlier fact(s); /knowledge browse {record.topic} shows them."
+        return ActionResult(status="success", message=message, action=self.name, resolved_target=record.id, results=(status("ok", message, source=Source("memory_note", "memory", url or record.id)),))
+
+
+MEMORY_ACTIONS = (MemoryBrowseAction, RecordGapAction, MemoryNoteAction)
+
+__all__ = ["MEMORY_ACTIONS", "MemoryBrowseAction", "MemoryNoteAction", "RecordGapAction"]

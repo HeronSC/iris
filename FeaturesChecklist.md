@@ -769,8 +769,9 @@ holds only the Creative Cloud shell, which is why an earlier check missed them.
 
 Presentation moved to 2.7 and 6. This section is about getting good information.
 
-- [~] Focused lookups already work for weather, news, stocks, time, and definitions
-	-> `core/assistant/general_knowledge_router.py`. General research does not.
+- [x] Focused lookups already work for weather, news, stocks, time, and definitions
+	-> `core/assistant/general_knowledge_router.py`. General research: `web_search`,
+	`fetch_web_page` and `web_research` (below).
 - [x] General web research. **Built 2026-09-12:** `web_search` (`core/actions/implementations/
 	web_search.py`) over `core/web/search.py`, a client for the SearXNG JSON API -- query,
 	category, optional time range, results deduplicated by URL and ranked by SearXNG's score,
@@ -785,10 +786,17 @@ Presentation moved to 2.7 and 6. This section is about getting good information.
 - [x] News and current information. `category: news`, with `time_range` for recency.
 - [x] Fetch and extract page content, not just search snippets. -> `core/web/fetch.py`, the
 	`fetch_web_page` tool. Built 2026-09-10.
-- [ ] Compare multiple sources, and say when they disagree.
-- [ ] Summarize findings, always with citations.
-- [ ] Preserve useful findings in Iris memory when appropriate (2.1), with the source URL and
-	the date retrieved.
+- [x] Compare multiple sources, and say when they disagree. **Built 2026-09-12:** `web_research`
+	(`core/actions/implementations/web_research.py`) searches, reads the top pages (three by
+	default, up to six) and returns them numbered with title, URL, author and date; the message
+	tells the model to answer from those pages only, cite each claim as [n], and say where the
+	sources disagree or none of them answers. Pages that could not be read are listed, not hidden.
+- [x] Summarize findings, always with citations. Same tool; every page is a link card plus its
+	text (2.7), so the citation numbers in the answer match the cards in the panel.
+- [x] Preserve useful findings in Iris memory when appropriate (2.1), with the source URL and
+	the date retrieved. **Built 2026-09-12:** `memory_note` (write permission, so it confirms)
+	keeps a finding as a fact under a topic with `source_ref` = the URL and `source` = web; the
+	record's timestamp is the date retrieved, and near-duplicates are named in the reply.
 - [~] Cache results, and respect rate limits and site terms. Page fetches are cached for ten
 	minutes and throttled to one request per host per second; nothing reads robots.txt yet.
 - [x] Return structured results per 2.7, so the UI can show thumbnails, previews, and cards.
@@ -809,8 +817,9 @@ Presentation moved to 2.7 and 6. This section is about getting good information.
 	only, no credentials in the URL, no loopback/private/link-local hosts (the LAN and Iris's own
 	services are reached through their integrations, never through a model-chosen URL), 3 MB cap. Playwright deferred until JavaScript-only pages actually block work;
 	it is a ~300 MB browser download.
-- [ ] The five keyless endpoints the fixed providers already call — DuckDuckGo instant answers,
-	Google News RSS, stooq, wttr.in, worldtimeapi — stay as they are.
+- [x] The five keyless endpoints the fixed providers already call — DuckDuckGo instant answers,
+	Google News RSS, stooq, wttr.in, worldtimeapi — stay as they are. Confirmed 2026-09-12: the
+	providers are untouched and SearXNG sits beside them for open-ended questions.
 
 ### 5.2 Document Intelligence
 

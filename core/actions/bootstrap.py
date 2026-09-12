@@ -21,7 +21,9 @@ from core.actions.implementations.memory_tools import MEMORY_ACTIONS
 from core.actions.implementations.network_tools import NETWORK_ACTIONS
 from core.actions.implementations.project_tools import PROJECT_ACTIONS
 from core.actions.implementations.fetch_web_page import FetchWebPageAction
+from core.actions.implementations.web_research import WebResearchAction
 from core.actions.implementations.web_search import WebSearchAction
+from core.actions.implementations.screen_tools import SCREEN_ACTIONS
 from core.actions.implementations.launch_application import LaunchApplicationAction
 from core.actions.implementations.open_file import OpenFileAction
 from core.actions.implementations.open_folder import OpenFolderAction, ShowInExplorerAction
@@ -131,6 +133,8 @@ def build_action_layer(
     excel_service: Any = None,
     knowledge: Any = None,
     cameras: Any = None,
+    model_router: Any = None,
+    captures_dir: Any = None,
 ) -> ActionLayer:
     registry_of_tools = tool_registry or ToolRegistry()
     action_registry = ActionRegistry(registry_of_tools)
@@ -149,7 +153,11 @@ def build_action_layer(
         action_registry.register(action)
     fetcher = page_fetcher_from(config)
     action_registry.register(FetchWebPageAction(fetcher))
-    action_registry.register(WebSearchAction(search_client_from(config)))
+    search_client = search_client_from(config)
+    action_registry.register(WebSearchAction(search_client))
+    action_registry.register(WebResearchAction(search_client, fetcher))
+    for screen_action in SCREEN_ACTIONS:
+        action_registry.register(screen_action())
     action_registry.register(ActiveContextAction())
     for code_action in CODE_ACTIONS:
         action_registry.register(code_action())
@@ -198,6 +206,8 @@ def build_action_layer(
             excel_service=excel_service,
             knowledge=knowledge,
             cameras=cameras,
+            model_router=model_router,
+            captures_dir=captures_dir,
         ),
     )
     return ActionLayer(
