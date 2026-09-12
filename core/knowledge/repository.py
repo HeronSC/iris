@@ -166,6 +166,17 @@ class KnowledgeRepository:
         with self.database.connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0])
 
+    def list_all(self, *, include_superseded: bool = False, limit: int = 100000, offset: int = 0) -> list[MemoryRecord]:
+        clause = "" if include_superseded else "WHERE status != ?"
+        params: list[Any] = [] if include_superseded else [MemoryStatus.SUPERSEDED.value]
+        params.extend([max(1, int(limit)), max(0, int(offset))])
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                f"SELECT {MEMORY_COLUMNS} FROM memories {clause} ORDER BY topic, sequence LIMIT ? OFFSET ?",
+                params,
+            ).fetchall()
+        return [record_from_row(row) for row in rows]
+
 
 def _row_for(record: MemoryRecord) -> dict[str, Any]:
     row = record.to_row()

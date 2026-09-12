@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from core.assistant.output import OutputSink, emit_output
 from core.knowledge import KnowledgeError, MemoryKind, MemoryStatus
+from core.knowledge.export import export_memory
 from core.knowledge.review import KnowledgeReviewWorkflow
 
 _USAGE = (
@@ -13,7 +15,7 @@ _USAGE = (
     "open [topic] | hypothesize <topic> <claim> | "
     "evidence <hypothesis> for|against <id> [note] | testing [topic] | "
     "pending | review | show <id> | why <id> | "
-    "approve <id> [note] | decline <id> <reason> | topics | embeddings [index]"
+    "approve <id> [note] | decline <id> <reason> | topics | embeddings [index] | export [folder]"
 )
 
 _TOPIC_NUDGE = (
@@ -29,11 +31,13 @@ class KnowledgeCommandHandler:
         output: OutputSink | None = None,
         actor: str = "user",
         embeddings: Any | None = None,
+        export_folder: str | Path | None = None,
     ) -> None:
         self.workflow = workflow
         self.output = output
         self.actor = actor
         self.embeddings = embeddings
+        self.export_folder = Path(export_folder) if export_folder else None
 
     def handle(self, user_input: str, state: dict[str, Any]) -> bool:
         text = (user_input or "").strip()
@@ -82,8 +86,17 @@ class KnowledgeCommandHandler:
             return self._decline(argument, rest)
         if command == "embeddings":
             return self._embeddings(argument)
+        if command == "export":
+            return self._export(argument)
 
         emit_output(self.output, _USAGE)
+        return True
+
+    def _export(self, argument: str) -> bool:
+        folder = Path(argument) if argument else (self.export_folder or Path.cwd() / "Exports")
+        records = self.workflow.graph.records.list_all()
+        report = export_memory(records, folder)
+        emit_output(self.output, f"{report.summary} in {folder}")
         return True
 
     def _embeddings(self, argument: str) -> bool:

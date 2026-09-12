@@ -257,7 +257,7 @@ class ConfigLoader:
         else:
             metrics_path = (memory_path.parent / "Metrics" / "metrics.db").resolve()
 
-        for section in ("knowledge", "notifications", "mcp_servers", "web", "permissions", "http"):
+        for section in ("knowledge", "notifications", "mcp_servers", "web", "permissions", "http", "latency_budget_ms", "backups"):
             value = config.get(section)
             if value is not None and not isinstance(value, dict):
                 raise ConfigError(f"{section} must be an object")
@@ -287,6 +287,8 @@ class ConfigLoader:
             "web": config.get("web", {}),
             "permissions": config.get("permissions", {}),
             "http": config.get("http", {}),
+            "latency_budget_ms": config.get("latency_budget_ms", {}),
+            "backups": config.get("backups", {}),
         }
 
 

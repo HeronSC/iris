@@ -9,7 +9,8 @@ from core.assistant.output import OutputSink, emit_output
 
 class ModelsCommandHandler:
 
-    def __init__(self, router: Any, metrics: Any | None = None, output: OutputSink | None = None) -> None:
+    def __init__(self, router: Any, metrics: Any | None = None, output: OutputSink | None = None, budget: Any | None = None) -> None:
+        self.budget = budget
         self.router = router
         self.metrics = metrics
         self.output = output
@@ -26,6 +27,9 @@ class ModelsCommandHandler:
         if subcommand == "routes":
             self._routes()
             return True
+        if subcommand == "budget":
+            self._budget(self._number(argument) if argument else 24.0)
+            return True
         if subcommand == "usage":
             hours = self._number(argument)
             self._usage(hours)
@@ -34,7 +38,7 @@ class ModelsCommandHandler:
             limit = int(self._number(argument) or 10)
             self._recent(limit)
             return True
-        emit_output(self.output, "Usage: /models [routes|usage [hours]|recent [count]]")
+        emit_output(self.output, "Usage: /models [routes|usage [hours]|recent [count]|budget [hours]]")
         return True
 
     def _routes(self) -> None:
@@ -54,6 +58,20 @@ class ModelsCommandHandler:
         if warnings:
             lines.append("Warnings:")
             lines.extend(f"- {item}" for item in warnings)
+        emit_output(self.output, "\n".join(lines))
+
+    def _budget(self, hours: float | None) -> None:
+        if self.budget is None:
+            emit_output(self.output, "No latency budget is configured.")
+            return
+        lines = ["Latency budget per request class: " + ", ".join(self.budget.describe())]
+        rows = self.metrics.summary(hours) if self.metrics is not None else []
+        warnings = self.budget.check(rows)
+        if warnings:
+            lines.append("Over budget" + (f" in the last {hours:g} h" if hours else "") + ":")
+            lines.extend(f"- {item}" for item in warnings)
+        else:
+            lines.append("Nothing is over budget" + (f" in the last {hours:g} h" if hours else "") + ".")
         emit_output(self.output, "\n".join(lines))
 
     def _usage(self, hours: float | None) -> None:

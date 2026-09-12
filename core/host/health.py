@@ -104,6 +104,10 @@ def health_report(service: Any, *, host: str) -> dict[str, Any]:
     models, model_warnings = _model_rows(service)
     watchers, watcher_warnings = _watcher_rows(service)
     schedules, schedule_warnings = _schedule_rows(service)
+    budget = getattr(service, "latency_budget", None)
+    metrics = getattr(service, "request_metrics", None)
+    if budget is not None and metrics is not None:
+        model_warnings.extend(_safe(lambda: budget.check(metrics.summary(24.0)), []) or [])
     problems = broken + model_warnings + watcher_warnings + schedule_warnings
     return {
         "status": "degraded" if problems else "ok",

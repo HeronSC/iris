@@ -44,7 +44,9 @@ from core.actions.changes import ChangeLedger
 from core.assistant.backup_command import BackupCommandHandler
 from core.assistant.changes_command import ChangesCommandHandler
 from core.assistant.stop_command import StopCommandHandler
+from core.assistant.corrections_command import CorrectionsCommandHandler
 from core.assistant.workflow_command import WorkflowCommandHandler
+from core.llm.budget import LatencyBudget
 from core.assistant.schedule_command import ScheduleCommandHandler
 from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
@@ -187,6 +189,7 @@ class IrisApplication:
         self.changes_handler: CommandHandler = _NoopCommandHandler()
         self.stop_handler: CommandHandler = _NoopCommandHandler()
         self.workflow_handler: CommandHandler = _NoopCommandHandler()
+        self.corrections_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
         self.attached_host: dict[str, Any] | None = None
 
@@ -293,6 +296,7 @@ class IrisApplication:
             output=self._sink,
             actor=str(self.config.get("assistant_user", "user")),
             embeddings=self.embedding_index,
+            export_folder=Path(self.config["memory_path"]).parent / "Exports",
         )
         proposal_generator = MemoryProposalGenerator(self.ollama_client)
         reviewer = MemoryProposalReviewer()
@@ -473,7 +477,15 @@ class IrisApplication:
         )
         self.mcp_manager.start(background=True)
         self.tools_handler = ToolsCommandHandler(self.tool_registry, self.mcp_manager, output=self._sink)
-        self.models_handler = ModelsCommandHandler(self.model_router, self.request_metrics, output=self._sink)
+        self.latency_budget = LatencyBudget.from_config(self.config)
+        self.models_handler = ModelsCommandHandler(self.model_router, self.request_metrics, output=self._sink, budget=self.latency_budget)
+        self.corrections_handler = CorrectionsCommandHandler(
+            self.knowledge,
+            last_request_id=lambda: getattr(self, "last_request_id", None),
+            last_user_message=lambda: getattr(self, "_last_user_message", ""),
+            last_answer=lambda: getattr(getattr(self, "_last_coordinator_turn", None), "text", "") or "",
+            output=self._sink,
+        )
         self.permissions_handler = PermissionsCommandHandler(
             self.permissions, self.secrets, audit=self.audit_stream, output=self._sink
         )
@@ -667,6 +679,8 @@ class IrisApplication:
             if self._handle_slash_command(self.stop_handler, stripped, status, command_prefixes=("/stop", "/halt", "/resume")):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.workflow_handler, stripped, status, command_prefixes=("/workflow", "/workflows")):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.corrections_handler, stripped, status, command_prefixes=("/correct", "/corrections")):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)

@@ -94,7 +94,11 @@ single feature is what made those features look larger than they are.
 - [ ] Handle conflicting or superseded facts: which one wins, and whether the old one is kept.
 - [ ] Decide a forgetting policy: expiry, decay, relevance pruning, or never forget.
 - [ ] Let the user browse, correct, and delete memories directly, not only through conversation.
-- [ ] Export and back up memory in a readable format (11).
+- [x] Export and back up memory in a readable format (11). **Built 2026-09-12:** `/knowledge
+	export [folder]` writes `Data\Exports\knowledge-<stamp>.md` -- every live record grouped by
+	topic with its kind, status, date, source, content and id, superseded records left out -- and a
+	`.json` beside it with the full records. The backup (11) keeps the database; this is the copy
+	a person can read.
 - [x] **Decided and built 2026-09-10:** add embedding retrieval beside FTS5, not instead of it.
 	-> `core/knowledge/embeddings.py`; fused in `retrieval.py`; `/knowledge embeddings` shows status.
 	Embeddings from `nomic-embed-text` via Ollama; vectors stored beside `knowledge.db` (`usearch`
@@ -137,8 +141,13 @@ single feature is what made those features look larger than they are.
 - [x] Store decision records with:
 	situation and context, options considered, decision made, reasoning, outcome.
 - [x] Never auto-promote a hypothesis; promotion is a human gate. -> `HypothesisTracker.promote`
-- [ ] When Iris is corrected, capture why the correction was made.
-- [ ] Turn repeated corrections into reusable principles.
+- [x] When Iris is corrected, capture why the correction was made. **Built 2026-09-12:**
+	`/correct <why>` records an observation under `iris/corrections` with the request id, what was
+	asked and what was answered, so the why sits beside the what. `/corrections` lists them.
+- [~] Turn repeated corrections into reusable principles. The third time the same correction is
+	made, `/correct` says so and offers the line that turns it into a principle
+	(`/knowledge observe iris/principles ...`); `/corrections` groups the repeats. Making that
+	automatic, and feeding the principles into prompts, is still to do.
 - [ ] Keep those principles in a list the user can read, edit, and switch off.
 - [ ] Close the loop automatically where the outcome is observable without being told —
 	a build failed, a file was reverted, an answer was rejected.
@@ -1063,7 +1072,11 @@ eval is a saved-requests fixture plus a scoring script in the same suite.
 - [ ] A saved set of real requests, used to check routing, retrieval, and answer quality before
 	and after a change.
 - [ ] Measure retrieval quality directly — does the right memory come back? — not by feel.
-- [ ] A latency budget per request class, and a warning when it is exceeded.
+- [x] A latency budget per request class, and a warning when it is exceeded. **Built
+	2026-09-12:** `latency_budget_ms` in config (defaults: chat 8 s, code 20 s, intent 2.5 s,
+	decision 6 s, summary 12 s, embedding 2 s) checked against the metrics table's per-class
+	averages -- `/models budget [hours]` says which class is over, and `/health` lists it under
+	`broken`. A class with fewer than three calls is not judged. -> `core/llm/budget.py`.
 - [ ] Record failures in normal use — wrong tool, wrong answer, bad context — and feed them into
 	2.2 instead of losing them.
 - [ ] Regression check before swapping a model or changing a routing rule (2.4).
