@@ -45,6 +45,7 @@ from core.assistant.backup_command import BackupCommandHandler
 from core.assistant.changes_command import ChangesCommandHandler
 from core.assistant.context_command import ContextCommandHandler
 from core.assistant.stop_command import StopCommandHandler
+from core.code import CodeService
 from core.context import build_context_service
 from core.assistant.corrections_command import CorrectionsCommandHandler
 from core.assistant.workflow_command import WorkflowCommandHandler
@@ -415,10 +416,16 @@ class IrisApplication:
         )
         self.changes = ChangeLedger(Path(self.config["memory_path"]).parent / "Backups" / "undo", audit=self.audit_stream)
         self.context_service = build_context_service(self.config)
+        self.code_service = CodeService(
+            document_config.root_paths(),
+            cache_dir=Path(self.config["memory_path"]).parent / "Index" / "al_symbols",
+            context_service=self.context_service,
+        )
         action_layer = build_action_layer(
             self.config,
             catalog=document_catalog,
             context_service=self.context_service,
+            code_service=self.code_service,
             audit_folder=self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit",
             permissions=self.permissions,
             ledger=self.changes,
@@ -517,7 +524,7 @@ class IrisApplication:
         self.changes_handler = ChangesCommandHandler(self.changes, output=self._sink)
         self.stop_handler = StopCommandHandler(self.halt, self.release, output=self._sink)
         self.context_handler = ContextCommandHandler(self.context_service, output=self._sink)
-        self.coordinator.context_provider = self.context_service.prompt_line
+        self.coordinator.context_provider = self._screen_prompt
         self.context_service.start()
         self.why_handler = WhyCommandHandler(
             log_file=log_dir_for(self.config) / LOG_FILE_NAME,
@@ -828,6 +835,16 @@ class IrisApplication:
             except Exception as error:
                 logger.warning("Scheduled jobs could not start", error=str(error))
         return service
+
+    def _screen_prompt(self) -> str:
+        parts = [self.context_service.prompt_line()]
+        code_service = getattr(self, "code_service", None)
+        if code_service is not None:
+            try:
+                parts.append(code_service.prompt_line())
+            except Exception as error:
+                logger.debug("Code context unavailable: %s", error)
+        return "\n".join(part for part in parts if part)
 
     def health(self) -> dict[str, Any]:
         report = health_report(self, host=HOST_DESKTOP)

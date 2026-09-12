@@ -410,12 +410,29 @@ this; they now consume it.
 
 Git-specific items moved to 3.3.
 
-- [ ] Begin with read-only repository access.
-- [ ] Provide repository search — text first, symbol-aware later.
-- [ ] Provide symbol and object awareness.
-- [ ] Build relevant context automatically before model calls.
-- [ ] Understand relationships between AL objects: tables, pages, codeunits, extensions, events.
-- [ ] Read `app.json`, `launch.json`, and `.alpackages` to know the app, its dependencies, and target.
+- [x] Begin with read-only repository access. **Built 2026-09-12:** `core/code/` and three
+	read-only tools (`core/actions/implementations/code_tools.py`), all confined to the document
+	roots in `config.json` -- a path outside them is refused by name.
+- [~] Provide repository search — text first, symbol-aware later. `repo_search` wraps `rg`
+	(`core/code/search.py`): literal or regex, case, glob, capped, skipping `.git`, `.alpackages`
+	and build output; results are a table of file, line, text. Symbol-aware search is the next
+	line.
+- [x] Provide symbol and object awareness. `al_symbol` looks an object up by name, id or prefix
+	in the workspace's own `.al` sources and in the newest version of each `.alpackages` file:
+	kind, id, namespace, caption, fields with types, procedures, the events it publishes, who in
+	this workspace subscribes to them, and which extensions target it. Package symbols are parsed
+	once and cached as compact JSON under `Data\Indexl_symbols` keyed by file size and time
+	(the five packages of a BC 28 workspace take ~2 s cold, ~0.6 s from cache).
+- [~] Build relevant context automatically before model calls. When VS Code is in front (3.1)
+	with an AL workspace, the system prompt carries the app name, version, publisher, Business
+	Central target and the open file on every turn. The objects the open file touches are not
+	pulled in yet.
+- [x] Understand relationships between AL objects: tables, pages, codeunits, extensions, events.
+	Extensions to an object, events an object publishes, subscribers in the workspace (parsed
+	from `[EventSubscriber(...)]`), interfaces an object implements.
+- [x] Read `app.json`, `launch.json`, and `.alpackages` to know the app, its dependencies, and target.
+	`al_workspace` (`core/code/workspace.py`): name, publisher, version, platform, application,
+	runtime, id ranges, dependencies, AL launch targets, packages, and object counts by kind.
 - [ ] Learn preferred BC patterns and architecture (feeds 2.2).
 - [ ] Add controlled file editing later.
 - [ ] Run the BC compiler and read errors.
@@ -423,16 +440,16 @@ Git-specific items moved to 3.3.
 - [ ] Run tests and read the results.
 - [ ] Show code diffs before significant changes — rendered per 2.7, gated per 10.
 - [ ] Target a VS Code-class coding experience.
-- [ ] **Decided 2026-09-10:** symbol and object awareness comes from parsing `SymbolReference.json`
+- [x] **Decided 2026-09-10, built 2026-09-12:** symbol and object awareness comes from parsing `SymbolReference.json`
 	inside the `.alpackages` files every AL project carries — in-house, no dependency. Verified on
 	a BC 27.1 package set: 1,567 tables, 2,708 pages, 1,748 codeunits; `Customer` with 183 fields
 	and 132 methods. Objects nest under `Namespaces` from BC 26 on, so walk recursively. The
 	project's *own* objects come from its built `.app`, which carries the same file.
 	Passed over: the AL language server (licensed as part of the VS Code extension, built to be
 	driven by an editor), tree-sitter (no AL grammar), a custom AL parser.
-- [ ] **Decided 2026-09-10:** text search is `rg` wrapped as a native tool (ripgrep 15.1 is
-	installed); the compiler is `alc.exe` from the installed AL extension (18.0.2732683), wrapped
-	the same way.
+- [~] **Decided 2026-09-10:** text search is `rg` wrapped as a native tool (ripgrep 15.1 is
+	installed; built 2026-09-12); the compiler is `alc.exe` from the installed AL extension (18.0.2732683), wrapped
+	the same way (not yet).
 
 ### 3.3 Git and Azure DevOps
 
