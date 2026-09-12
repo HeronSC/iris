@@ -15,6 +15,7 @@ from core.knowledge.hypotheses import HypothesisTracker
 from core.knowledge.retrieval import KnowledgeRetriever
 from core.knowledge.review import KnowledgeReviewWorkflow
 from core.llm.ollama_client import OllamaClient
+from core.system.limits import llm_options
 from core.llm.router import ModelRouter, ModelRoutes
 from core.permissions.policy import PermissionPolicy
 from core.permissions.secrets import SecretStore
@@ -42,6 +43,7 @@ class IrisKnowledgeService:
                 self.config["llm_server"],
                 self.config["model"],
                 timeout_seconds=self.config.get("llm_timeout_seconds", 30.0),
+                default_options=llm_options(self.config),
             ),
             ModelRoutes.from_config(self.config),
         )

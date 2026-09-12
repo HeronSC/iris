@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
+from core.config.schema import check_config
 from core.documents.models import DocumentSearchRoot, normalize_config_token, normalize_relative_path, normalize_root_key
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(Exception):
@@ -36,6 +40,12 @@ class ConfigLoader:
 
         if not isinstance(config, dict):
             raise ConfigError(f"{self.config_path.name} must contain a JSON object at the top level.")
+
+        errors, self.warnings = check_config(config)
+        if errors:
+            raise ConfigError("; ".join(errors))
+        for warning in self.warnings:
+            logger.warning("config: %s", warning)
 
         required_fields = ["assistant_name", "memory_path", "model", "llm_server"]
         for field_name in required_fields:
@@ -289,6 +299,9 @@ class ConfigLoader:
             "http": config.get("http", {}),
             "latency_budget_ms": config.get("latency_budget_ms", {}),
             "backups": config.get("backups", {}),
+            "llm": config.get("llm", {}),
+            "resources": config.get("resources", {}),
+            "config_warnings": list(self.warnings),
         }
 
 

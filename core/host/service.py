@@ -26,6 +26,7 @@ from core.scheduler.jobs import build_jobs
 from core.scheduler.service import ScheduleService
 from core.server.app import DEFAULT_HOST, DEFAULT_PORT, create_app
 from core.storage.backups import DEFAULT_KEEP, BackupService
+from core.system.limits import apply_process_priority
 from core.storage.sqlite_database import SQLiteDatabase
 from core.watchers.checks import register_kinds
 from core.watchers.knowledge_checks import KNOWLEDGE_KINDS
@@ -82,6 +83,8 @@ class IrisHost:
         self.http_port = http_port
         self.serve_http = serve_http
         self.heartbeat_seconds = max(1.0, float(heartbeat_seconds))
+        resources = self.config.get("resources") if isinstance(self.config.get("resources"), dict) else {}
+        self.process_priority = apply_process_priority(str(resources.get("priority") or ""))
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._server: Any = None

@@ -114,6 +114,7 @@ from core.state.search_result_context import SearchResultContext
 from core.storage.backups import DEFAULT_KEEP, BackupService
 from core.storage.sqlite_database import SQLiteDatabase
 from core.system.applications import ApplicationCatalog
+from core.system.limits import llm_options
 from core.system.places import KnownFolder, find_folders, root_subfolders, vscode_folders
 from core.tools.mcp_client import McpManager, load_server_configs
 from core.tools.models import PermissionLevel, ToolDefinition, ToolKind
@@ -229,6 +230,7 @@ class IrisApplication:
             self.config["llm_server"],
             self.config["model"],
             timeout_seconds=self.config.get("llm_timeout_seconds", 30.0),
+            default_options=llm_options(self.config),
         )
         metrics_path = self.config.get("metrics_path") or Path(self.config["memory_path"]).parent / "Metrics" / "metrics.db"
         try:

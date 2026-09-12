@@ -39,6 +39,8 @@ KNOWN_KEYS: dict[str, tuple[type, ...]] = {
     "context": (dict,),
     "retention": (dict,),
     "ui": (dict,),
+    "resources": (dict,),
+    "config_warnings": (list,),
 }
 
 SECRET_LIKE = ("password", "secret", "token", "api_key", "apikey", "client_secret")

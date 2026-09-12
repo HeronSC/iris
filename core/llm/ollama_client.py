@@ -31,8 +31,10 @@ class OllamaClient:
         timeout_seconds: float | None = 30.0,
         usage_listener: UsageListener | None = None,
         probe_timeout_seconds: float = PROBE_TIMEOUT_SECONDS,
+        default_options: dict[str, Any] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.default_options = dict(default_options or {})
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.probe_timeout_seconds = probe_timeout_seconds
@@ -122,8 +124,12 @@ class OllamaClient:
             kwargs["format"] = request.format
         if request.think is not None:
             kwargs["think"] = request.think
-        if request.options:
-            kwargs["options"] = dict(request.options)
+        options = {**self.default_options, **(request.options or {})}
+        keep_alive = options.pop("keep_alive", None)
+        if keep_alive is not None:
+            kwargs["keep_alive"] = keep_alive
+        if options:
+            kwargs["options"] = options
         return kwargs
 
     def _call(self, call: Callable[[], Any]) -> Any:

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("console", "ui", "tests")]
+    [ValidateSet("console", "ui", "service", "tests")]
     [string]$Mode = "ui",
     [string]$ConfigPath = "",
     [switch]$Bootstrap,
@@ -44,6 +44,12 @@ if ($Mode -eq "console") {
 }
 elseif ($Mode -eq "ui") {
     $args = @("ui\main.py")
+}
+elseif ($Mode -eq "service") {
+    $args = @("iris_service.py", "--console")
+    if ($ConfigPath) {
+        $args += @("--config", $env:IRIS_CONFIG_PATH)
+    }
 }
 else {
     $env:QT_QPA_PLATFORM = "offscreen"

@@ -1322,13 +1322,18 @@ and the `Data/` tree.
 	`deploy_phase4.ps1` then `Launch-Iris.cmd`. **Fixed 2026-09-12:** `dev_run.ps1 -Bootstrap` was
 	still installing from `core\requirements.txt` and `ui\requirements.txt`, both removed on
 	09-10, so a fresh dev box could not bootstrap; it reads the one root file now. Still to do: the
-	service host's install and start belong in the same two scripts.
+	service host's install and start belong in the same two scripts. **Added 2026-09-12:**
+	`dev_run.ps1 -Mode service` runs the headless host in a console.
 - [~] Config: one schema, validated on load, clear errors, no secrets (10). **Fixed 2026-09-12:**
 	`ConfigLoader.load()` returned only the keys it normalized, so five configured sections --
 	`mcp_servers`, `notifications`, `knowledge`, `web`, `metrics_path` -- were read from
 	`config.json` and then silently dropped before anything could use them. The git MCP server
 	(2.3) never started and quiet hours (8.2) never applied, both from this. They are passed
-	through now, along with `permissions` and `http` (10). A real schema is still to come.
+	through now, along with `permissions` and `http` (10). **Schema 2026-09-12:**
+	`core/config/schema.py` lists every known top-level key with its type; a wrong type is a
+	`ConfigError` naming the key, an unknown key is a logged warning (and `config_warnings` in the
+	loaded config), and any value under a key that looks like a password or token is flagged with
+	a pointer to `/secrets set`. Section internals are still checked where they are read.
 - [~] Document the data directory layout, and add migrations for the SQLite databases. The layout,
 	as of 2026-09-12 (every path configurable, these are the defaults under `Data\`):
 	`Memory\` (profile JSON, `conversations.db`, `knowledge.db` and its `.usearch` indexes),
@@ -1358,8 +1363,16 @@ and the `Data/` tree.
 	`Connection.backup()`, checkpointed into a self-contained DELETE-mode file. `knowledge.db` is
 	copied beside itself as `knowledge.before-vN.db` before its `SCHEMA_VERSION` ladder moves, and
 	never for a fresh file. Alembic/yoyo would still be more machinery than problem.
-- [ ] An update mechanism that does not lose data or config.
-- [ ] Resource limits: do not hold the GPU or thrash the disk while the user is working.
+- [x] An update mechanism that does not lose data or config. **Built 2026-09-12:**
+	`Update-Iris.ps1` refuses a dirty checkout, fast-forwards the source, takes a backup run of
+	`Data\` first, then runs `deploy_phase4.ps1`, which copies code and rebuilds the venv and
+	never touches `Data\` or `config.json`.
+- [~] Resource limits: do not hold the GPU or thrash the disk while the user is working. **Built
+	2026-09-12:** `llm.keep_alive`, `llm.num_thread`, `llm.num_ctx` and `llm.num_gpu` in config
+	reach every Ollama call (`core/system/limits.py`), so a short keep-alive frees VRAM between
+	turns; `resources.priority` (idle, below_normal, normal, above_normal, high) sets the host
+	process priority through `psutil`. Disk scans already carry time budgets (7.1, 2.6). Not
+	built: pausing indexing while the user is active.
 - [x] Health check: what is up, which model is loaded, what is indexed, what is broken. **Built
 	2026-09-12:** `/health` on either host now says which host answered, the configured model and
 	which routes are pulled (from the router's cached view -- a health check that waits on Ollama's
