@@ -186,8 +186,18 @@ single feature is what made those features look larger than they are.
 	Session state is checkpointed to `Data\Sessionsgent_checkpoints.db`, so a pending confirmation
 	survives a restart. Iris keeps the model seam, tools, memory, and prompts; `orchestrator.py` is
 	gone and the intent router keeps only its deterministic fast paths.
-- [ ] Later, once the client side works: expose Iris as an MCP *server*, so Claude Code and VS Code
-	can call recall/observe/hypothesize directly. Cheapest route to 4.2.
+- [x] Later, once the client side works: expose Iris as an MCP *server*, so Claude Code and VS Code
+	can call recall/observe/hypothesize directly. Cheapest route to 4.2. **Built 2026-09-12:**
+	`mcp_server.py` over `core/mcp_server/`, stdio, on the official SDK's `MCPServer`. Eight tools:
+	recall, observe, close_observation, hypothesize, add_evidence, assess, review_queue, explain.
+	The process holds only the knowledge layer -- no watchers, no schedules, no window -- so an
+	editor starting it does not start a second Iris. Every call passes the same permission policy
+	(10) and lands in the same audit trail (2.8) as everything else, tagged with which client made
+	it; a level the machine wants confirmed is refused rather than auto-approved, because there is
+	nobody at the other end of an MCP call to ask. Accepting a hypothesis stays out of reach here
+	too: a caller can bring evidence, and a person still decides.
+	Point a client at it with `command: <venv>\python.exe`, `args: ["mcp_server.py", "--client",
+	"claude-code"]`, `cwd: E:\AI\Iris`.
 
 ### 2.4 Model Router
 
@@ -456,8 +466,10 @@ An adapter is only as trustworthy as its undo. Read-only ships first in every ca
 - [ ] File editing.
 - [ ] Build and compiler integration.
 - [ ] Show Iris's output inside the editor, not only in the Iris window.
-- [ ] **Decided 2026-09-10:** no custom extension. VS Code is already an MCP client, so once Iris is
-	exposed as an MCP server (the 2.3 follow-on) VS Code and Copilot call Iris's tools directly,
+- [~] **Decided 2026-09-10, half built 2026-09-12:** no custom extension. VS Code is already an MCP
+	client, and the server it needs exists now (2.3), so Iris's memory is callable from the editor
+	today. What is still missing is the other direction -- 3.1's awareness of workspace, file, and
+	selection -- which is why the items above stay unchecked. VS Code and Copilot call Iris's tools directly,
 	and selection and diagnostics come back through VS Code's own MCP tooling. A TypeScript
 	extension is revisited only if inline panels or diffs inside the editor prove necessary.
 
@@ -983,8 +995,9 @@ Collected from the sections above. Each one changes the shape of the work that f
 
 1. ~~**Embeddings** (2.1, 5.2)~~ — closed 2026-09-10: `nomic-embed-text` + `sqlite-vec` for both;
 	memory vectors in `knowledge.db`, document vectors in `documents.db`.
-2. **MCP** (2.3) — decided: a native registry with `mcp` as a client inside it, and native
-	tool-calling for selection. Still open: when Iris becomes an MCP server itself.
+2. ~~**MCP** (2.3)~~ — closed 2026-09-12: a native registry with `mcp` as a client inside it, native
+	tool-calling for selection, and Iris exposed as an MCP server over stdio (`mcp_server.py`), which
+	is what 4.2 was waiting on.
 3. ~~**Cloud escalation** (2.4, 10)~~ — closed 2026-09-10: no cloud AI, by principle. Nothing
 	leaves the machine by default.
 4. ~~**VS Code** (4.2)~~ — closed 2026-09-10: Iris as an MCP server; VS Code is already a client.
