@@ -16,6 +16,7 @@ from core.actions.implementations.camera_tools import CAMERA_ACTIONS
 from core.actions.implementations.code_tools import CODE_ACTIONS
 from core.actions.implementations.excel_tools import EXCEL_ACTIONS
 from core.actions.implementations.file_tools import FILE_ACTIONS
+from core.actions.implementations.git_tools import GIT_ACTIONS
 from core.actions.implementations.memory_tools import MEMORY_ACTIONS
 from core.actions.implementations.network_tools import NETWORK_ACTIONS
 from core.actions.implementations.project_tools import PROJECT_ACTIONS
@@ -166,6 +167,8 @@ def build_action_layer(
         action_registry.register(memory_action())
     for file_action in FILE_ACTIONS:
         action_registry.register(file_action())
+    for git_action in GIT_ACTIONS:
+        action_registry.register(git_action())
     for camera_action in CAMERA_ACTIONS:
         action_registry.register(camera_action())
 

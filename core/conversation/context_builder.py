@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from core.profile.store import MemoryStore
+
+
+_WORDS = re.compile(r"[a-z0-9]+")
+
+
+def rank_by_relevance(items: list[str], message: str) -> list[str]:
+    wanted = {token for token in _WORDS.findall((message or "").lower()) if len(token) > 2}
+    if not wanted:
+        return list(items)
+
+    def score(text: str) -> int:
+        tokens = {token for token in _WORDS.findall(text.lower()) if len(token) > 2}
+        return len(tokens & wanted)
+
+    return sorted(items, key=lambda item: -score(item))
 
 
 class ContextBuilder:
@@ -60,7 +76,11 @@ class ContextBuilder:
                     lines.append(f"- Technologies: {', '.join(project['technologies'])}")
                 decisions = [str(item.get("decision")) for item in project.get("decisions", []) if isinstance(item, dict) and item.get("decision") and item.get("status", "active") == "active"]
                 if decisions:
-                    lines.append("- Decisions: " + "; ".join(decisions[:6]))
+                    ranked = rank_by_relevance(decisions, user_message)
+                    lines.append("- Decisions" + (" (most relevant first)" if len(ranked) > 1 else "") + ": " + "; ".join(ranked[:6]))
+                last = (project.get("metadata") or {}).get("last_session")
+                if isinstance(last, dict) and last.get("summary"):
+                    lines.append(f"- Last session: {str(last['summary'])[:300]}")
                 tasks = [item for item in project.get("next_actions", []) if isinstance(item, dict) and item.get("text") and item.get("status", "open") == "open"]
                 if tasks:
                     lines.append("- Open tasks: " + "; ".join(f"{item.get('id')}. {item['text']}" for item in tasks[:8]))

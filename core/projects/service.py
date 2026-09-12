@@ -140,6 +140,32 @@ class ProjectService:
             self._save(f"link {kind} of {project.get('name')}")
         return project
 
+    def set_area_path(self, project: dict[str, Any], area_path: str) -> dict[str, Any]:
+        with self._lock:
+            project["area_path"] = " ".join(area_path.split())
+            self._touch(project)
+            self._save(f"area path of {project.get('name')}")
+        return project
+
+    def add_person(self, project: dict[str, Any], name: str, role: str = "") -> dict[str, Any]:
+        clean = " ".join(name.split())
+        if not clean:
+            raise ValueError("A person needs a name")
+        people = project.setdefault("people", [])
+        entry = {"name": clean, "role": " ".join(role.split())}
+        with self._lock:
+            people[:] = [item for item in people if str(item.get("name", "")).casefold() != clean.casefold()]
+            people.append(entry)
+            self._touch(project)
+            self._save(f"people of {project.get('name')}")
+        return entry
+
+    def note_session(self, project: dict[str, Any], *, session_id: str, title: str, summary: str, messages: int) -> None:
+        with self._lock:
+            project.setdefault("metadata", {})["last_session"] = {"id": session_id, "title": title, "summary": " ".join(summary.split())[:600], "messages": int(messages), "at": _today()}
+            self._touch(project)
+            self._save(f"session state of {project.get('name')}")
+
     def set_focus(self, project: dict[str, Any], text: str) -> dict[str, Any]:
         with self._lock:
             project["current_focus"] = " ".join(text.split())
@@ -263,6 +289,14 @@ class ProjectService:
             lines.append("Linked: " + "; ".join(linked))
         if project.get("technologies"):
             lines.append("Technologies: " + ", ".join(str(item) for item in project["technologies"]))
+        if project.get("area_path"):
+            lines.append(f"Azure DevOps area: {project['area_path']}")
+        people = [item for item in project.get("people", []) if isinstance(item, dict) and item.get("name")]
+        if people:
+            lines.append("People: " + ", ".join(f"{item['name']}" + (f" ({item['role']})" if item.get("role") else "") for item in people))
+        last = (project.get("metadata") or {}).get("last_session")
+        if isinstance(last, dict) and last.get("summary"):
+            lines.append(f"Last session ({last.get('at')}, {last.get('title')}): {last['summary'][:200]}")
         decisions = self.active_decisions(project)
         if decisions:
             lines.append("Decisions: " + "; ".join(str(item["decision"]) for item in decisions[:6]))

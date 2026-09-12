@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -320,6 +321,64 @@ class ALCompileAction:
         return ActionResult(status="success" if not report.timed_out else "failed", message="\n".join(lines), action=self.name, resolved_target=str(workspace.root), results=tuple(results), error=None if not report.timed_out else "timeout")
 
 
-CODE_ACTIONS = (RepoSearchAction, ALWorkspaceAction, ALSymbolAction, ALCompileAction)
+class ALReferencesArguments(BaseModel):
+    name: str = Field(description="Object, procedure, field or event name to find references to, such as Sales-Post or OnBeforePostLines")
+    path: str | None = Field(default=None, description="Workspace folder or name; the one in view when omitted")
+    max_results: int = Field(default=60, ge=1, le=300)
 
-__all__ = ["ALCompileAction", "ALSymbolAction", "ALWorkspaceAction", "CODE_ACTIONS", "RepoSearchAction"]
+
+class ALReferencesAction:
+
+    name = "al_references"
+    definition = ToolDefinition(
+        name="al_references",
+        description="Where a Business Central object, procedure, field or event is referenced in the workspace's AL sources: every file and line that names it, quoted or bare, as a whole word.",
+        arguments=ALReferencesArguments,
+        permission=PermissionLevel.READ,
+        cost="seconds",
+        keywords=("who uses", "where is it used", "references to", "who calls", "usages of", "who subscribes", "where is the event raised"),
+    )
+
+    def validate(self, request: ActionRequest, context: object) -> ValidationResult:
+        try:
+            arguments = ALReferencesArguments.model_validate(request.arguments)
+        except Exception as error:
+            return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
+        name = arguments.name.strip().strip('"')
+        if not name:
+            return ValidationResult(ok=False, error="Say which name to look for")
+        service = _service(context)
+        if service is None:
+            return ValidationResult(ok=False, error=NO_SERVICE)
+        workspace, problem = _resolve(service, arguments.path)
+        if problem:
+            return ValidationResult(ok=False, error=problem)
+        return ValidationResult(ok=True, resolved_target=name, resolved_arguments={"name": name, "path": str(workspace.root), "max_results": arguments.max_results})
+
+    def execute(self, request: ActionRequest, context: object) -> ActionResult:
+        service = _service(context)
+        name = str(request.arguments["name"])
+        root = Path(str(request.arguments["path"]))
+        escaped = re.escape(name)
+        pattern = f'"{escaped}"' if " " in name or "-" in name else f'(?:"{escaped}"|\\b{escaped}\\b)'
+        try:
+            outcome = service.search_text(pattern, root, glob="*.al", regex=True, case_sensitive=True, max_results=int(request.arguments.get("max_results") or 60))
+        except (SearchToolMissing, TimeoutError, RuntimeError) as error:
+            return ActionResult(status="failed", message=str(error), action=self.name, error="search_failed")
+        source = Source("al_references", "tool", str(root))
+        if not outcome.matches:
+            message = f"Nothing in {root.name} references {name}."
+            return ActionResult(status="success", message=message, action=self.name, results=(status("ok", message, source=source),))
+        per_file: dict[str, int] = {}
+        for match in outcome.matches:
+            per_file[match.file] = per_file.get(match.file, 0) + 1
+        lines = [f"{len(outcome.matches)} reference{'s' if len(outcome.matches) != 1 else ''} to {name} in {len(per_file)} file{'s' if len(per_file) != 1 else ''}" + (" (more not shown)" if outcome.truncated else "") + ":"]
+        lines.extend(f"{file}: {count}" for file, count in sorted(per_file.items(), key=lambda item: -item[1]))
+        lines.extend(f"{match.file}:{match.line}: {match.text.strip()[:160]}" for match in outcome.matches[:40])
+        rows = [(match.file, match.line, match.text.strip()[:200]) for match in outcome.matches]
+        return ActionResult(status="success", message="\n".join(lines), action=self.name, resolved_target=name, results=(table(("file", "line", "text"), rows, source=source, title=f"References to {name}"),))
+
+
+CODE_ACTIONS = (RepoSearchAction, ALWorkspaceAction, ALSymbolAction, ALCompileAction, ALReferencesAction)
+
+__all__ = ["ALCompileAction", "ALReferencesAction", "ALSymbolAction", "ALWorkspaceAction", "CODE_ACTIONS", "RepoSearchAction"]

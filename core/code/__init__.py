@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 from core.code.compiler import ALCompiler, CompileReport
 from core.code.search import RipgrepSearch, SearchOutcome
-from core.code.symbols import Symbol, SymbolIndex
+from core.code.symbols import Symbol, SymbolIndex, parse_source
 from core.code.workspace import ALWorkspace, find_workspace_by_name, find_workspace_root, find_workspaces, load_workspace
 
 logger = logging.getLogger(__name__)
@@ -152,10 +152,32 @@ class CodeService:
         active = self.active_file()
         if active is not None:
             try:
-                lines.append(f"- Open AL file: {active.relative_to(workspace.root)}")
+                label = str(active.relative_to(workspace.root))
             except ValueError:
-                lines.append(f"- Open AL file: {active}")
+                label = str(active)
+            lines.append(f"- Open AL file: {label}")
+            lines.extend(self._file_objects(active, workspace))
         return "\n".join(lines)
+
+    def _file_objects(self, path: Path, workspace: ALWorkspace) -> list[str]:
+        try:
+            text = path.read_text(encoding="utf-8-sig", errors="replace")
+        except OSError:
+            return []
+        found: list[str] = []
+        for symbol in parse_source(text, file_name=path.name, app_name=workspace.name)[:4]:
+            bits = []
+            procedures = [item for item in symbol.methods if not item.event and not item.local]
+            if procedures:
+                bits.append(f"{len(procedures)} public procedure{'s' if len(procedures) != 1 else ''}: " + ", ".join(item.name for item in procedures[:8]))
+            if symbol.events:
+                bits.append("publishes " + ", ".join(item.name for item in symbol.events[:6]))
+            if symbol.subscriptions:
+                bits.append("subscribes to " + ", ".join(f"{item.object_name}.{item.event}" for item in symbol.subscriptions[:6]))
+            if symbol.implements:
+                bits.append("implements " + ", ".join(symbol.implements))
+            found.append(f"  - {symbol.label}" + (": " + "; ".join(bits) if bits else ""))
+        return found
 
     def find_symbols(self, workspace: ALWorkspace, query: str, *, kind: str | None = None, limit: int = 10) -> list[Symbol]:
         return self.index_for(workspace).find(query, kind=kind, limit=limit)

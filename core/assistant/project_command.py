@@ -9,7 +9,7 @@ from core.projects.service import PATH_KINDS, ProjectService
 
 USAGE = (
     "Usage: /project | /project list | /project <name> | /project clear | /project use | /project new <name> | "
-    "/project link workspace|repository|documents <path> | /project focus <text> | /project decide <text> | "
+    "/project link workspace|repository|documents <path> | /project area <ado area path> | /project people [add <name> [as <role>]] | /project focus <text> | /project decide <text> | "
     "/project tasks | /project task add <text> | /project task done <n>"
 )
 
@@ -82,6 +82,34 @@ class ProjectCommandHandler:
                 emit_output(self.output, str(error))
                 return True
             emit_output(self.output, f"Linked {kind} of {active['name']} to {path}.")
+            return True
+        if head == "area":
+            text = rest[len(words[0]):].strip()
+            if active is None:
+                emit_output(self.output, "No active project. /project <name> first.")
+                return True
+            if not text:
+                emit_output(self.output, USAGE)
+                return True
+            service.set_area_path(active, text)
+            emit_output(self.output, f"Azure DevOps area of {active['name']}: {text}. Tasks become a view over its work items once the ADO server is configured (3.3).")
+            return True
+        if head == "people":
+            if active is None:
+                emit_output(self.output, "No active project. /project <name> first.")
+                return True
+            if len(words) >= 3 and words[1].lower() == "add":
+                spec = rest[len(words[0]) + 1 + len(words[1]):].strip()
+                name, _sep, role = spec.partition(" as ")
+                try:
+                    entry = service.add_person(active, name, role)
+                except ValueError as error:
+                    emit_output(self.output, str(error))
+                    return True
+                emit_output(self.output, f"Added {entry['name']}" + (f" as {entry['role']}" if entry["role"] else "") + f" to {active['name']}.")
+                return True
+            people = [item for item in active.get("people", []) if isinstance(item, dict) and item.get("name")]
+            emit_output(self.output, ("People on " + active["name"] + ": " + ", ".join(f"{item['name']}" + (f" ({item['role']})" if item.get("role") else "") for item in people)) if people else f"Nobody is attached to {active['name']} yet; /project people add <name> as <role>.")
             return True
         if head in {"focus", "decide"}:
             text = rest[len(words[0]):].strip()

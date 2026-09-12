@@ -107,6 +107,8 @@ class ModelRouter:
     def chat(self, request: LLMRequest) -> LLMResponse:
         request = self._apply_task_options(request)
         requested = request.model or self.routes.model_for(request.task)
+        if request.task in self.routes.planning_tasks and request.tools:
+            requested = self._planning_model(requested)
         last_error: OllamaClientError | None = None
         for index, model in enumerate(self.routes.candidates(requested)):
             started = time.perf_counter()
@@ -217,6 +219,21 @@ class ModelRouter:
             "planning_tasks": list(self.routes.planning_tasks),
         }
 
+
+    def _planning_model(self, requested: str) -> str:
+        available = self.available_models()
+        if not available:
+            return requested
+        pulled = set(available)
+        for candidate in self.routes.candidates(requested):
+            if not self._is_pulled(candidate, pulled):
+                continue
+            if "tools" in self.capabilities(candidate):
+                if candidate != requested:
+                    logger.warning("%s cannot call tools; planning with %s instead", requested, candidate)
+                return candidate
+        logger.warning("No configured model reports tool-calling; planning with %s anyway", requested)
+        return requested
 
     def _first_available(self, requested: str) -> str:
         available = self.available_models()

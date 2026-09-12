@@ -644,6 +644,7 @@ class IrisApplication:
         self._turn_route = "coordinator"
 
         if stripped.lower() in {"exit", "quit"}:
+            self._note_session_state()
             self.session_handler.handle("/session close", self.state)
             return IrisResponse(
                 messages=self._response_messages,
@@ -1020,6 +1021,7 @@ class IrisApplication:
         if not self.initialized:
             return
         try:
+            self._note_session_state()
             self.session_handler.handle("/session close", self.state)
         except Exception:
             pass
@@ -1449,6 +1451,28 @@ class IrisApplication:
             details=details,
             metadata=metadata,
         )
+
+    def _note_session_state(self) -> None:
+        projects = getattr(self, "project_service", None)
+        manager = getattr(self, "session_manager", None)
+        state = getattr(self, "state", None)
+        if projects is None or manager is None or not isinstance(state, dict):
+            return
+        project_id = state.get("active_project_id")
+        session = manager.get_active_session()
+        if not project_id or session is None:
+            return
+        project = projects.get(str(project_id))
+        if project is None:
+            return
+        messages = session.get_messages()
+        if not messages:
+            return
+        summary = session.summary or " | ".join(str(item.get("content", ""))[:120] for item in messages[-3:] if item.get("role") == "user")
+        try:
+            projects.note_session(project, session_id=str(session.id), title=session.title, summary=summary, messages=len(messages))
+        except Exception as error:
+            logger.debug("Session state not noted: %s", error)
 
     def _retention_job(self) -> Any:
         retention_cfg = self.config.get("retention") if isinstance(self.config.get("retention"), dict) else {}

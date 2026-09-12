@@ -50,26 +50,32 @@ Written down so the unchecked boxes below read as "not yet" rather than "nothing
 
 ## 1. Core Principles
 
-- [ ] Build one Iris platform, not separate systems per app.
+- [x] Build one Iris platform, not separate systems per app. Held: every integration (Excel, code,
+	cameras, network, memory) is a tool in one registry behind one executor and one panel.
 	Architecture: Iris Core -> Memory and Decision System -> Model Router -> Tool and Plugin Layer -> Applications and Systems.
-- [ ] Evaluate existing open-source frameworks, APIs, and automation systems before custom-building.
-- [ ] Keep memory, tools, and personality independent from any single model.
-- [ ] Prefer native APIs and official integrations over GUI automation whenever possible.
-- [ ] Every capability reaches the user through the tool layer, never as a special case wired
+- [x] Evaluate existing open-source frameworks, APIs, and automation systems before custom-building.
+	Held: the 2026-09-10 review decided each dependency; the "passed over" notes stay in each section.
+- [x] Keep memory, tools, and personality independent from any single model. Held: memory is
+	SQLite records, tools are declared once, the model is a config route (2.4).
+- [x] Prefer native APIs and official integrations over GUI automation whenever possible. Held:
+	Excel COM, alc.exe, git, the Blue Iris JSON API, Win32 for the foreground window; no pixel
+	automation anywhere.
+- [x] Every capability reaches the user through the tool layer, never as a special case wired
 	directly into the UI.
-- [ ] Local-only AI. Iris does not depend on any cloud AI provider — decided 2026-09-10 as a
+- [x] Local-only AI. Iris does not depend on any cloud AI provider — decided 2026-09-10 as a
 	principle, not a deferral. Every model runs on this machine (2.4). Personal data, documents, and
 	camera footage never leave it (10). Third-party *services* that are not AI (a search API, Graph,
 	UniFi) are judged case by case in their own sections.
-- [ ] Read-only first, then controlled write, then autonomous action — per integration, not globally.
-- [ ] Few moving parts. Iris core is in-process — a Python library and SQLite files, no memory or
+- [x] Read-only first, then controlled write, then autonomous action — per integration, not globally.
+	Held: Excel, files and cameras each went read-only first; writes preview and confirm.
+- [x] Few moving parts. Iris core is in-process — a Python library and SQLite files, no memory or
 	vector server. The deliberate exceptions, each approved on its own on 2026-09-10, are: Ollama
 	(already required), a Windows service hosting Iris's own headless half (11), and two local
 	containers — SearXNG for search (5.1) and Home Assistant for devices (9.2, when it starts).
 	Anything beyond that list needs the same explicit yes.
-- [ ] Degrade gracefully. A missing model, an offline NAS, or an unreachable API produces a clear
+- [x] Degrade gracefully. A missing model, an offline NAS, or an unreachable API produces a clear
 	limitation, not a crash or a confident guess.
-- [ ] Everything Iris knows or does is inspectable: why it answered that, where the fact came
+- [x] Everything Iris knows or does is inspectable: why it answered that, where the fact came
 	from, what it changed.
 
 ---
@@ -281,8 +287,10 @@ among local models, not to decide when to leave the machine.
 	built 2026-09-10: every call site tags its task. Context size, latency, and VRAM are not.
 - [x] Fall back cleanly when a model or host is down. A missing model follows `models.fallbacks`
 	then the default; a down host raises one clear error and is recorded in metrics.
-- [~] Require structured output / tool-calling support from any model used for planning.
-	`/models` and startup warn when a planning model lacks the `tools` capability; not enforced.
+- [x] Require structured output / tool-calling support from any model used for planning.
+	**Enforced 2026-09-12:** a planning call that carries tools goes to the first pulled model in
+	its fallback chain that reports the `tools` capability, with a warning naming the switch;
+	`/models` and startup still warn ahead of time.
 - [x] Track tokens and latency per request, and make it visible (2.8). -> `core/llm/metrics.py`,
 	`/models usage`, `/models recent`.
 - [x] **Decided and built 2026-09-10:** replace the hand-rolled urllib client with the official `ollama`
@@ -293,7 +301,8 @@ among local models, not to decide when to leave the machine.
 	tools, and usage — that is the real work here. -> `core/llm/models.py`, `core/llm/router.py`.
 	Passed over: LiteLLM (normalises to OpenAI shape, heavy for a one-runtime problem), OpenRouter
 	(hosted middleman), and the `anthropic` SDK (no cloud AI, by principle).
-- [ ] Options for local runtimes beyond Ollama, if ever needed: llama.cpp, LM Studio, vLLM.
+- [x] Options for local runtimes beyond Ollama, if ever needed: llama.cpp, LM Studio, vLLM. A
+	note, not work; the `LLMClient` seam is where one would plug in.
 - [x] Fixed 2026-09-10: `config.json` pointed at `localhost`, which resolves to `::1` first on
 	Windows and stalled ~2 s per call before falling back. Now `127.0.0.1`; a chat call went from
 	2,242 ms to 228 ms for identical work, and roughly five calls run per turn.
@@ -394,9 +403,10 @@ for a problem Windows already solves.
 	present on every line, while `mcp`, `uvicorn`, and other libraries still log through stdlib and
 	get captured. JSON lines, rotating file handler, size cap. -> `core/observability/`;
 	`Data\logs\iris.jsonl`, 10 MB x 5; configured by the three entry points, never by tests.
-- [~] **Decided 2026-09-10, table built:** metrics are a SQLite table of per-request rows — model, tokens,
+- [x] **Decided 2026-09-10, table built:** metrics are a SQLite table of per-request rows — model, tokens,
 	latency, tools called, outcome — queried by the UI. No metrics server. -> `core/llm/metrics.py`
-	(`Data\Metrics\metrics.db`); read by `/models usage`, not yet by the UI. OpenTelemetry was
+	(`Data\Metrics\metrics.db`); read by `/models usage` and, since 2026-09-12, by the window's
+	activity line after every request. OpenTelemetry was
 	passed over: the API package arrived with `mcp`, but a useful setup means an exporter and a
 	Jaeger/Grafana backend, which is three services for one user on one machine.
 - [x] **Built 2026-09-12:** one audit schema, one file. `AuditEvent` in `core/audit/stream.py`
@@ -477,7 +487,9 @@ Git-specific items moved to 3.3.
 - [x] Begin with read-only repository access. **Built 2026-09-12:** `core/code/` and three
 	read-only tools (`core/actions/implementations/code_tools.py`), all confined to the document
 	roots in `config.json` -- a path outside them is refused by name.
-- [~] Provide repository search — text first, symbol-aware later. `repo_search` wraps `rg`
+- [x] Provide repository search — text first, symbol-aware later. **Symbol-aware 2026-09-12:**
+	`al_references` finds every file and line that names an object, procedure, field or event,
+	quoted or as a whole word, grouped per file. `repo_search` wraps `rg`
 	(`core/code/search.py`): literal or regex, case, glob, capped, skipping `.git`, `.alpackages`
 	and build output; results are a table of file, line, text. Symbol-aware search is the next
 	line.
@@ -487,7 +499,9 @@ Git-specific items moved to 3.3.
 	this workspace subscribes to them, and which extensions target it. Package symbols are parsed
 	once and cached as compact JSON under `Data\Indexl_symbols` keyed by file size and time
 	(the five packages of a BC 28 workspace take ~2 s cold, ~0.6 s from cache).
-- [~] Build relevant context automatically before model calls. When VS Code is in front (3.1)
+- [x] Build relevant context automatically before model calls. **Completed 2026-09-12:** the
+	prompt now also lists the open file's objects -- public procedures, events it publishes,
+	events it subscribes to, interfaces -- parsed from the file itself. When VS Code is in front (3.1)
 	with an AL workspace, the system prompt carries the app name, version, publisher, Business
 	Central target and the open file on every turn. The objects the open file touches are not
 	pulled in yet.
@@ -497,7 +511,8 @@ Git-specific items moved to 3.3.
 - [x] Read `app.json`, `launch.json`, and `.alpackages` to know the app, its dependencies, and target.
 	`al_workspace` (`core/code/workspace.py`): name, publisher, version, platform, application,
 	runtime, id ranges, dependencies, AL launch targets, packages, and object counts by kind.
-- [ ] Learn preferred BC patterns and architecture (feeds 2.2).
+- [~] Learn preferred BC patterns and architecture (feeds 2.2). The channels exist -- principles
+	from corrections, project decisions, facts under a topic -- and fill as the user works.
 - [x] Add controlled file editing later. **Built 2026-09-12:** `read_file` (a numbered window),
 	`edit_file` (replace exact text; the count of occurrences must match, the diff is shown for
 	approval, line endings and BOM are kept) and `write_file` (create, or replace with
@@ -518,8 +533,10 @@ Git-specific items moved to 3.3.
 	right while the loop is new. An automatic retry budget is not set.
 - [ ] Run tests and read the results. AL tests run inside a Business Central service; without a
 	container or sandbox here there is nothing to invoke yet.
-- [ ] Show code diffs before significant changes — rendered per 2.7, gated per 10.
-- [ ] Target a VS Code-class coding experience.
+- [x] Show code diffs before significant changes — rendered per 2.7, gated per 10. `edit_file`
+	and `write_file` preview a unified diff and confirm; the panel renders it coloured.
+- [~] Target a VS Code-class coding experience. Read, search, symbols, references, compile, edit
+	with diff and undo are there; running tests and a debugger are not.
 - [x] **Decided 2026-09-10, built 2026-09-12:** symbol and object awareness comes from parsing `SymbolReference.json`
 	inside the `.alpackages` files every AL project carries — in-house, no dependency. Verified on
 	a BC 27.1 package set: 1,567 tables, 2,708 pages, 1,748 codeunits; `Customer` with 183 fields
@@ -539,7 +556,9 @@ Git-specific items moved to 3.3.
 	repositories need their own `mcp_servers` entry or the `repo_path` argument.
 - [x] Commits and history (moved here from 3.2). `git_log`, `git_show`.
 - [x] Branches. `git_branch` to list; `git_create_branch` and `git_checkout` go through confirm.
-- [~] Diff and blame on demand. `git_diff`, `git_diff_staged`, `git_diff_unstaged` render as
+- [x] Diff and blame on demand. **Blame built 2026-09-12:** `git_blame` (a native tool over the
+	installed git) gives commit, author and date per line for a range, confined to the document
+	roots. `git_diff`, `git_diff_staged`, `git_diff_unstaged` render as
 	diff results (2.7). The reference server has no blame; that waits for a second server or a
 	wrapped `git blame`.
 - [ ] Pull requests: list, read, comment, create.
@@ -558,12 +577,13 @@ Git-specific items moved to 3.3.
 
 ### 3.4 Project and Task Awareness
 
-- [~] Define what a project *is*: a named record with folders, repos, an ADO area path, documents,
+- [x] Define what a project *is*: a named record with folders, repos, an ADO area path, documents,
 	and people attached. **Built 2026-09-12:** `core/projects/service.py` owns
 	`Data\Memory\projects.json` -- id, name, status, summary, technologies, `paths.workspace /
 	repository / documents`, focus, decisions, tasks (`next_actions`). Every write is copied
-	first through the change ledger, so `/undo` puts it back. An ADO area path and people are
-	still to add; nothing reads them yet.
+	first through the change ledger, so `/undo` puts it back. **2026-09-12:** `/project area
+	<path>` sets the Azure DevOps area path and `/project people add <name> as <role>` attaches
+	people; both show in the record and the description.
 - [x] Track active projects. `/project list`, `/project <name>`, `/project new <name>`,
 	`/project clear`; the active project is per session as before.
 - [~] Associate conversations, files, code, decisions, and tasks per project. Sessions carry
@@ -577,12 +597,15 @@ Git-specific items moved to 3.3.
 	without switching.
 - [x] Scope memory per project (2.1). Built there 2026-09-12: `project:<id>` scope, recall
 	filtered to the active project plus global, `@project` on observe, hypothesize and fact.
-- [~] Remember current project state. Focus, decisions, open tasks and last-opened date are on
+- [x] Remember current project state. **Completed 2026-09-12:** when a session closes with a
+	project active, its id, title, summary (or the last user messages) and message count are
+	written to the project as its last session, shown by `/project` and in the prompt. Focus, decisions, open tasks and last-opened date are on
 	the record and in the prompt when the project is active. What was being done in the last
 	session is not summarised into it yet.
 - [x] Track unfinished work. `/project tasks`, `/project task add <text>`, `/project task done
 	<n>`, and the `active_project` / `project_update` tools; open tasks appear in the prompt.
-- [~] Surface relevant prior decisions automatically. The active project's decisions are in the
+- [x] Surface relevant prior decisions automatically. **Ranked 2026-09-12:** the active
+	project's decisions are ordered by word overlap with the request, most relevant first. The active project's decisions are in the
 	system prompt on every turn (`context_builder`), so the model can cite them; ranking by
 	relevance to the request is not done.
 - [ ] **Decided 2026-09-10:** where a project names an Azure DevOps area path, its tasks are a
