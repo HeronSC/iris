@@ -52,6 +52,7 @@ from core.assistant.intent_router import IntentRouter
 from core.assistant.memory_commands import MemoryCommandHandler
 from core.assistant.models_command import ModelsCommandHandler
 from core.assistant.permissions_command import PermissionsCommandHandler
+from core.assistant.backup_command import BackupCommandHandler
 from core.assistant.schedule_command import ScheduleCommandHandler
 from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
@@ -102,6 +103,7 @@ from core.profile.store import MemoryStore
 from core.profile.update_service import MemoryUpdateService
 from core.profile.writer import MemoryWriter
 from core.state.search_result_context import SearchResultContext
+from core.storage.backups import DEFAULT_KEEP, BackupService
 from core.storage.sqlite_database import SQLiteDatabase
 from core.system.applications import ApplicationCatalog
 from core.system.places import KnownFolder, find_folders, root_subfolders, vscode_folders
@@ -111,7 +113,7 @@ from core.permissions.policy import PermissionPolicy
 from core.permissions.secrets import SecretStore
 from core.tools.audit import ToolAuditor
 from core.tools.registry import ToolRegistry
-from core.scheduler.jobs import HYPOTHESIS_REVIEW, build_jobs
+from core.scheduler.jobs import DATABASE_BACKUP, HYPOTHESIS_REVIEW, build_jobs
 from core.scheduler.models import JobDefinition
 from core.scheduler.service import ScheduleService
 from core.watchers import InboxNotifier, LogNotifier, QuietHours, ToastNotifier, WatcherService
@@ -182,6 +184,7 @@ class IrisApplication:
         self.watch_handler: CommandHandler = _NoopCommandHandler()
         self.permissions_handler: CommandHandler = _NoopCommandHandler()
         self.schedule_handler: CommandHandler = _NoopCommandHandler()
+        self.backup_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
 
     def initialize(self, event_handler: EventHandler | None = None) -> None:
@@ -338,6 +341,23 @@ class IrisApplication:
         )
         document_db = SQLiteDatabase(document_cfg.get("catalog_path") or Path(__file__).resolve().parents[1] / "index" / "documents.db")
         document_catalog = DocumentCatalog(document_db)
+        data_root = Path(self.config["memory_path"]).parent
+        backup_databases = {"knowledge": knowledge_database, "documents": document_db}
+        if self.request_metrics is not None:
+            backup_databases["metrics"] = self.request_metrics.database
+        if self.topic_memory_service is not None:
+            backup_databases["conversations"] = self.topic_memory_service.database
+        self.backups = BackupService(
+            data_root / "Backups",
+            databases=backup_databases,
+            folders={
+                "Memory": Path(self.config["memory_path"]),
+                "Sessions": Path(self.config.get("session_path") or data_root / "Sessions"),
+                "Configuration": data_root / "Configuration",
+                "Audit": audit_folder,
+            },
+            keep=int((self.config.get("backups") or {}).get("keep", DEFAULT_KEEP)) if isinstance(self.config.get("backups"), dict) else DEFAULT_KEEP,
+        )
         scanner = DocumentScanner(
             config=document_config,
             catalog=document_catalog,
@@ -498,6 +518,7 @@ class IrisApplication:
         self.watchers = self._build_watchers()
         self.watch_handler = WatchCommandHandler(self.watchers, output=self._sink)
         self.schedule_handler = ScheduleCommandHandler(self.schedules, output=self._sink)
+        self.backup_handler = BackupCommandHandler(self.backups, output=self._sink)
         self.why_handler = WhyCommandHandler(
             log_file=log_dir_for(self.config) / LOG_FILE_NAME,
             trace_file=getattr(getattr(self.coordinator, "trace_logger", None), "path", None),
@@ -650,6 +671,8 @@ class IrisApplication:
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.schedule_handler, stripped, status, command_prefixes=("/schedule",)):
                 return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.backup_handler, stripped, status, command_prefixes=("/backup",)):
+                return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)
             if self._handle_slash_command(self.search_handler, stripped, IrisStatus.SEARCHING, command_prefixes=("/search", "/file")):
@@ -765,7 +788,7 @@ class IrisApplication:
         self.schedules = ScheduleService(
             configuration / "schedules.json",
             configuration / "schedules_state.json",
-            build_jobs(review=self.knowledge_review),
+            build_jobs(review=self.knowledge_review, backups=self.backups),
             notifiers={**notifiers, "inbox": inbox},
             quiet_hours=quiet,
             audit=self.audit_stream,
@@ -776,6 +799,15 @@ class IrisApplication:
                 name="Re-appraise hypotheses",
                 cron="0 6 * * *",
                 id="hypothesis-review",
+            )
+        )
+        self.schedules.ensure(
+            JobDefinition(
+                job=DATABASE_BACKUP,
+                name="Back up Data",
+                cron="0 3 * * *",
+                id="database-backup",
+                channels=("inbox", "log"),
             )
         )
         if bool(notifications_cfg.get("enabled", True)):

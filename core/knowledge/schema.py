@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+from pathlib import Path
 
 from core.storage.sqlite_database import SQLiteDatabase
+
+logger = logging.getLogger(__name__)
 
 
 SCHEMA = """
@@ -95,11 +99,36 @@ END;
 """
 
 
-def ensure_schema(database: SQLiteDatabase) -> None:
+def ensure_schema(database: SQLiteDatabase) -> Path | None:
+    copy = _copy_before_migration(database)
     with database.connect() as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)
         conn.commit()
+    return copy
+
+
+def stored_version(database: SQLiteDatabase) -> int | None:
+    if not database.db_path.exists() or database.db_path.stat().st_size == 0:
+        return None
+    with database.connect() as conn:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'knowledge_meta'"
+        ).fetchone()
+        if table is None:
+            return None
+        row = conn.execute("SELECT value FROM knowledge_meta WHERE key = 'schema_version'").fetchone()
+    return int(row[0]) if row is not None else 1
+
+
+def _copy_before_migration(database: SQLiteDatabase) -> Path | None:
+    current = stored_version(database)
+    if current is None or current == SCHEMA_VERSION:
+        return None
+    target = database.db_path.with_name(f"{database.db_path.stem}.before-v{SCHEMA_VERSION}.db")
+    copy = database.backup_to(target)
+    logger.info("Copied %s to %s before migrating schema v%d -> v%d", database.db_path.name, copy.name, current, SCHEMA_VERSION)
+    return copy
 
 
 SCHEMA_VERSION = 2

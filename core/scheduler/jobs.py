@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 HYPOTHESIS_REVIEW = "hypothesis_review"
 
+DATABASE_BACKUP = "database_backup"
+
 
 def hypothesis_review(review: Any) -> Callable[[dict[str, Any]], JobResult]:
     def run(params: dict[str, Any]) -> JobResult:
@@ -51,11 +53,32 @@ def hypothesis_review(review: Any) -> Callable[[dict[str, Any]], JobResult]:
     return run
 
 
-def build_jobs(review: Any | None = None) -> dict[str, Callable[[dict[str, Any]], JobResult]]:
+def database_backup(backups: Any) -> Callable[[dict[str, Any]], JobResult]:
+    def run(_params: dict[str, Any]) -> JobResult:
+        report = backups.run()
+        return JobResult(
+            ok=report.ok,
+            summary=report.summary,
+            data={
+                "run": report.run.name,
+                "databases": sorted(report.databases),
+                "folders": sorted(report.folders),
+                "failures": dict(report.failures),
+                "pruned": list(report.pruned),
+            },
+            notify=not report.ok,
+        )
+
+    return run
+
+
+def build_jobs(review: Any | None = None, backups: Any | None = None) -> dict[str, Callable[[dict[str, Any]], JobResult]]:
     jobs: dict[str, Callable[[dict[str, Any]], JobResult]] = {}
     if review is not None:
         jobs[HYPOTHESIS_REVIEW] = hypothesis_review(review)
+    if backups is not None:
+        jobs[DATABASE_BACKUP] = database_backup(backups)
     return jobs
 
 
-__all__ = ["HYPOTHESIS_REVIEW", "build_jobs", "hypothesis_review"]
+__all__ = ["DATABASE_BACKUP", "HYPOTHESIS_REVIEW", "build_jobs", "database_backup", "hypothesis_review"]

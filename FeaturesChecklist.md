@@ -904,21 +904,47 @@ and the `Data/` tree.
 	`core/requirements.txt`, which listed only `pypdf`, and would have missed every dependency
 	decided today. `pywin32` is pinned explicitly rather than left transitive, since Excel COM,
 	the service host, and 3.1 all depend on it.
-- [ ] One documented way to launch dev, one for release.
+- [~] One documented way to launch dev, one for release. Dev: `Run-Iris-Dev.cmd` ->
+	`dev_run.ps1 -Mode ui|console|tests` (`-Bootstrap` creates `.venv`). Release:
+	`deploy_phase4.ps1` then `Launch-Iris.cmd`. **Fixed 2026-09-12:** `dev_run.ps1 -Bootstrap` was
+	still installing from `core\requirements.txt` and `ui\requirements.txt`, both removed on
+	09-10, so a fresh dev box could not bootstrap; it reads the one root file now. Still to do: the
+	service host's install and start belong in the same two scripts.
 - [~] Config: one schema, validated on load, clear errors, no secrets (10). **Fixed 2026-09-12:**
 	`ConfigLoader.load()` returned only the keys it normalized, so five configured sections --
 	`mcp_servers`, `notifications`, `knowledge`, `web`, `metrics_path` -- were read from
 	`config.json` and then silently dropped before anything could use them. The git MCP server
 	(2.3) never started and quiet hours (8.2) never applied, both from this. They are passed
 	through now, along with `permissions` and `http` (10). A real schema is still to come.
-- [ ] Document the data directory layout, and add migrations for the SQLite databases.
-- [ ] Back up `Data/` — memory, sessions, audit, index — and test a restore.
-- [ ] SQLite durability for `knowledge.db` and `conversations.db` — decided 2026-09-10, stdlib only:
-	switch `journal_mode` from DELETE to WAL (Data/ is on a local, unsynced drive, so WAL is safe);
-	run `PRAGMA quick_check` on startup and refuse to write to a database that fails it;
-	take a consistent online copy with `sqlite3.Connection.backup()` on a schedule and before every
-	schema migration, keeping a bounded number of copies. The hand-rolled `SCHEMA_VERSION` ladder
-	stays; Alembic/yoyo would be more machinery than problem.
+- [~] Document the data directory layout, and add migrations for the SQLite databases. The layout,
+	as of 2026-09-12 (every path configurable, these are the defaults under `Data\`):
+	`Memory\` (profile JSON, `conversations.db`, `knowledge.db` and its `.usearch` indexes),
+	`Sessions\` (session JSON, `agent_checkpoints.db`), `Proposals\`, `Audit\` (`audit.jsonl`,
+	`notifications.jsonl`, the two pre-unification files as history), `Index\documents.db` and
+	its `.usearch` index, `Metrics\metrics.db`, `Configuration\` (watchers, schedules, secrets
+	index, synonyms), `Backups\<stamp>\`, `logs\iris.jsonl`. Migrations: `knowledge.db` has the
+	`SCHEMA_VERSION` ladder with a copy taken first; the other three create-if-missing and have
+	not needed a migration yet.
+- [x] Back up `Data/` — memory, sessions, audit, index — and test a restore. **Built 2026-09-12:**
+	`core/storage/backups.py` writes one dated run under `Data\Backups\` -- the four databases
+	(knowledge, conversations, documents, metrics) through the backup API, each copy re-checked;
+	Memory, Sessions, Configuration and Audit as folder copies, with live `.db` files skipped there
+	because a plain copy of an open database can be torn -- and keeps the newest seven
+	(`backups.keep`). Runs daily at 03:00 as a scheduled job (8.2) and on demand with
+	`/backup now`. `/backup restore [run]` puts a run back: the live files are set aside as
+	`.before-restore-<stamp>` rather than overwritten, stale WAL sidecars are removed so SQLite
+	cannot replay an old journal onto the restored file, and a copy that fails its own quick_check
+	is refused. The restore is a test, not an assumption: `core/tests/test_storage_durability.py`
+	deletes the rows, restores, and reads them back.
+- [x] SQLite durability for `knowledge.db` and `conversations.db` — decided 2026-09-10, **built
+	2026-09-12**, stdlib only, in the one wrapper every database already goes through
+	(`core/storage/sqlite_database.py`): `journal_mode` is WAL with `synchronous=NORMAL` (Data/ is
+	on a local, unsynced drive, so WAL is safe); `PRAGMA quick_check` runs on the first connection
+	and a database that fails it is opened read-only from then on -- reads still answer, writes
+	raise, the log says which file and why; `backup_to()` takes a consistent online copy with
+	`Connection.backup()`, checkpointed into a self-contained DELETE-mode file. `knowledge.db` is
+	copied beside itself as `knowledge.before-vN.db` before its `SCHEMA_VERSION` ladder moves, and
+	never for a fresh file. Alembic/yoyo would still be more machinery than problem.
 - [ ] An update mechanism that does not lose data or config.
 - [ ] Resource limits: do not hold the GPU or thrash the disk while the user is working.
 - [ ] Health check: what is up, which model is loaded, what is indexed, what is broken.

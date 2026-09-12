@@ -28,10 +28,9 @@ if (-not (Test-Path $venvPython)) {
         throw "Failed to create .venv with py -3.11"
     }
 
-    Write-Host "Installing base dependencies..."
+    Write-Host "Installing dependencies from the one requirements.txt..."
     & $venvPython -m pip install --upgrade pip
-    & $venvPython -m pip install -r (Join-Path $appRoot "core\requirements.txt")
-    & $venvPython -m pip install -r (Join-Path $appRoot "ui\requirements.txt")
+    & $venvPython -m pip install -r (Join-Path $appRoot "requirements.txt")
 }
 
 if ($ConfigPath) {
