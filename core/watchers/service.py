@@ -38,6 +38,7 @@ class WatcherService:
             self.notifiers["inbox"] = self.inbox
         self.quiet_hours = quiet_hours or QuietHours()
         self.context = context or WatcherContext()
+        self.listeners: list[Any] = []
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._definitions: dict[str, WatcherDefinition] = {}
         self._states: dict[str, WatcherState] = {}
@@ -338,6 +339,11 @@ class WatcherService:
         if final.deferred:
             with self._lock:
                 self._digest.append(final)
+        for listener in list(self.listeners):
+            try:
+                listener(final)
+            except Exception as error:
+                logger.warning("Watcher listener failed for %s: %s", definition.label, error)
         return final
 
     def missed(self) -> list[Notification]:

@@ -14,22 +14,6 @@ from pathlib import Path
 from typing import Any
 
 
-from core.actions.audit import ActionAuditLogger
-from core.actions.executor import ActionExecutionContext, ActionExecutor, SystemAdapter
-from core.actions.implementations.add_document_root import AddDocumentRootAction
-from core.actions.implementations.clipboard import ClipboardAction
-from core.actions.implementations.fetch_web_page import FetchWebPageAction
-from core.actions.implementations.system_info import SYSTEM_ACTIONS
-from core.actions.implementations.launch_application import LaunchApplicationAction
-from core.actions.implementations.open_file import OpenFileAction
-from core.actions.implementations.open_folder import OpenFolderAction, ShowInExplorerAction
-from core.actions.implementations.open_url import OpenUrlAction
-from core.actions.implementations.scan_document_root import ScanDocumentRootAction
-from core.actions.implementations.update_config import UpdateConfigAction
-from core.actions.implementations.update_profile import UpdateProfileAction
-from core.actions.models import ApplicationConfig
-from core.actions.policy import ActionPolicy
-from core.actions.registry import ActionRegistry
 from core.application.contracts import (
     IrisEvent,
     ActionSuggestion,
@@ -55,10 +39,12 @@ from core.assistant.intent_router import IntentRouter
 from core.assistant.memory_commands import MemoryCommandHandler
 from core.assistant.models_command import ModelsCommandHandler
 from core.assistant.permissions_command import PermissionsCommandHandler
+from core.actions.bootstrap import build_action_layer
 from core.actions.changes import ChangeLedger
 from core.assistant.backup_command import BackupCommandHandler
 from core.assistant.changes_command import ChangesCommandHandler
 from core.assistant.stop_command import StopCommandHandler
+from core.assistant.workflow_command import WorkflowCommandHandler
 from core.assistant.schedule_command import ScheduleCommandHandler
 from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
@@ -118,7 +104,6 @@ from core.tools.models import PermissionLevel, ToolDefinition, ToolKind
 from core.permissions.policy import PermissionPolicy
 from core.permissions.secrets import SecretStore
 from core.tools.audit import ToolAuditor
-from core.tools.registry import ToolRegistry
 from core.host.health import HOST_DESKTOP, HOST_SERVICE, health_report
 from core.host.service import probe_host
 from core.server.app import DEFAULT_HOST, DEFAULT_PORT
@@ -131,8 +116,10 @@ from core.scheduler.service import ScheduleService
 from core.watchers import InboxNotifier, LogNotifier, QuietHours, ToastNotifier, WatcherService
 from core.watchers.checks import register_kinds
 from core.watchers.knowledge_checks import KNOWLEDGE_KINDS
-from core.watchers.models import WatcherContext
-from core.web.fetch import PageFetcher
+from core.watchers.models import Notification, WatcherContext
+from core.workflows.invokers import agent_invoker, executor_confirmer, executor_previewer
+from core.workflows.runner import WorkflowRunner
+from core.workflows.service import WorkflowService
 
 import structlog
 
@@ -199,6 +186,7 @@ class IrisApplication:
         self.backup_handler: CommandHandler = _NoopCommandHandler()
         self.changes_handler: CommandHandler = _NoopCommandHandler()
         self.stop_handler: CommandHandler = _NoopCommandHandler()
+        self.workflow_handler: CommandHandler = _NoopCommandHandler()
         self.last_request_id: str | None = None
         self.attached_host: dict[str, Any] | None = None
 
@@ -412,72 +400,28 @@ class IrisApplication:
         search_context = SearchResultContext(ttl_minutes=30)
         self.search_handler = SearchCommandHandler(document_search_service, search_context=search_context, output=self._sink)
 
-        applications_cfg = self.config.get("applications", {}) if isinstance(self.config, dict) else {}
-        application_map: dict[str, ApplicationConfig] = {}
-        alias_map: dict[str, str] = {}
-        for app_id, payload in applications_cfg.items():
-            if not isinstance(payload, dict):
-                continue
-            app = ApplicationConfig(
-                id=app_id,
-                display_name=str(payload.get("display_name", app_id)),
-                executable=str(payload.get("executable", "")),
-                aliases=[str(item).lower() for item in payload.get("aliases", []) if str(item).strip()],
-            )
-            application_map[app_id] = app
-            alias_map[app_id.lower()] = app_id
-            alias_map[app.display_name.lower()] = app_id
-            for alias in app.aliases:
-                alias_map[alias] = app_id
-
-        self.tool_registry = ToolRegistry()
-        action_registry = ActionRegistry(self.tool_registry)
-        action_registry.register(OpenFileAction())
-        action_registry.register(OpenFolderAction())
-        action_registry.register(ShowInExplorerAction())
-        action_registry.register(LaunchApplicationAction())
-        action_registry.register(OpenUrlAction())
-        action_registry.register(ClipboardAction())
-        action_registry.register(AddDocumentRootAction())
-        action_registry.register(ScanDocumentRootAction())
-        action_registry.register(UpdateConfigAction())
-        action_registry.register(UpdateProfileAction())
-        web_cfg = self.config.get("web", {}) if isinstance(self.config.get("web"), dict) else {}
-        self.page_fetcher = PageFetcher(
-            user_agent=str(web_cfg.get("user_agent") or (self.config.get("general_knowledge", {}) or {}).get("user_agent") or "Iris/1.0 (local desktop assistant)"),
-            timeout_seconds=float(web_cfg.get("timeout_seconds", 15.0)),
-            max_bytes=int(web_cfg.get("max_bytes", 3_000_000)),
-            cache_ttl_seconds=float(web_cfg.get("cache_ttl_seconds", 600.0)),
-        )
-        action_registry.register(FetchWebPageAction(self.page_fetcher))
-        for system_action in SYSTEM_ACTIONS:
-            action_registry.register(system_action())
-
-        action_audit = ActionAuditLogger(self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit")
         self.permissions = PermissionPolicy.from_config(
             self.config.get("permissions"),
             default_allowed_paths=[],
             audit=self.audit_stream,
         )
         self.changes = ChangeLedger(Path(self.config["memory_path"]).parent / "Backups" / "undo", audit=self.audit_stream)
-        self.action_executor = ActionExecutor(
-            registry=action_registry,
-            policy=ActionPolicy(),
-            audit=action_audit,
+        action_layer = build_action_layer(
+            self.config,
+            catalog=document_catalog,
+            audit_folder=self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit",
             permissions=self.permissions,
             ledger=self.changes,
-            context=ActionExecutionContext(
-                catalog=document_catalog,
-                allowed_roots=document_config.root_paths(),
-                applications=application_map,
-                app_alias_map=alias_map,
-                web_shortcuts=self.config.get("web_shortcuts", {}) if isinstance(self.config, dict) else {},
-                system=SystemAdapter(),
-                config_path=self.config_loader.config_path,
-                memory_path=Path(self.config["memory_path"]),
-                document_scanner=scanner,
-            ),
+            config_path=self.config_loader.config_path,
+            memory_path=Path(self.config["memory_path"]),
+            scanner=scanner,
+            document_config=document_config,
         )
+        self.tool_registry = action_layer.tool_registry
+        action_registry = action_layer.action_registry
+        self.page_fetcher = action_layer.page_fetcher
+        action_audit = action_layer.audit
+        self.action_executor = action_layer.executor
         self.application_catalog = ApplicationCatalog()
         document_roots = document_config.root_paths()
 
@@ -533,8 +477,23 @@ class IrisApplication:
         self.permissions_handler = PermissionsCommandHandler(
             self.permissions, self.secrets, audit=self.audit_stream, output=self._sink
         )
+        self.workflows = WorkflowService(
+            Path(self.config["memory_path"]).parent / "Workflows",
+            WorkflowRunner(
+                agent_invoker(self.coordinator, self.action_executor),
+                preview=executor_previewer(self.action_executor),
+                confirm=executor_confirmer(self.action_executor),
+                tool_version=self._tool_version,
+            ),
+            tool_version=self._tool_version,
+            audit=self.audit_stream,
+            notify=self._notify_workflow,
+        )
         self.watchers = self._build_watchers()
+        self.watchers.listeners.append(self.workflows.watcher_listener())
+        self.workflows.sync_schedules(self.schedules)
         self.watch_handler = WatchCommandHandler(self.watchers, output=self._sink)
+        self.workflow_handler = WorkflowCommandHandler(self.workflows, output=self._sink)
         self.schedule_handler = ScheduleCommandHandler(self.schedules, output=self._sink)
         self.backup_handler = BackupCommandHandler(self.backups, output=self._sink)
         self.changes_handler = ChangesCommandHandler(self.changes, output=self._sink)
@@ -707,6 +666,8 @@ class IrisApplication:
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.stop_handler, stripped, status, command_prefixes=("/stop", "/halt", "/resume")):
                 return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.workflow_handler, stripped, status, command_prefixes=("/workflow", "/workflows")):
+                return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.index_handler, stripped, IrisStatus.INDEXING, command_prefixes=("/index",)):
                 return self._build_response(IrisStatus.INDEXING, cancel_event)
             if self._handle_slash_command(self.search_handler, stripped, IrisStatus.SEARCHING, command_prefixes=("/search", "/file")):
@@ -822,7 +783,7 @@ class IrisApplication:
         self.schedules = ScheduleService(
             configuration / "schedules.json",
             configuration / "schedules_state.json",
-            build_jobs(review=self.knowledge_review, backups=self.backups),
+            build_jobs(review=self.knowledge_review, backups=self.backups, workflows=self.workflows),
             notifiers={**notifiers, "inbox": inbox},
             quiet_hours=quiet,
             audit=self.audit_stream,
@@ -867,6 +828,10 @@ class IrisApplication:
         if not self.permissions.halted:
             self.permissions.halt("Iris is stopped")
             halted.append("tools")
+        workflows = getattr(self, "workflows", None)
+        if workflows is not None and not workflows.halted:
+            workflows.halted = True
+            halted.append("workflows")
         remote = self._control_host("stop")
         if remote:
             halted.append(f"the Iris service ({', '.join(remote)})")
@@ -884,11 +849,33 @@ class IrisApplication:
         if self.permissions.halted:
             self.permissions.release()
             released.append("tools")
+        workflows = getattr(self, "workflows", None)
+        if workflows is not None and workflows.halted:
+            workflows.halted = False
+            released.append("workflows")
         remote = self._control_host("resume")
         if remote:
             released.append(f"the Iris service ({', '.join(remote)})")
         logger.info("iris released", released=released)
         return released
+
+    def _tool_version(self, name: str) -> str | None:
+        definition = self.tool_registry.get(name) if getattr(self, "tool_registry", None) is not None else None
+        return definition.version if definition is not None else None
+
+    def _notify_workflow(self, run: Any) -> None:
+        inbox = getattr(getattr(self, "watchers", None), "inbox", None)
+        if inbox is None:
+            return
+        inbox.send(
+            Notification(
+                watcher_id=run.workflow_id,
+                title=f"Workflow {run.workflow_name}: {run.status}",
+                body=run.note or run.summary,
+                kind="workflow",
+                created_at=run.finished_at or run.started_at,
+            )
+        )
 
     def _control_host(self, verb: str) -> list[str]:
         attached = getattr(self, "attached_host", None)

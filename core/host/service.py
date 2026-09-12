@@ -11,6 +11,8 @@ from typing import Any
 
 import structlog
 
+from core.actions.bootstrap import build_action_layer
+from core.actions.changes import ChangeLedger
 from core.conversation.persistent_memory.models import MemoryConfig
 from core.documents.catalog import DocumentCatalog
 from core.host.health import HOST_SERVICE, health_report
@@ -23,9 +25,12 @@ from core.storage.backups import DEFAULT_KEEP, BackupService
 from core.storage.sqlite_database import SQLiteDatabase
 from core.watchers.checks import register_kinds
 from core.watchers.knowledge_checks import KNOWLEDGE_KINDS
-from core.watchers.models import WatcherContext
+from core.watchers.models import Notification, WatcherContext
 from core.watchers.notify import InboxNotifier, LogNotifier, QuietHours
 from core.watchers.service import WatcherService
+from core.workflows.invokers import executor_confirmer, executor_invoker, executor_previewer
+from core.workflows.runner import WorkflowRunner
+from core.workflows.service import WorkflowService
 
 logger = structlog.get_logger(__name__)
 
@@ -128,8 +133,50 @@ class IrisHost:
             quiet_hours=quiet,
             audit=self.audit_stream,
         )
+        self.changes = ChangeLedger(self.data_root / "Backups" / "undo", audit=self.audit_stream)
+        action_layer = build_action_layer(
+            self.config,
+            catalog=self.document_catalog,
+            audit_folder=self.audit_stream.folder,
+            permissions=self.permissions,
+            ledger=self.changes,
+            config_path=self.config_path,
+            memory_path=Path(self.config["memory_path"]),
+        )
+        self.tool_registry = action_layer.tool_registry
+        self.action_executor = action_layer.executor
+        self.workflows = WorkflowService(
+            self.data_root / "Workflows",
+            WorkflowRunner(
+                executor_invoker(self.action_executor),
+                preview=executor_previewer(self.action_executor),
+                confirm=executor_confirmer(self.action_executor),
+                tool_version=self._tool_version,
+            ),
+            tool_version=self._tool_version,
+            audit=self.audit_stream,
+            notify=self._notify_workflow,
+        )
+        self.schedules.jobs.update(build_jobs(workflows=self.workflows))
         ensure_default_jobs(self.schedules)
+        self.workflows.sync_schedules(self.schedules)
+        self.watchers.listeners.append(self.workflows.watcher_listener())
         self.api = create_app(self) if serve_http else None
+
+    def _tool_version(self, name: str) -> str | None:
+        definition = self.tool_registry.get(name)
+        return definition.version if definition is not None else None
+
+    def _notify_workflow(self, run: Any) -> None:
+        self.watchers.inbox.send(
+            Notification(
+                watcher_id=run.workflow_id,
+                title=f"Workflow {run.workflow_name}: {run.status}",
+                body=run.note or run.summary,
+                kind="workflow",
+                created_at=run.finished_at or run.started_at,
+            )
+        )
 
     def health(self) -> dict[str, Any]:
         report = health_report(self, host=HOST_SERVICE)
@@ -148,6 +195,9 @@ class IrisHost:
         if not self.permissions.halted:
             self.permissions.halt("Iris is stopped")
             halted.append("tools")
+        if not self.workflows.halted:
+            self.workflows.halted = True
+            halted.append("workflows")
         logger.warning("iris host halted", halted=halted)
         return halted
 
@@ -162,6 +212,9 @@ class IrisHost:
         if self.permissions.halted:
             self.permissions.release()
             released.append("tools")
+        if self.workflows.halted:
+            self.workflows.halted = False
+            released.append("workflows")
         logger.info("iris host released", released=released)
         return released
 
@@ -195,10 +248,12 @@ class IrisHost:
 
     def _heartbeat(self) -> None:
         while not self._stop.wait(self.heartbeat_seconds):
-            for name, service in (("watchers", self.watchers), ("schedules", self.schedules)):
+            for name, service in (("watchers", self.watchers), ("schedules", self.schedules), ("workflows", self.workflows)):
                 try:
                     if service.reload_if_changed():
                         logger.info("reloaded definitions", service=name)
+                        if name == "workflows":
+                            self.workflows.sync_schedules(self.schedules)
                 except Exception as error:
                     logger.warning("reload failed", service=name, error=str(error))
 

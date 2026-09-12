@@ -211,6 +211,38 @@ class ActionExecutor:
         self._log(request, result, tool=tool_name)
         return result
 
+    def preview(self, request: ActionRequest) -> dict[str, Any]:
+        resolved = self.registry.resolve(request)
+        if resolved is None:
+            return {"status": "failed", "error": "unknown_action", "message": "Unknown action type"}
+        if not self.registry.is_enabled(request.action):
+            return {"status": "failed", "error": "tool_disabled", "message": f"Tool is disabled: {request.action}"}
+        if resolved.error:
+            return {"status": "failed", "error": "invalid_arguments", "message": f"Invalid arguments: {resolved.error}"}
+        validation = resolved.action.validate(resolved.request, self.context)
+        if not validation.ok:
+            return {"status": "failed", "error": validation.error, "message": validation.error or "Action validation failed"}
+        arguments = validation.resolved_arguments if validation.resolved_arguments is not None else resolved.request.arguments
+        validated = ActionRequest(action=resolved.request.action, arguments=arguments, source=request.source, reason=request.reason)
+        permission = self._permission_decision(resolved.definition, validated, validation.resolved_target)
+        if permission is not None and permission.denied:
+            return {"status": "failed", "error": "permission_denied", "message": f"Not allowed: {permission.reason}."}
+        preview = validation.confirmation_preview
+        text = self._describe_request(validated, validation.resolved_target)
+        diff = str((preview.metadata or {}).get("diff") or "").strip() if preview is not None else ""
+        needs_confirmation = validation.requires_confirmation or any(
+            self.policy.requires_confirmation(resolved.request, definition) for definition in (resolved.definition,)
+        ) or bool(permission is not None and permission.requires_confirmation)
+        return {
+            "status": "preview",
+            "message": text,
+            "target": validation.resolved_target,
+            "changes": list(validation.changes),
+            "requires_confirmation": needs_confirmation,
+            "irreversible": bool(getattr(resolved.definition, "irreversible", False)),
+            "preview": diff or (preview.after if preview is not None else None),
+        }
+
     def confirm_pending(self) -> ActionResult:
         if self._pending_action is None:
             return ActionResult(

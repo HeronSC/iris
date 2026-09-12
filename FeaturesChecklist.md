@@ -156,15 +156,20 @@ single feature is what made those features look larger than they are.
 - [x] Let Iris choose appropriate tools. -> native tool-calling in `intent_router._classify`
 - [x] Declare each tool's permission level — read, write, execute. Enforcement lives in 10.
 	Declared on every tool; MCP tools derive it from their annotations.
-- [ ] Support dry-run / preview for any tool that writes.
+- [x] Support dry-run / preview for any tool that writes. **Built 2026-09-12:**
+	`ActionExecutor.preview()` validates, asks the policy, and returns the target, the files that
+	would be written, the diff and whether it would ask -- without running. Workflows dry-run
+	through it.
 - [ ] Give tools a uniform error and timeout contract, and make long-running tools cancellable.
 - [x] Log every tool invocation and result (2.8). **Closed 2026-09-12:** the audit happens at
 	the agent's dispatch point (`core/agent/graph.py` -> `core/tools/audit.py`), so command tools
 	and knowledge providers are recorded the same way actions and MCP calls already were, and a
 	tool nobody has written yet is covered by construction. Actions keep the executor's own entry
 	rather than getting a second line: it knows the resolved target and the confirmation.
-- [~] Version tools, so a saved workflow (8.3) does not silently change meaning. A `version`
-	field exists on the definition; nothing reads it yet.
+- [x] Version tools, so a saved workflow (8.3) does not silently change meaning. **Closed
+	2026-09-12:** a saved workflow pins the version of every tool it uses and is blocked, with the
+	change named, when one has moved; `/workflow rebase` accepts it. Bump `version` on a tool
+	when its meaning changes, and the workflows that use it will say so.
 - [x] Let a tool be disabled or sandboxed without removing it. -> `/tools disable <name>`
 - [ ] Ensure future tools can be added without redesign — a new app integration (4) should be a
 	plugin, not a core change.
@@ -781,19 +786,48 @@ rules out every hosted speech API, which leaves a short, good list.
 
 ### 8.3 Workflow Automation
 
-- [ ] Chain tools into workflows.
-- [ ] Support patterns like:
+- [x] Chain tools into workflows. **Built 2026-09-12:** `core/workflows/`. A workflow is steps,
+	each naming a tool from the registry (2.3) and its arguments; an argument can read the
+	trigger (`{{trigger.url}}`) or an earlier step's result (`{{steps.fetch.first.text}}`, or a
+	`save_as` name), so one step feeds the next without prose in between.
+- [x] Support patterns like:
 	detect event -> gather info -> analyze -> store result -> notify.
-- [ ] Triggers: manual, scheduled, and event-driven.
-- [ ] Handle failure explicitly: retry, timeout, partial completion, and what to do about each.
-- [ ] Support a human approval step mid-workflow (10).
-- [ ] Dry-run a workflow before enabling it.
-- [ ] Store workflows as data — versioned, editable, and disableable.
-- [ ] Add reusable workflows over time.
-- [ ] Keep this built on the plugin/tool architecture (2.3), not as a separate automation stack.
-- [ ] **Decided 2026-09-10:** in-house on the tool layer, with `APScheduler` (8.2) supplying the
-	scheduled and interval triggers and event triggers coming from watchers and MQTT (9.1).
-	n8n and Node-RED passed over; a visual editor has not been asked for.
+	That shape is a watcher trigger, `fetch_web_page`, the model or a capability, `observe` over
+	MCP or the knowledge tools, and a notification -- each an existing tool. The test suite runs
+	exactly that chain.
+- [x] Triggers: manual, scheduled, and event-driven. `/workflow run`, a `schedule` trigger
+	(cron or interval) that becomes a scheduled job (8.2) and follows the workflow when it is
+	saved, changed, disabled or removed, and a `watcher` trigger naming a watcher id or kind, run
+	with the alert as its payload when that watcher fires.
+- [x] Handle failure explicitly: retry, timeout, partial completion, and what to do about each.
+	Per step: `on_failure` is `stop` (the run fails there), `continue` (the run finishes
+	`partial`) or `retry` (up to `retries`, backing off); `timeout_seconds` fails a step that does
+	not return; every attempt and its time are in the run record; a failed, partial or blocked
+	run lands in the inbox.
+- [x] Support a human approval step mid-workflow (10). A step marked `approve` stops the run
+	as `awaiting_approval` with everything before it kept; `/workflow approve <run>` runs it and
+	the rest. A tool that asks for confirmation on its own does the same, so a workflow never
+	confirms anything a person did not.
+- [x] Dry-run a workflow before enabling it. `/workflow dry-run <id>` renders every step's
+	arguments and asks the executor what it *would* do -- the target, the files it would write,
+	the diff, whether it would ask -- and runs nothing. The same `executor.preview()` closes the
+	2.3 item on dry-run for any tool that writes.
+- [x] Store workflows as data — versioned, editable, and disableable. One JSON file per workflow
+	under `Data\Workflows\`, edited by hand and picked up on change; the version bumps when the
+	content changes; `enable`/`disable` keeps the file. Each file pins the version of every tool it
+	uses, and a run is blocked -- not silently different -- when a tool has changed since, until
+	`/workflow rebase` accepts the new versions. That is the 2.3 item on tool versioning, closed.
+- [~] Add reusable workflows over time. `/workflow new <name> <tool> ...` writes a skeleton to
+	edit. None shipped yet; the first candidates are the trading morning (13.1) and a page-to-memory
+	clip.
+- [x] Keep this built on the plugin/tool architecture (2.3), not as a separate automation stack.
+	A step is a registry tool run through the same executor, permissions (10), change ledger and
+	audit (2.8) as a spoken request; the host and the window build that tool set from one place
+	(`core/actions/bootstrap.py`), so a workflow runs the same either side. Capability tools
+	(weather, news) live with the model in the window; a workflow using them runs there.
+- [x] **Decided 2026-09-10, built 2026-09-12:** in-house on the tool layer, with `APScheduler`
+	(8.2) supplying the scheduled and interval triggers and event triggers coming from watchers
+	(MQTT joins with 9.1). n8n and Node-RED passed over; a visual editor has not been asked for.
 
 ---
 

@@ -14,6 +14,8 @@ HYPOTHESIS_REVIEW = "hypothesis_review"
 
 DATABASE_BACKUP = "database_backup"
 
+WORKFLOW_RUN = "workflow_run"
+
 
 def hypothesis_review(review: Any) -> Callable[[dict[str, Any]], JobResult]:
     def run(params: dict[str, Any]) -> JobResult:
@@ -72,13 +74,35 @@ def database_backup(backups: Any) -> Callable[[dict[str, Any]], JobResult]:
     return run
 
 
-def build_jobs(review: Any | None = None, backups: Any | None = None) -> dict[str, Callable[[dict[str, Any]], JobResult]]:
+def workflow_run(workflows: Any) -> Callable[[dict[str, Any]], JobResult]:
+    def run(params: dict[str, Any]) -> JobResult:
+        workflow_id = str(params.get("workflow_id") or "").strip()
+        if not workflow_id:
+            return JobResult(ok=False, summary="workflow_run needs workflow_id")
+        run_record = workflows.run(workflow_id, payload={"scheduled": True}, trigger="schedule")
+        if run_record is None:
+            return JobResult(ok=False, summary=f"No enabled workflow matches {workflow_id}")
+        return JobResult(
+            ok=run_record.status in {"success", "awaiting_approval"},
+            summary=run_record.summary,
+            data={"run_id": run_record.id, "status": run_record.status},
+            notify=run_record.status in {"failed", "partial", "blocked"},
+        )
+
+    return run
+
+
+def build_jobs(
+    review: Any | None = None, backups: Any | None = None, workflows: Any | None = None
+) -> dict[str, Callable[[dict[str, Any]], JobResult]]:
     jobs: dict[str, Callable[[dict[str, Any]], JobResult]] = {}
     if review is not None:
         jobs[HYPOTHESIS_REVIEW] = hypothesis_review(review)
     if backups is not None:
         jobs[DATABASE_BACKUP] = database_backup(backups)
+    if workflows is not None:
+        jobs[WORKFLOW_RUN] = workflow_run(workflows)
     return jobs
 
 
-__all__ = ["DATABASE_BACKUP", "HYPOTHESIS_REVIEW", "build_jobs", "database_backup", "hypothesis_review"]
+__all__ = ["DATABASE_BACKUP", "HYPOTHESIS_REVIEW", "WORKFLOW_RUN", "build_jobs", "database_backup", "hypothesis_review", "workflow_run"]
