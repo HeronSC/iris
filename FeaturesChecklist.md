@@ -531,18 +531,32 @@ An adapter is only as trustworthy as its undo. Read-only ships first in every ca
 
 ### 4.1 Excel
 
-- [ ] Detect active workbook — via 3.1, not a separate mechanism.
-- [ ] Inspect sheets, formulas, tables, named ranges, and pivot tables.
-- [ ] Read a closed workbook without opening Excel.
+- [x] Detect active workbook — via 3.1, not a separate mechanism. **Built 2026-09-12:** the
+	Excel tools take the workbook the context service saw (path, sheet, selection), then Excel's
+	own active workbook, then a name of an open workbook, then a path on disk inside the document
+	roots.
+- [x] Inspect sheets, formulas, tables, named ranges, and pivot tables. **Built 2026-09-12:**
+	`core/excel/live.py` over COM (`GetActiveObject`, never `Dispatch`): sheets with used-range
+	size, ListObjects, pivot counts, hidden and protected flags, defined names, active sheet and
+	selection, unsaved and read-only state. Tools: `excel_workbook`, `excel_read` (values and
+	formulas of a sheet, range, table or name, as a table result), `excel_find` (cells containing
+	text), `excel_check` (cells showing #REF!, #DIV/0!, #N/A and the rest, with the formula behind
+	each). Error cells arrive from COM as integer codes and are mapped to their names.
+- [x] Read a closed workbook without opening Excel. `core/excel/closed.py` over `openpyxl`, the
+	same four tools. Error checking on a closed file needs Excel to have saved cached values; a
+	file written by a library and never opened reports none, and the tool says so only implicitly
+	(worth a note in the result later).
 - [ ] Make controlled edits.
 - [ ] Validate changes: recalculate, compare before and after, check for new errors.
 - [ ] Add backup and undo protection (10).
-- [ ] Handle the awkward cases explicitly: unsaved changes, protected sheets, a workbook the user
-	is actively typing in, files locked by OneDrive.
-- [ ] **Decided 2026-09-10:** the live workbook is reached through Excel COM via `pywin32` (already
+- [~] Handle the awkward cases explicitly: unsaved changes, protected sheets, a workbook the user
+	is actively typing in, files locked by OneDrive. Unsaved changes, read-only and protected
+	sheets are reported; a locked file gives a clear message; a workbook being typed in is not
+	detected yet (COM calls simply wait for Excel).
+- [x] **Decided 2026-09-10, built 2026-09-12:** the live workbook is reached through Excel COM via `pywin32` (already
 	in the venv; verified against Excel 16). Attach to the running instance with `GetActiveObject`,
 	never `Dispatch`, or Iris starts a second hidden Excel.
-- [ ] **Decided 2026-09-10:** closed files go through `openpyxl`. The hand-rolled `zipfile` +
+- [x] **Decided 2026-09-10, built 2026-09-12:** closed files go through `openpyxl`. The hand-rolled `zipfile` +
 	`ElementTree` extractor is replaced — shared strings, merged cells, cached values vs formulas,
 	date serials, tables, and named ranges are exactly what a mature library has already handled.
 	Passed over: `excel-mcp-server` (a thin community wrapper on openpyxl), pandas (heavier, and

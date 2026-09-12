@@ -68,6 +68,7 @@ class ActionExecutionContext:
     code_service: Any = None
     project_service: Any = None
     active_project_id: Any = None
+    excel_service: Any = None
 
 
 @dataclass(frozen=True)

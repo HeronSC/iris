@@ -13,6 +13,7 @@ from core.actions.implementations.add_document_root import AddDocumentRootAction
 from core.actions.implementations.clipboard import ClipboardAction
 from core.actions.implementations.active_context import ActiveContextAction
 from core.actions.implementations.code_tools import CODE_ACTIONS
+from core.actions.implementations.excel_tools import EXCEL_ACTIONS
 from core.actions.implementations.project_tools import PROJECT_ACTIONS
 from core.actions.implementations.fetch_web_page import FetchWebPageAction
 from core.actions.implementations.web_search import WebSearchAction
@@ -32,6 +33,7 @@ from core.permissions.policy import PermissionPolicy
 from core.tools.registry import ToolRegistry
 from core.web.fetch import PageFetcher
 from core.web.search import DEFAULT_SEARCH_URL, SearchClient
+from core.excel import ExcelService
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,10 @@ def page_fetcher_from(config: dict[str, Any]) -> PageFetcher:
     )
 
 
+def documents_roots_for(config: dict[str, Any]) -> list[Path]:
+    return document_search_config(config).root_paths()
+
+
 def search_client_from(config: dict[str, Any]) -> SearchClient:
     web_cfg = config.get("web", {}) if isinstance(config.get("web"), dict) else {}
     general = config.get("general_knowledge", {}) if isinstance(config.get("general_knowledge"), dict) else {}
@@ -117,6 +123,7 @@ def build_action_layer(
     code_service: Any = None,
     project_service: Any = None,
     active_project_id: Any = None,
+    excel_service: Any = None,
 ) -> ActionLayer:
     registry_of_tools = tool_registry or ToolRegistry()
     action_registry = ActionRegistry(registry_of_tools)
@@ -141,6 +148,10 @@ def build_action_layer(
         action_registry.register(code_action())
     for project_action in PROJECT_ACTIONS:
         action_registry.register(project_action())
+    if excel_service is None:
+        excel_service = ExcelService(documents_roots_for(config), context_service=context_service)
+    for excel_action in EXCEL_ACTIONS:
+        action_registry.register(excel_action())
     for system_action in SYSTEM_ACTIONS:
         action_registry.register(system_action())
 
@@ -167,6 +178,7 @@ def build_action_layer(
             code_service=code_service,
             project_service=project_service,
             active_project_id=active_project_id,
+            excel_service=excel_service,
         ),
     )
     return ActionLayer(
