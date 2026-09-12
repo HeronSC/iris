@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS memories (
     occurred_at TEXT,
     created_at TEXT NOT NULL,
     supersedes TEXT REFERENCES memories(id),
-    superseded_by TEXT REFERENCES memories(id)
+    superseded_by TEXT REFERENCES memories(id),
+    scope TEXT NOT NULL DEFAULT 'global'
 );
 
 -- Retrieval filters in SQL before it scores anything in Python, so the indexes
@@ -131,7 +132,7 @@ def _copy_before_migration(database: SQLiteDatabase) -> Path | None:
     return copy
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -140,6 +141,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
     if current < 2:
         conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+
+    if current < 3:
+        columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(memories)").fetchall()}
+        if "scope" not in columns:
+            conn.execute("ALTER TABLE memories ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope, created_at DESC)")
 
     if current != SCHEMA_VERSION:
         conn.execute(

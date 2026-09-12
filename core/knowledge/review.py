@@ -104,13 +104,15 @@ class KnowledgeReviewWorkflow:
         )
 
     def close(self, observation_id: str, content: str, *, source: str) -> MemoryRecord:
+        observation = self._observation(observation_id)
         return self.graph.record_outcome(
             observation_id,
             MemoryRecord(
                 kind=MemoryKind.OUTCOME,
-                topic=self._observation(observation_id).topic,
+                topic=observation.topic,
                 content=content,
                 source=source,
+                scope=observation.scope,
             ),
         )
 

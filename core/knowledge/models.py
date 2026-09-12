@@ -1,3 +1,5 @@
+# File: core/knowledge/models.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,13 +14,6 @@ class KnowledgeError(ValueError):
 
 
 class MemoryKind(str, Enum):
-    """What sort of thing a record is.
-
-    The distinction that matters is epistemic: FACT is "we hold this to be
-    true", OBSERVATION is "we saw this at a point in time", HYPOTHESIS is
-    "we think this may be true", KNOWLEDGE is "we accumulated enough
-    evidence to reason with this".
-    """
 
     FACT = "fact"
     OBSERVATION = "observation"
@@ -38,9 +33,6 @@ class MemoryStatus(str, Enum):
     SUPERSEDED = "superseded"
 
 
-#: The status a record starts in when the caller does not name one. A thing we
-#: saw is "observed" on arrival; a thing we merely think is "proposed" and has
-#: to earn its way forward.
 DEFAULT_STATUS: dict[MemoryKind, MemoryStatus] = {
     MemoryKind.FACT: MemoryStatus.ACCEPTED,
     MemoryKind.OBSERVATION: MemoryStatus.OBSERVED,
@@ -57,13 +49,6 @@ def utc_now_iso() -> str:
 
 @dataclass(frozen=True)
 class MemoryRecord:
-    """One durable thing Iris knows, saw, decided, or suspects.
-
-    Records are append-only. Content never changes: a revision is a new
-    record that supersedes the old one, so that the reasoning behind a past
-    conclusion stays reconstructable. Only ``status`` and ``superseded_by``
-    are ever updated in place.
-    """
 
     kind: MemoryKind
     topic: str
@@ -74,12 +59,11 @@ class MemoryRecord:
     confidence: float | None = None
     source: str = "unknown"
     source_ref: str | None = None
-    #: When the thing described actually happened, if that differs from when
-    #: the record was written. A candidate seen at 10:04 is stored later.
     occurred_at: str | None = None
     created_at: str = field(default_factory=utc_now_iso)
     supersedes: str | None = None
     superseded_by: str | None = None
+    scope: str = "global"
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, MemoryKind):
@@ -113,4 +97,5 @@ class MemoryRecord:
             "created_at": self.created_at,
             "supersedes": self.supersedes,
             "superseded_by": self.superseded_by,
+            "scope": self.scope or "global",
         }

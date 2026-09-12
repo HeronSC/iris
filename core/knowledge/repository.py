@@ -14,7 +14,7 @@ from core.storage.sqlite_database import SQLiteDatabase
 
 MEMORY_COLUMNS = (
     "id, kind, topic, status, content, data_json, confidence, source, "
-    "source_ref, occurred_at, created_at, supersedes, superseded_by"
+    "source_ref, occurred_at, created_at, supersedes, superseded_by, scope"
 )
 
 _ID_CHECK_CHUNK = 400
@@ -44,7 +44,7 @@ class KnowledgeRepository:
                 conn.executemany(
                     f"INSERT INTO memories (sequence, {MEMORY_COLUMNS}) VALUES "
                     "(:sequence, :id, :kind, :topic, :status, :content, :data_json, :confidence, "
-                    ":source, :source_ref, :occurred_at, :created_at, :supersedes, :superseded_by)",
+                    ":source, :source_ref, :occurred_at, :created_at, :supersedes, :superseded_by, :scope)",
                     rows,
                 )
             except sqlite3.IntegrityError as error:
@@ -162,6 +162,11 @@ class KnowledgeRepository:
             ).fetchall()
         return [record_from_row(row) for row in rows]
 
+    def count_by_scope(self) -> dict[str, int]:
+        with self.database.connect() as conn:
+            rows = conn.execute("SELECT scope, COUNT(*) FROM memories WHERE status != 'superseded' GROUP BY scope ORDER BY scope").fetchall()
+        return {str(row[0]): int(row[1]) for row in rows}
+
     def count(self) -> int:
         with self.database.connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0])
@@ -211,7 +216,7 @@ def _insert(conn: Any, record: MemoryRecord) -> None:
         conn.execute(
             f"INSERT INTO memories (sequence, {MEMORY_COLUMNS}) VALUES "
             "(:sequence, :id, :kind, :topic, :status, :content, :data_json, :confidence, :source, "
-            ":source_ref, :occurred_at, :created_at, :supersedes, :superseded_by)",
+            ":source_ref, :occurred_at, :created_at, :supersedes, :superseded_by, :scope)",
             row,
         )
     except sqlite3.IntegrityError as error:
@@ -237,6 +242,7 @@ def record_from_row(row: Any) -> MemoryRecord:
         created_at=str(row["created_at"]),
         supersedes=row["supersedes"],
         superseded_by=row["superseded_by"],
+        scope=str(row["scope"]) if "scope" in row.keys() and row["scope"] else "global",
     )
 
 
@@ -255,6 +261,7 @@ def _replace(record: MemoryRecord, **changes: Any) -> MemoryRecord:
         "created_at": record.created_at,
         "supersedes": record.supersedes,
         "superseded_by": record.superseded_by,
+        "scope": record.scope,
     }
     values.update(changes)
     return MemoryRecord(**values)

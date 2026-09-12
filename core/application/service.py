@@ -46,6 +46,7 @@ from core.assistant.changes_command import ChangesCommandHandler
 from core.assistant.context_command import ContextCommandHandler
 from core.assistant.stop_command import StopCommandHandler
 from core.code import CodeService
+from core.knowledge.scopes import resolve_scope, visible_scopes
 from core.projects import ProjectService
 from core.context import build_context_service
 from core.assistant.corrections_command import CorrectionsCommandHandler
@@ -284,7 +285,7 @@ class IrisApplication:
         recall_enabled = bool((knowledge_cfg.get("enabled", {}) or {}).get("recall", True))
         if recall_enabled:
             self.coordinator.general_knowledge_router.register(
-                KnowledgeRecallProvider(self.knowledge_retriever)
+                KnowledgeRecallProvider(self.knowledge_retriever, scopes=self._visible_scopes)
             )
 
         self.project_service = ProjectService(Path(self.config["memory_path"]), store=self.store)
@@ -304,6 +305,7 @@ class IrisApplication:
             actor=str(self.config.get("assistant_user", "user")),
             embeddings=self.embedding_index,
             export_folder=Path(self.config["memory_path"]).parent / "Exports",
+            scope_resolver=self._resolve_scope,
         )
         proposal_generator = MemoryProposalGenerator(self.ollama_client)
         reviewer = MemoryProposalReviewer()
@@ -1415,6 +1417,21 @@ class IrisApplication:
             details=details,
             metadata=metadata,
         )
+
+    def _active_session_id(self) -> str | None:
+        manager = getattr(self, "session_manager", None)
+        session = manager.get_active_session() if manager is not None else None
+        return getattr(session, "id", None) if session is not None else None
+
+    def _visible_scopes(self) -> tuple[str, ...]:
+        state = getattr(self, "state", None)
+        project_id = state.get("active_project_id") if isinstance(state, dict) else None
+        return visible_scopes(project_id, self._active_session_id())
+
+    def _resolve_scope(self, word: str | None) -> str:
+        state = getattr(self, "state", None)
+        project_id = state.get("active_project_id") if isinstance(state, dict) else None
+        return resolve_scope(word, project_id=project_id, session_id=self._active_session_id())
 
     def _activity_summary(self) -> dict[str, Any]:
         handler = getattr(self, "why_handler", None)

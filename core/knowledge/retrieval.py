@@ -32,6 +32,8 @@ class KnowledgeQuery:
     limit: int = 10
     max_tokens: int | None = None
     minimum_text_match: float = 0.01
+    scopes: tuple[str, ...] = ()
+    scope_weight: float = 0.08
 
 
 @dataclass(frozen=True)
@@ -87,7 +89,16 @@ class KnowledgeRetriever:
             candidates.extend(extra)
         query_tokens = tokenize(query.text)
         scored = sorted(
-            (score(record, query_tokens, now=now, semantic=semantic.get(record.id)) for record in candidates),
+            (
+                score(
+                    record,
+                    query_tokens,
+                    now=now,
+                    semantic=semantic.get(record.id),
+                    scope_bonus=query.scope_weight if query.scopes and record.scope != "global" and record.scope in query.scopes else 0.0,
+                )
+                for record in candidates
+            ),
             key=lambda item: (-item.score, item.record.created_at),
         )
         relevant = scored
@@ -193,6 +204,10 @@ def _filters(query: KnowledgeQuery, *, table: str = "") -> tuple[list[str], list
     elif not query.include_superseded:
         clauses.append(f"{at}status != ?")
         params.append(MemoryStatus.SUPERSEDED.value)
+
+    if query.scopes:
+        clauses.append(f"{at}scope IN ({', '.join('?' * len(query.scopes))})")
+        params.extend(str(scope) for scope in query.scopes)
 
     if query.occurred_after:
         clauses.append(f"COALESCE({at}occurred_at, {at}created_at) >= ?")

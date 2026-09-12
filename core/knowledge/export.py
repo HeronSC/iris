@@ -87,6 +87,7 @@ def _record_json(record: MemoryRecord) -> dict[str, Any]:
         "created_at": record.created_at,
         "supersedes": getattr(record, "supersedes", None),
         "superseded_by": getattr(record, "superseded_by", None),
+        "scope": getattr(record, "scope", "global"),
     }
 
 

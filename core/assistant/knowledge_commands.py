@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from core.assistant.output import OutputSink, emit_output
 from core.knowledge import KnowledgeError, MemoryKind, MemoryStatus
 from core.knowledge.export import export_memory
+from core.knowledge.scopes import SCOPE_WORDS, describe_scope, resolve_scope
 from core.knowledge.review import KnowledgeReviewWorkflow
 
 _USAGE = (
@@ -15,7 +16,8 @@ _USAGE = (
     "open [topic] | hypothesize <topic> <claim> | "
     "evidence <hypothesis> for|against <id> [note] | testing [topic] | "
     "pending | review | show <id> | why <id> | "
-    "approve <id> [note] | decline <id> <reason> | topics | embeddings [index] | export [folder]"
+    "approve <id> [note] | decline <id> <reason> | topics | scopes | embeddings [index] | export [folder]. "
+    "Prefix what you record with @project or @session to keep it out of other projects."
 )
 
 _TOPIC_NUDGE = (
@@ -32,12 +34,19 @@ class KnowledgeCommandHandler:
         actor: str = "user",
         embeddings: Any | None = None,
         export_folder: str | Path | None = None,
+        scope_resolver: Callable[[str | None], str] | None = None,
     ) -> None:
         self.workflow = workflow
         self.output = output
         self.actor = actor
         self.embeddings = embeddings
         self.export_folder = Path(export_folder) if export_folder else None
+        self.scope_resolver = scope_resolver
+
+    def _scope_for(self, word: str | None) -> str:
+        if self.scope_resolver is None:
+            return resolve_scope(word)
+        return self.scope_resolver(word)
 
     def handle(self, user_input: str, state: dict[str, Any]) -> bool:
         text = (user_input or "").strip()
@@ -78,6 +87,8 @@ class KnowledgeCommandHandler:
             return self._pending(refresh=True)
         if command == "topics":
             return self._topics()
+        if command == "scopes":
+            return self._scopes()
         if command in {"show", "why"}:
             return self._show(argument, why=command == "why")
         if command == "approve":
@@ -90,6 +101,22 @@ class KnowledgeCommandHandler:
             return self._export(argument)
 
         emit_output(self.output, _USAGE)
+        return True
+
+    def _split_scope(self, topic: str, content: str) -> tuple[str | None, str, str]:
+        if topic.startswith("@") and topic[1:].lower() in SCOPE_WORDS:
+            head, _sep, rest = content.strip().partition(" ")
+            return topic[1:].lower(), head, rest.strip()
+        return None, topic, content
+
+    def _scopes(self) -> bool:
+        counts = self.workflow.graph.records.count_by_scope()
+        if not counts:
+            emit_output(self.output, "No records yet.")
+            return True
+        lines = ["Records by scope:"] + [f"- {describe_scope(scope)}: {count}" for scope, count in counts.items()]
+        lines.append("A new project sees only the global records; @project and @session keep a record to one project or one conversation.")
+        emit_output(self.output, "\n".join(lines))
         return True
 
     def _export(self, argument: str) -> bool:
@@ -123,25 +150,37 @@ class KnowledgeCommandHandler:
         return True
 
     def _observe(self, topic: str, content: str) -> bool:
+        scope_word, topic, content = self._split_scope(topic, content)
         if not topic or not content:
-            emit_output(self.output, "Usage: /knowledge observe <topic> <what you saw>", "error")
+            emit_output(self.output, "Usage: /knowledge observe [@project|@session] <topic> <what you saw>", "error")
             return True
 
         normalized = topic.strip().lower()
-        record = self.workflow.observe(normalized, content, source=f"user:{self.actor}")
-        emit_output(self.output, f"Recorded {record.id[:8]} in {normalized}.")
+        try:
+            scope = self._scope_for(scope_word)
+        except ValueError as error:
+            emit_output(self.output, str(error), "error")
+            return True
+        record = self.workflow.observe(normalized, content, source=f"user:{self.actor}", scope=scope)
+        emit_output(self.output, f"Recorded {record.id[:8]} in {normalized} ({describe_scope(scope)}).")
         self._nudge_topic(normalized)
         emit_output(self.output, f"Close it later with /knowledge outcome {record.id[:8]} <what happened>")
         return True
 
     def _hypothesize(self, topic: str, content: str) -> bool:
+        scope_word, topic, content = self._split_scope(topic, content)
         if not topic or not content:
-            emit_output(self.output, "Usage: /knowledge hypothesize <topic> <claim>", "error")
+            emit_output(self.output, "Usage: /knowledge hypothesize [@project|@session] <topic> <claim>", "error")
             return True
 
         normalized = topic.strip().lower()
-        record = self.workflow.hypothesize(normalized, content, source=f"user:{self.actor}")
-        emit_output(self.output, f"Proposed {record.id[:8]} in {normalized}. Nothing acts on it yet.")
+        try:
+            scope = self._scope_for(scope_word)
+        except ValueError as error:
+            emit_output(self.output, str(error), "error")
+            return True
+        record = self.workflow.hypothesize(normalized, content, source=f"user:{self.actor}", scope=scope)
+        emit_output(self.output, f"Proposed {record.id[:8]} in {normalized} ({describe_scope(scope)}). Nothing acts on it yet.")
         self._nudge_topic(normalized)
         emit_output(
             self.output,

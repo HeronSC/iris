@@ -87,10 +87,19 @@ single feature is what made those features look larger than they are.
 - [x] Support short-term conversation memory. -> `core/conversation/`
 - [x] Support long-term persistent memory. -> `core/knowledge/repository.py`
 - [x] Store personal preferences and working habits. -> `core/profile/`
-- [~] Store project-specific knowledge. Records exist; project scoping does not (3.4).
+- [x] Store project-specific knowledge. **Built 2026-09-12:** every record carries a `scope`
+	(`global`, `project:<id>`, `session:<id>`); `/knowledge observe @project ...` and
+	`@session` write into one, outcomes inherit their observation's scope, and `/knowledge
+	scopes` counts them.
 - [x] Retrieve the right memory at the right time. -> `core/knowledge/retrieval.py`
 - [x] Record provenance on every memory: source, time, status.
-- [ ] Scope memory explicitly — global vs project vs session — and decide what a new project inherits.
+- [x] Scope memory explicitly — global vs project vs session — and decide what a new project inherits.
+	**Built 2026-09-12:** schema v3 adds `scope` (old databases are copied then migrated; every
+	existing record is global). Recall filters to the scopes in view -- global, the active
+	project (3.4), the active session -- and a record in the project's or session's own scope
+	ranks a little above a global one on equal text, so the project's memory wins ties. A new
+	project inherits only the global records; nothing is copied. The trading bot, corrections
+	and the MCP server still write global records, which is right for them.
 - [ ] Handle conflicting or superseded facts: which one wins, and whether the old one is kept.
 - [ ] Decide a forgetting policy: expiry, decay, relevance pruning, or never forget.
 - [ ] Let the user browse, correct, and delete memories directly, not only through conversation.

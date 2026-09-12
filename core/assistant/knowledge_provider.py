@@ -1,3 +1,5 @@
+# File: core/assistant/knowledge_provider.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,12 +13,8 @@ from core.assistant.general_knowledge_router import (
 )
 from core.knowledge import KnowledgeQuery, KnowledgeRetriever, MemoryKind, MemoryStatus
 
-#: Kinds a caller may ask for by name. Deliberately the vocabulary from the
-#: design rather than the enum's spelling, so the planner asks for what it means.
 _KINDS = {kind.value: kind for kind in MemoryKind}
 
-#: How much retrieved knowledge may take up in the prompt. Recall competing
-#: with the conversation for room is worse than recalling less.
 _DEFAULT_TOKEN_BUDGET = 700
 
 
@@ -30,23 +28,25 @@ class RecallRequest:
 
 
 class KnowledgeRecallProvider(KnowledgeProvider):
-    """Lets the planner consult what Iris has recorded, learned or decided.
-
-    Registered like any other capability, so the LLM chooses when to recall
-    rather than a keyword rule deciding for it. It reports what it did and did
-    not find: a recall that quietly returns nothing reads to the model as
-    "there is nothing to know", which is a different claim.
-    """
 
     name = "recall"
 
-    def __init__(self, retriever: KnowledgeRetriever, *, token_budget: int = _DEFAULT_TOKEN_BUDGET) -> None:
+    def __init__(self, retriever: KnowledgeRetriever, *, token_budget: int = _DEFAULT_TOKEN_BUDGET, scopes: Any = None) -> None:
         self.retriever = retriever
         self.token_budget = token_budget
+        self.scopes = scopes
+
+    def _visible_scopes(self) -> tuple[str, ...]:
+        provider = self.scopes
+        if provider is None:
+            return ()
+        try:
+            found = provider() if callable(provider) else provider
+        except Exception:
+            return ()
+        return tuple(str(item) for item in (found or ()))
 
     def can_handle(self, text: str) -> bool:
-        # No keyword route on purpose. This capability is reached through the
-        # planner, which is the direction the project is moving.
         return False
 
     def definition(self) -> CapabilityDefinition:
@@ -107,6 +107,7 @@ class KnowledgeRecallProvider(KnowledgeProvider):
                 statuses=statuses,
                 limit=request_obj.limit,
                 max_tokens=self.token_budget,
+                scopes=self._visible_scopes(),
             )
         )
 

@@ -77,6 +77,7 @@ def score(
     text_weight: float = 1.0,
     recency_weight_factor: float = 0.25,
     semantic: float | None = None,
+    scope_bonus: float = 0.0,
 ) -> ScoredRecord:
     lexical = overlap(query_tokens, record_tokens(record)) if query_tokens else 0.0
     text = max(lexical, semantic) if semantic is not None else lexical
@@ -87,7 +88,9 @@ def score(
         "recency": round(recency * recency_weight_factor, 4),
         "status": round(prior, 4),
     }
-    total = round(reasons["text"] + reasons["recency"] + reasons["status"], 4)
+    if scope_bonus:
+        reasons["scope"] = round(scope_bonus, 4)
+    total = round(reasons["text"] + reasons["recency"] + reasons["status"] + reasons.get("scope", 0.0), 4)
     if semantic is not None:
         reasons["lexical"] = round(lexical, 4)
         reasons["semantic"] = round(semantic, 4)
