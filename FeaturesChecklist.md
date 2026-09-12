@@ -944,15 +944,26 @@ rules out every hosted speech API, which leaves a short, good list.
 - [x] Process visibility. -> `top_processes` tool.
 - [x] CPU and GPU utilization, including VRAM — Iris shares the GPU with its own models.
 	-> `system_overview` (psutil + `nvidia-smi`).
-- [ ] Temperatures and fan state.
+- [~] Temperatures and fan state. **Built 2026-09-12:** `temperatures` tool -- ACPI thermal zones
+	and `Win32_Fan` over WMI, GPU temperature from `nvidia-smi`. On this board Windows exposes no
+	zones and no fan speeds, and the answer says so; LibreHardwareMonitor stays the install for more.
 - [x] Windows Event Logs. -> `event_log_errors` tool (System and Application, level error and critical).
 - [x] Services status. -> `windows_services` tool.
 - [x] Startup applications. -> `startup_apps` tool.
-- [ ] Hardware information.
-- [ ] Installed software and pending Windows updates.
-- [ ] File-system tools.
-- [ ] Prefer native Windows APIs/interfaces and proven open-source utilities.
-- [ ] Expose all of this as declared tools (2.3), not ad-hoc shell calls.
+- [x] Hardware information. **Built 2026-09-12:** `hardware_info` -- maker, model, CPU (cores,
+	threads, clock), memory total and sticks, board, BIOS, GPUs with VRAM and driver, Windows
+	edition, build and install date. -> `core/system/inventory.py`.
+- [x] Installed software and pending Windows updates. **Built 2026-09-12:** `installed_software`
+	(the three uninstall registry hives, filtered by name or publisher) and `windows_updates`
+	(the Windows Update agent's COM searcher; KB, severity, size, downloaded).
+- [x] File-system tools. **Built 2026-09-12:** `largest_files` and `recent_files` -- a walk with
+	a twenty-second budget that says when it was cut short; `disk_usage` covers the drives.
+- [x] Prefer native Windows APIs/interfaces and proven open-source utilities. Everything in this
+	section is WMI/CIM, the registry, the Windows Update agent, `psutil` and `nvidia-smi`; no
+	installer was added.
+- [x] Expose all of this as declared tools (2.3), not ad-hoc shell calls. Thirteen read-only
+	tools in `SYSTEM_ACTIONS` (`core/actions/implementations/system_info.py`), each with keywords,
+	cost and timeout, all typed results (2.7).
 - [x] **Decided and built 2026-09-10:** `psutil` (installed) for CPU, RAM, disk, processes, and network
 	counters; `nvidia-smi` (present, driver 596) as a subprocess for GPU and VRAM; drive health from
 	Windows itself — `MSStorageDriver_FailurePredictStatus` over WMI and

@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
-from core.system import probes
+from core.system import inventory, probes
 from core.system.probes import human_bytes
 from core.results.models import Result, Source, chart, status, table
 from core.tools.models import PermissionLevel, ToolDefinition
@@ -273,7 +273,178 @@ class StartupAppsAction(_ReadOnlyAction):
         return "\n".join(lines)
 
 
+class HardwareInfoAction(_ReadOnlyAction):
+    name = "hardware_info"
+    definition = ToolDefinition(
+        name="hardware_info",
+        description="What this PC is: maker and model, CPU with cores and clock, memory total and sticks, board and BIOS, graphics cards with VRAM and driver, Windows edition and build, install date.",
+        permission=PermissionLevel.READ,
+        cost="seconds",
+        keywords=("hardware", "what cpu", "what gpu", "how much ram", "motherboard", "bios", "windows version", "which windows", "specs", "this pc"),
+    )
+
+    def produce(self, arguments: dict[str, Any]) -> tuple[str, tuple[Result, ...]]:
+        data = inventory.hardware()
+        lines = [
+            f"{data.get('manufacturer') or '?'} {data.get('model') or ''}".strip(),
+            f"CPU {data.get('cpu') or '?'}: {data.get('cores') or '?'} cores, {data.get('threads') or '?'} threads, {data.get('max_clock_mhz') or '?'} MHz",
+            f"Memory {data.get('memory_total')}" + (": " + ", ".join(data.get("memory_sticks") or []) if data.get("memory_sticks") else ""),
+            f"Board {data.get('board') or '?'}; BIOS {data.get('bios') or '?'}",
+        ]
+        for gpu in data.get("gpus") or []:
+            lines.append(f"GPU {gpu.get('name')}: {gpu.get('vram')} VRAM, driver {gpu.get('driver')}")
+        lines.append(f"{data.get('os') or 'Windows'} {data.get('os_version') or ''}, installed {data.get('installed') or '?'}")
+        source = Source("hardware_info", "tool", "this PC")
+        rows = [(key.replace("_", " "), ", ".join(map(str, value)) if isinstance(value, list) else str(value)) for key, value in data.items() if key != "gpus" and value]
+        rows.extend((f"gpu {index + 1}", f"{gpu.get('name')} {gpu.get('vram')}") for index, gpu in enumerate(data.get("gpus") or []))
+        return "\n".join(lines), (table(("item", "value"), rows, source=source, title="Hardware"),)
+
+
+class SoftwareArguments(BaseModel):
+    name: str = Field(default="", description="Only programs whose name or publisher contains this")
+    limit: int = Field(default=60, ge=1, le=300)
+
+
+class InstalledSoftwareAction(_ReadOnlyAction):
+    name = "installed_software"
+    definition = ToolDefinition(
+        name="installed_software",
+        description="Programs installed on this PC from the Windows uninstall registry, with version, publisher and install date; optionally filtered by name.",
+        arguments=SoftwareArguments,
+        permission=PermissionLevel.READ,
+        cost="seconds",
+        keywords=("installed", "is x installed", "which version of", "programs", "software list", "do i have", "installed programs"),
+    )
+    arguments_model = SoftwareArguments
+
+    def produce(self, arguments: dict[str, Any]) -> tuple[str, tuple[Result, ...]]:
+        rows = inventory.installed_software(str(arguments.get("name") or ""), limit=int(arguments.get("limit") or 60))
+        source = Source("installed_software", "tool", "uninstall registry")
+        needle = str(arguments.get("name") or "").strip()
+        if not rows:
+            message = f"No installed program matches '{needle}'." if needle else "No installed programs were found."
+            return message, (status("ok" if needle else "warning", message, source=source),)
+        lines = [f"{len(rows)} program{'s' if len(rows) != 1 else ''}" + (f" matching '{needle}'" if needle else "") + ":"]
+        lines.extend(f"{row['name']} {row['version']}".strip() + (f" ({row['publisher']})" if row["publisher"] else "") for row in rows[:60])
+        return "\n".join(lines), (table(("program", "version", "publisher", "installed"), [(row["name"], row["version"], row["publisher"], row["installed"]) for row in rows], source=source, title="Installed software"),)
+
+
+class WindowsUpdatesAction(_ReadOnlyAction):
+    name = "windows_updates"
+    definition = ToolDefinition(
+        name="windows_updates",
+        description="Windows updates waiting to be installed, with KB number, severity and size, from the Windows Update agent. Can take half a minute.",
+        permission=PermissionLevel.READ,
+        timeout_seconds=240.0,
+        cost="up to a minute; asks the Windows Update agent",
+        keywords=("windows update", "pending updates", "updates waiting", "patch", "kb", "update status"),
+    )
+
+    def produce(self, arguments: dict[str, Any]) -> tuple[str, tuple[Result, ...]]:
+        rows = inventory.pending_updates()
+        source = Source("windows_updates", "tool", "windows update")
+        if not rows:
+            message = "No Windows updates are waiting."
+            return message, (status("ok", message, source=source),)
+        lines = [f"{len(rows)} update{'s' if len(rows) != 1 else ''} waiting:"] + [f"{row['title']} {row['kb']} {row['severity']} {row['size']}".strip() for row in rows]
+        return "\n".join(lines), (status("warning", lines[0], source=source), table(("update", "kb", "severity", "size", "downloaded"), [(row["title"], row["kb"], row["severity"], row["size"], "yes" if row["downloaded"] else "no") for row in rows], source=source, title="Pending updates"))
+
+
+class TemperaturesAction(_ReadOnlyAction):
+    name = "temperatures"
+    definition = ToolDefinition(
+        name="temperatures",
+        description="CPU or board thermal zones and fans as Windows exposes them, and GPU temperature from the NVIDIA driver. Many boards expose nothing to Windows; the answer says so.",
+        permission=PermissionLevel.READ,
+        cost="seconds",
+        keywords=("temperature", "how hot", "fan", "thermal", "overheating", "cooling"),
+    )
+
+    def produce(self, arguments: dict[str, Any]) -> tuple[str, tuple[Result, ...]]:
+        data = inventory.temperatures(gpu=probes.gpu)
+        source = Source("temperatures", "tool", "wmi and nvidia-smi")
+        rows: list[tuple[Any, ...]] = [(item["name"], f"{item['celsius']:.1f}", "thermal zone") for item in data["zones"]]
+        rows.extend((str(item.get("name")), f"{item.get('celsius')}", "gpu") for item in data["gpus"] if item.get("celsius") is not None)
+        rows.extend((item["name"], str(item.get("speed") or "?"), "fan") for item in data["fans"])
+        if not rows:
+            message = "This board exposes no temperature or fan readings to Windows; a vendor tool or LibreHardwareMonitor would be needed."
+            return message, (status("warning", message, source=source),)
+        lines = [f"{row[0]}: {row[1]}" + (" °C" if row[2] != "fan" else " rpm") for row in rows]
+        if not data["zones"]:
+            lines.append("No thermal zones are exposed by this board; only the GPU reports.")
+        return "\n".join(lines), (table(("sensor", "reading", "kind"), rows, source=source, title="Temperatures"),)
+
+
+class LargeFilesArguments(BaseModel):
+    path: str = Field(description="Folder to look under")
+    top: int = Field(default=20, ge=1, le=100)
+
+
+class LargestFilesAction(_ReadOnlyAction):
+    name = "largest_files"
+    definition = ToolDefinition(
+        name="largest_files",
+        description="The largest files under a folder, with size and modified date, scanned for up to twenty seconds.",
+        arguments=LargeFilesArguments,
+        permission=PermissionLevel.READ,
+        timeout_seconds=60.0,
+        cost="up to twenty seconds of disk reading",
+        keywords=("largest files", "biggest files", "what is taking space", "big files", "space hogs"),
+    )
+    arguments_model = LargeFilesArguments
+
+    def produce(self, arguments: dict[str, Any]) -> tuple[str, tuple[Result, ...]]:
+        folder = str(arguments["path"])
+        rows, truncated = inventory.largest_files(folder, top=int(arguments.get("top") or 20))
+        source = Source("largest_files", "tool", folder)
+        if not rows:
+            message = f"No files found under {folder}."
+            return message, (status("warning", message, source=source),)
+        lines = [f"Largest files under {folder}" + (" (scan cut short at twenty seconds)" if truncated else "") + ":"] + [f"{row['size']:>10}  {row['modified']}  {row['path']}" for row in rows]
+        results: list[Result] = [table(("size", "modified", "path"), [(row["size"], row["modified"], row["path"]) for row in rows], source=source, title=f"Largest files under {folder}")]
+        if truncated:
+            results.append(status("warning", "The scan stopped after twenty seconds; the list may miss deeper folders.", source=source))
+        return "\n".join(lines), tuple(results)
+
+
+class RecentFilesArguments(BaseModel):
+    path: str = Field(description="Folder to look under")
+    hours: float = Field(default=24.0, gt=0, le=8760)
+    top: int = Field(default=30, ge=1, le=200)
+
+
+class RecentFilesAction(_ReadOnlyAction):
+    name = "recent_files"
+    definition = ToolDefinition(
+        name="recent_files",
+        description="Files changed under a folder in the last so many hours, newest first, scanned for up to twenty seconds.",
+        arguments=RecentFilesArguments,
+        permission=PermissionLevel.READ,
+        timeout_seconds=60.0,
+        cost="up to twenty seconds of disk reading",
+        keywords=("recently changed", "modified today", "what changed in", "recent files", "files from today", "touched recently"),
+    )
+    arguments_model = RecentFilesArguments
+
+    def produce(self, arguments: dict[str, Any]) -> tuple[str, tuple[Result, ...]]:
+        folder = str(arguments["path"])
+        hours = float(arguments.get("hours") or 24.0)
+        rows, truncated = inventory.recent_files(folder, hours=hours, top=int(arguments.get("top") or 30))
+        source = Source("recent_files", "tool", folder)
+        if not rows:
+            message = f"Nothing under {folder} changed in the last {hours:g} hours."
+            return message, (status("ok", message, source=source),)
+        lines = [f"{len(rows)} file{'s' if len(rows) != 1 else ''} changed under {folder} in the last {hours:g} hours" + (" (scan cut short)" if truncated else "") + ":"] + [f"{row['modified']}  {row['size']:>9}  {row['path']}" for row in rows]
+        return "\n".join(lines), (table(("modified", "size", "path"), [(row["modified"], row["size"], row["path"]) for row in rows], source=source, title=f"Recent files under {folder}"),)
+
+
 SYSTEM_ACTIONS = (
+    HardwareInfoAction,
+    InstalledSoftwareAction,
+    WindowsUpdatesAction,
+    TemperaturesAction,
+    LargestFilesAction,
+    RecentFilesAction,
     SystemOverviewAction,
     DiskUsageAction,
     TopProcessesAction,
