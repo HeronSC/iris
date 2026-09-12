@@ -19,6 +19,7 @@ from core.llm.models import ChatMessage, LLMRequest, LLMResponse, ToolSpec
 from core.llm.ollama_client import OllamaClientError
 from core.permissions.models import PermissionLevel, PermissionRequest
 from core.permissions.targets import hosts_in, paths_in
+from core.results.models import to_json_list
 from core.tools.models import ToolArgumentError, ToolKind
 
 logger = logging.getLogger(__name__)
@@ -463,12 +464,12 @@ class IrisAgent:
                 confirmed = self.action_executor.confirm_pending()
                 if confirmed.status == "success" and self.on_tool_success is not None:
                     self.on_tool_success(user_message, name, arguments)
-                return {"status": confirmed.status, "error": confirmed.error, "message": confirmed.message}
+                return {"status": confirmed.status, "error": confirmed.error, "message": confirmed.message, "results": to_json_list(confirmed.results)}
             cancelled = self.action_executor.cancel_pending()
             return {"status": "cancelled", "error": None, "message": cancelled.message}
         if result.status == "success" and self.on_tool_success is not None:
             self.on_tool_success(user_message, name, arguments)
-        return {"status": result.status, "error": result.error, "message": result.message}
+        return {"status": result.status, "error": result.error, "message": result.message, "results": to_json_list(result.results)}
 
     def _run_capability(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         router = self.knowledge_router

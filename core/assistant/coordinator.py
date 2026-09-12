@@ -8,7 +8,7 @@ import os
 import re
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +57,7 @@ class CoordinatorTurn:
     topic_title: str | None = None
     awaiting_confirmation: bool = False
     resolved_by: str = "model"
+    results: list[dict[str, Any]] = field(default_factory=list)
 
 
 class AssistantCoordinator:
@@ -196,6 +197,7 @@ class AssistantCoordinator:
             topic_title=self._active_topic_title,
             awaiting_confirmation=result.awaiting_confirmation,
             resolved_by=result.resolved_by,
+            results=[item for outcome in result.tool_results for item in (outcome.get("results") or []) if isinstance(item, dict)],
         )
 
     def _remember_tool_success(self, user_message: str, tool_name: str, arguments: dict[str, Any]) -> None:

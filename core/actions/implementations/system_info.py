@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
 from core.system import probes
 from core.system.probes import human_bytes
+from core.results.models import Result, Source, chart, status, table
 from core.tools.models import PermissionLevel, ToolDefinition
 
 
@@ -29,10 +30,13 @@ class _ReadOnlyAction:
 
     def execute(self, request: ActionRequest, context: object) -> ActionResult:
         try:
-            message = self.render(request.arguments)
+            message, results = self.produce(request.arguments)
         except Exception as error:
             return ActionResult(status="failed", message=f"{self.name} failed: {error}", action=self.name, error=str(error))
-        return ActionResult(status="success", message=message, action=self.name)
+        return ActionResult(status="success", message=message, action=self.name, results=results)
+
+    def produce(self, arguments: dict[str, Any]) -> tuple[str, tuple[Result, ...]]:
+        return self.render(arguments), ()
 
     def render(self, arguments: dict[str, Any]) -> str:
         raise NotImplementedError
@@ -79,8 +83,15 @@ class DiskUsageAction(_ReadOnlyAction):
         keywords=("space", "disk", "drive", "storage", "folder size", "big files", "largest", "full"),
     )
 
-    def render(self, arguments: dict[str, Any]) -> str:
+    def produce(self, arguments: dict[str, Any]) -> tuple[str, tuple[Result, ...]]:
         data = probes.disk_usage(str(arguments.get("path", "")), top=int(arguments.get("top", 15)))
+        return self._render(data), self._results(data)
+
+    def render(self, arguments: dict[str, Any]) -> str:
+        return self.produce(arguments)[0]
+
+    @staticmethod
+    def _render(data: dict[str, Any]) -> str:
         lines = [f"Largest entries in {data['root']}:"]
         for entry in data["entries"]:
             marker = "" if entry["complete"] else " (partial)"
@@ -93,6 +104,38 @@ class DiskUsageAction(_ReadOnlyAction):
         if data["skipped"]:
             lines.append(f"{data['skipped']} entries could not be read.")
         return "\n".join(lines)
+
+    @staticmethod
+    def _results(data: dict[str, Any]) -> tuple[Result, ...]:
+        source = Source("disk_usage", "tool", str(data["root"]))
+        found: list[Result] = [
+            table(
+                ("Path", "Size", "Bytes", "Complete"),
+                [(entry["path"], human_bytes(entry["size"]), int(entry["size"]), bool(entry["complete"])) for entry in data["entries"]],
+                source=source,
+                title=f"Largest entries in {data['root']}",
+            )
+        ]
+        usage = data.get("usage")
+        if usage:
+            found.append(
+                chart(
+                    "pie",
+                    [{"name": "space", "values": [int(usage["used"]), int(usage["free"])]}],
+                    labels=("used", "free"),
+                    units="bytes",
+                    source=source,
+                    title=f"{human_bytes(usage['used'])} used, {human_bytes(usage['free'])} free of {human_bytes(usage['total'])}",
+                )
+            )
+        if data["truncated"] or data["skipped"]:
+            notes = []
+            if data["truncated"]:
+                notes.append("the scan hit its time budget; partial sizes are lower bounds")
+            if data["skipped"]:
+                notes.append(f"{data['skipped']} entries could not be read")
+            found.append(status("warning", "; ".join(notes), source=source))
+        return tuple(found)
 
 
 class TopProcessesArguments(BaseModel):

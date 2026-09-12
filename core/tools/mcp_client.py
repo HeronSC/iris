@@ -26,6 +26,8 @@ from typing import Any, Callable
 
 from core.actions.models import ActionRequest, ActionResult, ConfirmationPreview, ValidationResult
 from core.actions.registry import ActionRegistry
+from core.results.mcp import from_mcp
+from core.results.models import Source
 from core.tools.models import PermissionLevel, ToolDefinition
 
 logger = logging.getLogger(__name__)
@@ -142,6 +144,9 @@ class McpCallResult:
     text: str
     is_error: bool = False
     structured: Any = None
+    #: The content blocks as Iris results (2.7): text, code, image, link, file.
+    #: ``text`` above is what the model reads; this is what a client renders.
+    results: tuple[Any, ...] = ()
 
 
 class McpServerError(Exception):
@@ -208,15 +213,22 @@ class McpServerConnection:
             raise McpServerError(f"{name} timed out on MCP server {self.config.name}") from error
         except Exception as error:
             raise McpServerError(f"{name} failed on MCP server {self.config.name}: {error}") from error
+        content = getattr(result, "content", None) or []
         parts: list[str] = []
-        for item in getattr(result, "content", None) or []:
+        for item in content:
             text = getattr(item, "text", None)
             if isinstance(text, str) and text:
                 parts.append(text)
         structured = getattr(result, "structured_content", None)
         if not parts and structured is not None:
             parts.append(json.dumps(structured, ensure_ascii=False, indent=2))
-        return McpCallResult(text="\n".join(parts), is_error=bool(getattr(result, "is_error", False)), structured=structured)
+        results = from_mcp(content, source=Source(f"{self.config.name}:{name}", "mcp"), structured=structured)
+        return McpCallResult(
+            text="\n".join(parts),
+            is_error=bool(getattr(result, "is_error", False)),
+            structured=structured,
+            results=results,
+        )
 
     # -- internals --------------------------------------------------------
 
@@ -389,7 +401,13 @@ class McpToolAction:
                 resolved_target=target,
                 error="mcp_tool_error",
             )
-        return ActionResult(status="success", message=result.text or "(no output)", action=self.name, resolved_target=target)
+        return ActionResult(
+            status="success",
+            message=result.text or "(no output)",
+            action=self.name,
+            resolved_target=target,
+            results=result.results,
+        )
 
     def _impact(self) -> str:
         if self.tool.destructive:

@@ -7,6 +7,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
+from core.results.models import Source, link
+from core.results.models import text as text_result
 from core.tools.models import PermissionLevel, ToolDefinition
 from core.web.fetch import PageFetcher, UrlRejected
 
@@ -71,4 +73,19 @@ class FetchWebPageAction:
         lines.append(text[:max_chars].rstrip() + (" …" if truncated else ""))
         if truncated:
             lines.append(f"\n[{len(text) - max_chars} more characters not shown]")
-        return ActionResult(status="success", message="\n".join(lines), action=self.name, resolved_target=page.final_url)
+        results = (
+            link(
+                page.final_url,
+                source=Source("fetch_web_page", "web", page.final_url),
+                title=page.title or page.final_url,
+                author=page.author or None,
+                date=page.date or None,
+            ),
+            text_result(
+                text[:max_chars].rstrip() + (" …" if truncated else ""),
+                source=Source("fetch_web_page", "web", page.final_url),
+                title=page.title or None,
+                format="text",
+            ),
+        )
+        return ActionResult(status="success", message="\n".join(lines), action=self.name, resolved_target=page.final_url, results=results)

@@ -274,17 +274,37 @@ for a problem Windows already solves.
 
 **Owner:** the shape of an answer. Moved out of 5.1 and 6, which both described it.
 
-- [ ] Tools and providers return structured results — typed data plus display hints — never
-	pre-formatted prose.
-- [ ] Define the result types once: text, table, image, video, file, code, diff, link/card,
-	chart, status.
-- [ ] Every result carries its source and timestamp, so it can be cited and re-run.
-- [ ] The UI (6) renders these types. Any client — desktop, web, voice — renders the same
-	results in its own way.
-- [ ] Results can be saved into memory (2.1) or attached to a project (3.4) as they are.
-- [ ] Map to and from MCP content blocks (text, image, resource), so an MCP tool's result (2.3)
-	renders natively and an Iris result can be returned to an MCP caller later. In-house; pydantic
-	is already the wire layer in `core/server/models.py`.
+- [~] Tools and providers return structured results — typed data plus display hints — never
+	pre-formatted prose. **Contract built 2026-09-12** (`core/results/`); two producers speak it so
+	far -- `fetch_web_page` (a link with its byline, then the text) and `disk_usage` (a table, a
+	used/free chart, a warning when the scan was cut short) -- and every MCP tool's content arrives
+	as results. `ActionResult.results` carries them beside the prose the model reads; the agent
+	passes them through the graph and the window's detail panel renders them. The other actions
+	and the five knowledge providers still return prose plus per-capability `facts`; each is a
+	small change now that the shape exists.
+- [x] Define the result types once: text, table, image, video, file, code, diff, link/card,
+	chart, status. **Built 2026-09-12:** one `Result` with a `kind` and a validated payload rather
+	than ten classes, so JSON round-trips are one function and a client that does not know a kind
+	can still show its markdown. -> `core/results/models.py`.
+- [x] Every result carries its source and timestamp, so it can be cited and re-run. `Source` is
+	name, kind (tool, capability, mcp, web, document, memory) and a ref -- the URL, path or record
+	id -- and `created_at` is set when the result is made, not when it is shown.
+- [~] The UI (6) renders these types. Any client — desktop, web, voice — renders the same
+	results in its own way. Today every kind renders to markdown (`core/results/render.py`) and the
+	window shows that through its existing panel, with the typed results riding in the detail's
+	metadata for a native renderer; the console prints the same. Native table, image and chart
+	panels are 6's work.
+- [~] Results can be saved into memory (2.1) or attached to a project (3.4) as they are.
+	`to_memory_record()` turns a result into an observation whose `data` keeps the whole result
+	and whose source is the result's source, so a saved link is still a link. Attaching to a
+	project waits on 3.4.
+- [x] Map to and from MCP content blocks (text, image, resource), so an MCP tool's result (2.3)
+	renders natively and an Iris result can be returned to an MCP caller later. **Built 2026-09-12:**
+	`core/results/mcp.py` -- text becomes text (fenced text becomes code), image becomes image,
+	an embedded resource becomes text, code, image or file by its MIME type, a resource link
+	becomes a link, and structured content with nothing else becomes JSON code; the other way,
+	images go out as image blocks and everything else as its markdown. In-house, no new
+	dependency. `McpCallResult.results` is filled on every MCP call.
 
 ### 2.8 Observability and Audit
 

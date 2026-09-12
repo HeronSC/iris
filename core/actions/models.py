@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/actions/models.py
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -44,6 +46,7 @@ class ActionResult:
     resolved_target: str | None = None
     error: str | None = None
     confirmation_preview: ConfirmationPreview | None = None
+    results: tuple[Any, ...] = ()
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).replace(microsecond=0).isoformat())
 
 

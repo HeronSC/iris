@@ -115,6 +115,8 @@ from core.tools.audit import ToolAuditor
 from core.tools.registry import ToolRegistry
 from core.host.health import HOST_DESKTOP, HOST_SERVICE, health_report
 from core.host.service import probe_host
+from core.results.models import from_json_list
+from core.results.render import to_detail
 from core.scheduler.defaults import ensure_default_jobs
 from core.scheduler.jobs import build_jobs
 from core.scheduler.service import ScheduleService
@@ -873,6 +875,9 @@ class IrisApplication:
         stop = getattr(self, "_embedding_stop", None)
         if stop is not None:
             stop.set()
+        embedding_thread = getattr(self, "_embedding_thread", None)
+        if embedding_thread is not None and embedding_thread.is_alive():
+            embedding_thread.join(timeout=5.0)
         watchers = getattr(self, "watchers", None)
         if watchers is not None:
             try:
@@ -1047,6 +1052,14 @@ class IrisApplication:
             facts_detail = self._render_capability_details_from_facts(self._detail_metadata_override)
             if facts_detail:
                 self._detail_content_override = facts_detail
+        typed_results = from_json_list(getattr(turn, "results", None) or [])
+        if typed_results:
+            detail = to_detail(typed_results, title=self._detail_title_override)
+            self._detail_type_override = detail.type
+            self._detail_content_override = detail.content
+            if detail.title:
+                self._detail_title_override = detail.title
+            self._detail_metadata_override.update(detail.metadata)
         file_operations_payload = turn.file_operations
         if file_operations_payload:
             self._detail_metadata_override["file_operations"] = file_operations_payload
