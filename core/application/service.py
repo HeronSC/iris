@@ -45,6 +45,9 @@ from core.assistant.backup_command import BackupCommandHandler
 from core.assistant.changes_command import ChangesCommandHandler
 from core.assistant.context_command import ContextCommandHandler
 from core.assistant.learning import LearningLoop
+from core.actions.bootstrap import document_search_config
+from core.documents.roots import probe_roots
+from core.scheduler.jobs import audit_retention
 from core.assistant.principles_command import PrinciplesCommandHandler
 from core.knowledge.principles import PrincipleService
 from core.assistant.tool_progress import describe_tool_event
@@ -843,7 +846,7 @@ class IrisApplication:
         self.schedules = ScheduleService(
             configuration / "schedules.json",
             configuration / "schedules_state.json",
-            build_jobs(review=self.knowledge_review, backups=self.backups, workflows=self.workflows),
+            build_jobs(review=self.knowledge_review, backups=self.backups, workflows=self.workflows, retention=self._retention_job()),
             notifiers={**notifiers, "inbox": inbox},
             quiet_hours=quiet,
             audit=self.audit_stream,
@@ -1446,6 +1449,19 @@ class IrisApplication:
             details=details,
             metadata=metadata,
         )
+
+    def _retention_job(self) -> Any:
+        retention_cfg = self.config.get("retention") if isinstance(self.config.get("retention"), dict) else {}
+        audit_folder = self.audit_stream.folder
+        data_root = Path(self.config["memory_path"]).parent
+
+        def files() -> list[Path]:
+            return [audit_folder / name for name in ("audit.jsonl", "notifications.jsonl", "request_trace.jsonl", "actions.jsonl")] + [log_dir_for(self.config) / LOG_FILE_NAME]
+
+        return audit_retention(files, capture_folders=lambda: [data_root / "Captures"], keep_days=int(retention_cfg.get("keep_days", 90)))
+
+    def document_roots(self) -> list[Any]:
+        return probe_roots(document_search_config(self.config).root_paths())
 
     def _active_session_id(self) -> str | None:
         manager = getattr(self, "session_manager", None)

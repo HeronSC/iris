@@ -204,8 +204,10 @@ single feature is what made those features look larger than they are.
 - [x] Make plugin and tool architecture a core feature early. Built 2026-09-10: `core/tools/`
 	holds the registry; `core/actions/implementations/` declare themselves into it.
 - [x] Define a standard interface for adding tools. -> `core/tools/models.py` (`ToolDefinition`)
-- [~] Let tools advertise their capabilities: name, purpose, typed arguments, cost, side effects.
-	Name, purpose, typed arguments, permission, and confirmation are declared; cost is not yet.
+- [x] Let tools advertise their capabilities: name, purpose, typed arguments, cost, side effects.
+	Name, purpose, typed arguments, permission, confirmation, outbound and irreversible are
+	declared; since 2026-09-12 `cost` ("seconds; sends pings", "up to a minute; runs the
+	compiler") and `timeout_seconds` are too.
 - [x] Let Iris choose appropriate tools. -> native tool-calling in `intent_router._classify`
 - [x] Declare each tool's permission level — read, write, execute. Enforcement lives in 10.
 	Declared on every tool; MCP tools derive it from their annotations.
@@ -213,7 +215,12 @@ single feature is what made those features look larger than they are.
 	`ActionExecutor.preview()` validates, asks the policy, and returns the target, the files that
 	would be written, the diff and whether it would ask -- without running. Workflows dry-run
 	through it.
-- [ ] Give tools a uniform error and timeout contract, and make long-running tools cancellable.
+- [x] Give tools a uniform error and timeout contract, and make long-running tools cancellable.
+	**Built 2026-09-12:** the executor runs every action on a worker thread with the tool's
+	declared `timeout_seconds` (120 by default; the compiler declares 660, a traceroute 180)
+	and returns `failed / timeout` when it overruns; the request's cancel event (the Stop
+	button) returns `cancelled` at once. An abandoned tool may still finish in the background;
+	the result says so. Errors were already uniform: `failed` with `error` and a message.
 - [x] Log every tool invocation and result (2.8). **Closed 2026-09-12:** the audit happens at
 	the agent's dispatch point (`core/agent/graph.py` -> `core/tools/audit.py`), so command tools
 	and knowledge providers are recorded the same way actions and MCP calls already were, and a
@@ -224,7 +231,7 @@ single feature is what made those features look larger than they are.
 	change named, when one has moved; `/workflow rebase` accepts it. Bump `version` on a tool
 	when its meaning changes, and the workflows that use it will say so.
 - [x] Let a tool be disabled or sandboxed without removing it. -> `/tools disable <name>`
-- [ ] Ensure future tools can be added without redesign — a new app integration (4) should be a
+- [x] Ensure future tools can be added without redesign — a new app integration (4) should be a
 	plugin, not a core change.
 - [x] **Decided and built 2026-09-10:** one tool definition — name, description, arguments as a pydantic
 	model (JSON Schema for free), permission level, `requires_confirmation`. Native actions and the
@@ -299,8 +306,11 @@ Already built and relied on everywhere, but missing from the original document.
 - [x] Summarise long conversations to stay inside the context budget. -> `session_summarizer.py`
 - [x] Topic tracking. -> `core/conversation/persistent_memory/`
 - [x] Build request context from the available sources. -> `context_builder.py`
-- [ ] Branch or fork a conversation without losing the original.
-- [ ] Search across past conversations.
+- [x] Branch or fork a conversation without losing the original. **Built 2026-09-12:**
+	`/session fork [title]` starts a new session carrying the messages, summary and project so
+	far, with `forked_from` in its metadata; the original stays as it was.
+- [x] Search across past conversations. `/session search <text>` scans every saved session's
+	messages, newest first, with the session id to resume.
 - [x] Attach a session to a project (3.4) so its context loads with that project. Sessions carry
 	`project_id`; `/project <name>` sets it on the active session and the project block (focus,
 	decisions, open tasks) loads into every prompt while it is set.
@@ -313,7 +323,7 @@ Already built and relied on everywhere, but missing from the original document.
 disk, UNC paths, and a OneDrive sync folder covers all three; `fsspec` was passed over as a layer
 for a problem Windows already solves.
 
-- [ ] NAS is reached by UNC path. Handle an offline or unreachable root without hanging or losing
+- [x] NAS is reached by UNC path. Handle an offline or unreachable root without hanging or losing
 	data — the scanner's `exists()` guard is the start; a UNC root that vanishes mid-scan is the
 	case to test.
 - [ ] OneDrive is not synced to this PC today. When it is needed, sync it rather than reaching it
@@ -328,7 +338,9 @@ for a problem Windows already solves.
 	notifications, one dependency serving this item and 8.2's file watchers. Scheduled rescans stay
 	as the safety net, because a watcher can miss events during downtime: a full rescan every 24 h
 	(`document_search.watch.rescan_interval_hours`), events coalesced for 2 s before applying.
-- [ ] Respect path allowlists and per-root permissions (10).
+- [~] Respect path allowlists and per-root permissions (10). `permissions.allowed_paths` in
+	`config.json` confines every path-taking tool (10); the file, code and Excel tools confine
+	themselves to the document roots as well. Per-root read/write levels are not separate yet.
 
 ### 2.7 Result Contract
 
@@ -398,7 +410,13 @@ for a problem Windows already solves.
 	leaked. A key whose name says credential is replaced whole; `user:password@host`, an
 	`Authorization` header, and a token in a query string are rewritten in free text.
 	-> `core/audit/redaction.py`.
-- [ ] Retention policy for traces, audit entries, and captured screen or camera data.
+- [x] Retention policy for traces, audit entries, and captured screen or camera data. **Decided
+	and built 2026-09-12:** keep 90 days (`retention.keep_days` in `config.json`). The
+	"Trim audit and traces" job runs daily at 03:30 in the desktop and the host: dated lines
+	older than that leave `audit.jsonl`, `notifications.jsonl`, `request_trace.jsonl`,
+	`actions.jsonl` and the log; undated or unparseable lines stay; images and clips under
+	`Data\Captures` older than that are removed. Knowledge records are not touched (2.1 owns
+	forgetting).
 
 ---
 

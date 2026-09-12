@@ -12,7 +12,10 @@ from typing import Any
 import structlog
 
 from core.actions.bootstrap import build_action_layer
+from core.actions.bootstrap import document_search_config
 from core.actions.changes import ChangeLedger
+from core.documents.roots import probe_roots
+from core.scheduler.jobs import audit_retention
 from core.cameras import CameraService
 from core.conversation.persistent_memory.models import MemoryConfig
 from core.documents.catalog import DocumentCatalog
@@ -130,7 +133,7 @@ class IrisHost:
         self.schedules = ScheduleService(
             configuration / "schedules.json",
             configuration / "schedules_state.json",
-            build_jobs(review=self.knowledge_review, backups=self.backups),
+            build_jobs(review=self.knowledge_review, backups=self.backups, retention=self._retention_job()),
             notifiers=notifiers,
             quiet_hours=quiet,
             audit=self.audit_stream,
@@ -165,6 +168,18 @@ class IrisHost:
         self.workflows.sync_schedules(self.schedules)
         self.watchers.listeners.append(self.workflows.watcher_listener())
         self.api = create_app(self) if serve_http else None
+
+    def _retention_job(self) -> Any:
+        retention_cfg = self.config.get("retention") if isinstance(self.config.get("retention"), dict) else {}
+        audit_folder = self.audit_stream.folder
+
+        def files() -> list[Path]:
+            return [audit_folder / name for name in ("audit.jsonl", "notifications.jsonl", "request_trace.jsonl", "actions.jsonl")] + [self.data_root / "logs" / "iris.jsonl"]
+
+        return audit_retention(files, capture_folders=lambda: [self.data_root / "Captures"], keep_days=int(retention_cfg.get("keep_days", 90)))
+
+    def document_roots(self) -> list[Any]:
+        return probe_roots(document_search_config(self.config).root_paths())
 
     def _tool_version(self, name: str) -> str | None:
         definition = self.tool_registry.get(name)

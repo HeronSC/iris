@@ -11,6 +11,7 @@ from typing import Callable, Any
 
 from core.documents.catalog import DocumentCatalog
 from core.documents.extractors.base import DocumentExtractor
+from core.documents.roots import probe_root
 from core.documents.models import DocumentSearchConfig, DocumentSearchRoot, ExtractedDocument, coerce_document_search_root
 
 
@@ -49,9 +50,12 @@ class DocumentScanner:
         for root in roots:
             root_config = coerce_document_search_root(root)
             root_path = root_config.path
-            if not root_path.exists() or not root_path.is_dir():
-                self.catalog.log_scan_error(str(root_path), "Root does not exist or is not a directory")
+            status = probe_root(root_path)
+            if not status.online:
+                self.catalog.log_scan_error(str(root_path), f"Root is offline or missing: {status.reason}")
                 error_files = error_files + 1
+                if progress_callback is not None:
+                    progress_callback(f"SKIPPED ROOT:{root_path} ({status.reason})")
                 continue
 
             if progress_callback is not None:

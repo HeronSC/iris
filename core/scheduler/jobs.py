@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from core.audit.retention import apply_retention
 from core.knowledge.models import MemoryStatus
 from core.scheduler.models import JobResult
 
@@ -15,6 +16,8 @@ HYPOTHESIS_REVIEW = "hypothesis_review"
 DATABASE_BACKUP = "database_backup"
 
 WORKFLOW_RUN = "workflow_run"
+
+AUDIT_RETENTION = "audit_retention"
 
 
 def hypothesis_review(review: Any) -> Callable[[dict[str, Any]], JobResult]:
@@ -74,6 +77,15 @@ def database_backup(backups: Any) -> Callable[[dict[str, Any]], JobResult]:
     return run
 
 
+def audit_retention(files: Callable[[], list[Any]], *, capture_folders: Callable[[], list[Any]] | None = None, keep_days: int = 90) -> Callable[[dict[str, Any]], JobResult]:
+    def run(params: dict[str, Any]) -> JobResult:
+        days = int(params.get("keep_days") or keep_days)
+        report = apply_retention(files(), keep_days=days, capture_folders=capture_folders() if capture_folders else ())
+        return JobResult(ok=True, summary=report.summary(), data={"kept_days": report.kept_days, "removed": report.removed, "files": {name: list(counts) for name, counts in report.files.items()}}, notify=False)
+
+    return run
+
+
 def workflow_run(workflows: Any) -> Callable[[dict[str, Any]], JobResult]:
     def run(params: dict[str, Any]) -> JobResult:
         workflow_id = str(params.get("workflow_id") or "").strip()
@@ -93,9 +105,11 @@ def workflow_run(workflows: Any) -> Callable[[dict[str, Any]], JobResult]:
 
 
 def build_jobs(
-    review: Any | None = None, backups: Any | None = None, workflows: Any | None = None
+    review: Any | None = None, backups: Any | None = None, workflows: Any | None = None, retention: Callable[[dict[str, Any]], JobResult] | None = None
 ) -> dict[str, Callable[[dict[str, Any]], JobResult]]:
     jobs: dict[str, Callable[[dict[str, Any]], JobResult]] = {}
+    if retention is not None:
+        jobs[AUDIT_RETENTION] = retention
     if review is not None:
         jobs[HYPOTHESIS_REVIEW] = hypothesis_review(review)
     if backups is not None:
@@ -105,4 +119,4 @@ def build_jobs(
     return jobs
 
 
-__all__ = ["DATABASE_BACKUP", "HYPOTHESIS_REVIEW", "WORKFLOW_RUN", "build_jobs", "database_backup", "hypothesis_review", "workflow_run"]
+__all__ = ["AUDIT_RETENTION", "DATABASE_BACKUP", "HYPOTHESIS_REVIEW", "WORKFLOW_RUN", "audit_retention", "build_jobs", "database_backup", "hypothesis_review", "workflow_run"]

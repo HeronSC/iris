@@ -78,7 +78,7 @@ class HostTests(unittest.TestCase):
         self.assertEqual(payload["host"], HOST_SERVICE)
         self.assertTrue(self.host.watchers.running)
         self.assertTrue(self.host.schedules.running)
-        self.assertEqual(sorted(payload["schedules"]["last_runs"]), ["Back up Data", "Re-appraise hypotheses"])
+        self.assertEqual(sorted(payload["schedules"]["last_runs"]), ["Back up Data", "Re-appraise hypotheses", "Trim audit and traces"])
         self.assertEqual(payload["databases"]["knowledge"], "ok")
         self.assertIn("Ollama did not answer", " ".join(payload["broken"]))
 

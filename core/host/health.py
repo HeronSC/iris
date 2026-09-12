@@ -68,6 +68,10 @@ def _index_rows(service: Any) -> dict[str, Any]:
     document_vectors = getattr(service, "document_embeddings", None)
     if document_vectors is not None:
         rows["document_vectors"] = _safe(document_vectors.count, 0) if _safe(lambda: document_vectors.available, False) else None
+    roots = getattr(service, "document_roots", None)
+    if callable(roots):
+        statuses = _safe(roots, []) or []
+        rows["roots"] = {str(item.path): ("online" if item.online else f"offline: {item.reason}") for item in statuses}
     return rows
 
 
@@ -108,7 +112,9 @@ def health_report(service: Any, *, host: str) -> dict[str, Any]:
     metrics = getattr(service, "request_metrics", None)
     if budget is not None and metrics is not None:
         model_warnings.extend(_safe(lambda: budget.check(metrics.summary(24.0)), []) or [])
-    problems = broken + model_warnings + watcher_warnings + schedule_warnings
+    offline_roots = [path for path, state in (_index_rows(service).get("roots") or {}).items() if state != "online"]
+    root_warnings = [f"document root {path} is offline" for path in offline_roots]
+    problems = broken + model_warnings + watcher_warnings + schedule_warnings + root_warnings
     return {
         "status": "degraded" if problems else "ok",
         "host": host,
