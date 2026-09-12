@@ -15,7 +15,7 @@ from core.actions.audit import ActionAuditLogger
 from core.actions.changes import ChangeLedger
 from core.actions.executor import ActionExecutionContext, ActionExecutor, SystemAdapter
 from core.actions.implementations.update_profile import UpdateProfileAction
-from core.actions.models import ActionRequest, ActionResult, ValidationResult
+from core.actions.models import ActionRequest, ActionResult, ConfirmationPreview, ValidationResult
 from core.actions.policy import ActionPolicy
 from core.actions.registry import ActionRegistry
 from core.audit.stream import AuditCategory, AuditStream
@@ -50,7 +50,7 @@ class WipeAction:
     )
 
     def validate(self, request: ActionRequest, context: object) -> ValidationResult:
-        return ValidationResult(ok=True)
+        return ValidationResult(ok=True, confirmation_preview=ConfirmationPreview(summary="Wipe the clipboard"))
 
     def execute(self, request: ActionRequest, context: object) -> ActionResult:
         return ActionResult(status="success", message="wiped", action=self.name)
@@ -127,6 +127,7 @@ class LedgerTests(unittest.TestCase):
         result = executor.execute(ActionRequest(action="wipe", arguments={}))
         self.assertEqual(result.status, "pending_confirmation")
         self.assertIn("This cannot be undone.", result.message)
+        self.assertTrue(executor.pending_confirmation_preview().metadata["irreversible"])
 
     def test_a_write_says_it_can_be_undone_before_it_runs(self) -> None:
         class ConfirmedRewrite(RewriteAction):

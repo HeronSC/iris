@@ -303,11 +303,10 @@ for a problem Windows already solves.
 - [x] Every result carries its source and timestamp, so it can be cited and re-run. `Source` is
 	name, kind (tool, capability, mcp, web, document, memory) and a ref -- the URL, path or record
 	id -- and `created_at` is set when the result is made, not when it is shown.
-- [~] The UI (6) renders these types. Any client — desktop, web, voice — renders the same
-	results in its own way. Today every kind renders to markdown (`core/results/render.py`) and the
-	window shows that through its existing panel, with the typed results riding in the detail's
-	metadata for a native renderer; the console prints the same. Native table, image and chart
-	panels are 6's work.
+- [x] The UI (6) renders these types. Any client — desktop, web, voice — renders the same
+	results in its own way. Every kind renders to markdown (`core/results/render.py`) for the
+	console and the model, and since 2026-09-12 to HTML (`core/results/html.py`) for the desktop
+	panel; the typed results ride in the detail's metadata and the window renders from those.
 - [~] Results can be saved into memory (2.1) or attached to a project (3.4) as they are.
 	`to_memory_record()` turns a result into an observation whose `data` keeps the whole result
 	and whose source is the result's source, so a saved link is still a link. Attaching to a
@@ -648,22 +647,40 @@ Rendering only. *What* gets rendered is defined in 2.7.
 
 - [ ] Replace the current plain UI with a modern experience.
 - [ ] Design the UI as the central interface for all Iris capabilities.
-- [ ] Render every result type from 2.7: rich response panels, image previews, video previews,
-	syntax-highlighted code, diffs, file previews, tables, and search result cards.
+- [~] Render every result type from 2.7: rich response panels, image previews, video previews,
+	syntax-highlighted code, diffs, file previews, tables, and search result cards. **Built
+	2026-09-12:** the detail panel is a `QWebEngineView` (`ui/results_panel.py`) showing HTML from
+	`core/results/html.py`, one renderer per kind -- tables with numeric columns aligned, bar and
+	line charts as inline SVG, diffs coloured by line, code blocks, file cards with Open and
+	Folder, images and video served from disk, link cards with byline, status badges. The renderer
+	is core code with no Qt in it, so the HTTP surface can serve the same page later. Still to do:
+	search result cards (the older file tree panel shows those), and syntax colouring inside code
+	blocks (`pygments` is in the dev venv only through pytest; using it is a dependency decision).
 - [x] Stream responses as they generate, and let the user stop a running request. Built
 	2026-09-10: the coordinator streams the main answer through `on_delta`, the service turns
 	fragments into `IrisEvent.delta`, the desktop window rewrites the placeholder bubble as text
 	arrives, and Stop closes the model stream and keeps what came through.
 - [ ] Show tool and action status clearly — what is running, what it touched, what it cost.
-- [ ] Show pending confirmations and approvals prominently (10).
+- [x] Show pending confirmations and approvals prominently (10). **Built 2026-09-12:** while an
+	action waits, an approval bar with Approve and Cancel sits at the top of the panel and the
+	change itself is a card -- title, summary, target, the unified diff or the after-state, and
+	whether it is copied first for `/undo` or cannot be undone. The executor now stamps
+	`irreversible` on the pending preview and the service passes the preview's fields through
+	`DetailContent.metadata["confirmation"]`, so any client can render the same card.
 - [ ] Improve conversation and project organization (2.5, 3.4).
 - [ ] Make it reachable instantly: tray icon, global hotkey, a small always-available input.
 - [ ] Keyboard-first navigation and a command palette.
-- [ ] Show sources, and let the user open the underlying file, page, or record in one click.
-- [ ] Dark mode and readable defaults at the screen sizes actually used.
+- [~] Show sources, and let the user open the underlying file, page, or record in one click.
+	**Built 2026-09-12:** every card shows its source and the time it was made; a web source opens
+	in the browser and a path opens in its Windows default app through an `iris://open` link the
+	panel intercepts, with no JavaScript enabled in the view. Records (memory ids) do not open yet.
+- [~] Dark mode and readable defaults at the screen sizes actually used. The result panel
+	follows the Qt palette (light and dark token sets, 2026-09-12); the rest of the window is
+	stock Qt widgets.
 - [~] **Decided 2026-09-10:** stay on PySide6, and render the result panels in an embedded
 	`QWebEngineView` — `QtWebEngineWidgets` is already present in the installed PySide6 6.11.
-	Streaming arrived with the `ollama` client change (2.4) and is wired (above); the web view is not. A web front end on the FastAPI app was
+	Streaming arrived with the `ollama` client change (2.4) and is wired (above); the web view
+	arrived 2026-09-12 (above). A web front end on the FastAPI app was
 	passed over: a second TypeScript codebase for a phone view that 11 does not ask for yet. The
 	result contract (2.7) keeps that door open without touching core.
 

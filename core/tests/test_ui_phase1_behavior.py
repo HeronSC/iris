@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+# File: core/tests/test_ui_phase1_behavior.py
+
+from __future__ import annotations
 
 import importlib.util
 import os
@@ -297,7 +299,7 @@ class UiPhase1BehaviorTests(unittest.TestCase):
         window._on_worker_finished(response)
 
         history_text = window.history.toPlainText()
-        details_text = window.details_view.toPlainText()
+        details_text = window.results_panel.current_text()
 
         self.assertIn("Raccoons are adaptable North American mammals", history_text)
         self.assertNotIn("### **Physical Traits**", history_text)
@@ -474,12 +476,12 @@ class UiPhase1BehaviorTests(unittest.TestCase):
         window._on_worker_finished(first)
         window._on_worker_finished(second)
 
-        details_text = window.details_view.toPlainText()
+        details_text = window.results_panel.current_text()
         self.assertIn("Platypus overview details", details_text)
         self.assertIn("Platypus venom details", details_text)
 
         window._on_worker_finished(third)
-        llama_text = window.details_view.toPlainText()
+        llama_text = window.results_panel.current_text()
         self.assertIn("Llama overview details", llama_text)
         self.assertNotIn("Platypus venom details", llama_text)
 

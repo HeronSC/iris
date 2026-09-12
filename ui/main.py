@@ -10,7 +10,6 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -49,6 +48,10 @@ from core.config.loader import ConfigError
 from core.observability import configure_logging, log_dir_for
 #! @allow-local-import
 from core.profile.loader import AssistantMemoryError
+#! @allow-local-import
+from core.results.html import render_confirmation
+#! @allow-local-import
+from ui.results_panel import ResultsPanel, markdown_to_html, results_fragment
 
 
 class ChatInput(QTextEdit):
@@ -350,9 +353,12 @@ class IrisWindow(QMainWindow):
         right_layout = QVBoxLayout()
         right_layout.addWidget(self.details_title)
         self.file_ops_panel = FileOperationsPanel(self)
+        self.results_panel = ResultsPanel(self, base_dir=workspace_root)
+        self.results_panel.commandRequested.connect(self._submit_command)
         self.details_stack = QStackedWidget()
         self.details_stack.addWidget(self.details_view)
         self.details_stack.addWidget(self.file_ops_panel)
+        self.details_stack.addWidget(self.results_panel)
         right_layout.addWidget(self.details_stack, 1)
         right_layout.addWidget(self.details_actions_row)
         right_layout.addWidget(self.approve_button)
@@ -751,16 +757,14 @@ class IrisWindow(QMainWindow):
         )
         sections = active_workspace.get("sections", [])
         rendered_sections = self._normalize_sections(sections if isinstance(sections, list) else [])
-        self.details_title.setText(str(active_workspace.get("title") or "Details"))
-        if rendered_sections:
-            container_html = "<hr>".join(str(block.get("html", "")) for block in rendered_sections if str(block.get("html", "")).strip())
-            self.details_view.setHtml(container_html)
-            cursor = self.details_view.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
-            self.details_view.setTextCursor(cursor)
-        else:
-            self.details_view.setHtml("<i>No details available.</i>")
-        self.details_stack.setCurrentWidget(self.details_view)
+        panel_title = str(active_workspace.get("title") or "Details")
+        self.details_title.setText(panel_title)
+        self.results_panel.show_sections(
+            [str(block.get("html", "")) for block in rendered_sections],
+            title=panel_title,
+            awaiting_approval=response.status == IrisStatus.AWAITING_CONFIRMATION,
+        )
+        self.details_stack.setCurrentWidget(self.results_panel)
         self._render_explore_actions_for_topic(self._active_topic_id)
         self._sync_file_operations_panel(detail_type, detail_items, metadata)
 
@@ -786,13 +790,16 @@ class IrisWindow(QMainWindow):
         if detail_type == "topic_state":
             return self._render_topic_state_section(display_title, items)
 
+        confirmation = metadata.get("confirmation") if isinstance(metadata, dict) else None
+        if isinstance(confirmation, dict):
+            return render_confirmation(confirmation, actions=False)
+
+        typed_results = metadata.get("results") if isinstance(metadata, dict) else None
+        if isinstance(typed_results, list) and typed_results:
+            return f"<section><h3>{self._escape_html(display_title)}</h3>{results_fragment(typed_results)}</section>"
+
         if detail_type == "markdown" and body:
-            document = QTextDocument()
-            document.setMarkdown(body)
-            rendered_body = document.toHtml()
-            rendered_body = re.sub(r"^.*<body[^>]*>", "", rendered_body, flags=re.DOTALL)
-            rendered_body = re.sub(r"</body>.*$", "", rendered_body, flags=re.DOTALL)
-            return f"<section><h3>{self._escape_html(display_title)}</h3>{rendered_body}</section>"
+            return f"<section><h3>{self._escape_html(display_title)}</h3>{markdown_to_html(body)}</section>"
 
         parts: list[str] = []
         parts.append(f"<h3>{self._escape_html(display_title)}</h3>")

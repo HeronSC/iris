@@ -6,7 +6,7 @@ import logging
 import os
 import subprocess
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -177,18 +177,22 @@ class ActionExecutor:
                 )
                 self._log(request, result, tool=tool_name)
                 return result
+            irreversible = any(bool(getattr(definition, "irreversible", False)) for definition in definitions)
+            preview = validation.confirmation_preview
+            if preview is not None:
+                preview = replace(preview, metadata={**preview.metadata, "irreversible": irreversible})
             self._pending_action = PendingAction(
                 original_request=request,
                 validated_request=validated_request,
                 resolved_target=validation.resolved_target,
                 expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.confirmation_ttl_seconds),
                 follow_up_request=request.follow_up,
-                confirmation_preview=validation.confirmation_preview,
+                confirmation_preview=preview,
                 changes=tuple(validation.changes),
             )
             self._expired_confirmation_notice = False
             description = self._describe_request(validated_request, validation.resolved_target)
-            if any(bool(getattr(definition, "irreversible", False)) for definition in definitions):
+            if irreversible:
                 description += "\n\nThis cannot be undone."
             elif validation.changes:
                 description += "\n\nThe file is copied first, so /undo can put it back."

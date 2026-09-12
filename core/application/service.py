@@ -1540,6 +1540,7 @@ class IrisApplication:
         if content is None:
             content = ""
 
+        confirmation_metadata: dict[str, Any] | None = None
         if requires_confirmation and self._detail_content_override is None:
             preview = self.action_executor.pending_confirmation_preview()
             if preview is not None:
@@ -1547,6 +1548,7 @@ class IrisApplication:
                 title = preview.title or title
                 content = self._format_confirmation_preview(preview)
                 summary = preview.summary
+                confirmation_metadata = self._confirmation_metadata(preview)
 
         if self._detail_type_override in {"markdown", "text"}:
             detail_type = self._detail_type_override
@@ -1558,6 +1560,8 @@ class IrisApplication:
         }
         if self._detail_metadata_override:
             metadata.update(self._detail_metadata_override)
+        if confirmation_metadata is not None:
+            metadata["confirmation"] = confirmation_metadata
 
         items = [
             {"role": message.role.value, "text": message.text}
@@ -1581,6 +1585,18 @@ class IrisApplication:
             actions=actions,
             metadata=metadata,
         )
+
+    def _confirmation_metadata(self, preview: Any) -> dict[str, Any]:
+        extra = dict(preview.metadata or {})
+        payload: dict[str, Any] = {"summary": preview.summary, "irreversible": bool(extra.get("irreversible"))}
+        for name in ("title", "target", "after", "impact"):
+            value = getattr(preview, name, None)
+            if value:
+                payload[name] = value
+        for name in ("diff", "diff_path"):
+            if extra.get(name):
+                payload[name] = extra[name]
+        return payload
 
     def _format_confirmation_preview(self, preview: Any) -> str:
         sections: list[str] = []
