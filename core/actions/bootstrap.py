@@ -14,6 +14,7 @@ from core.actions.implementations.clipboard import ClipboardAction
 from core.actions.implementations.active_context import ActiveContextAction
 from core.actions.implementations.code_tools import CODE_ACTIONS
 from core.actions.implementations.excel_tools import EXCEL_ACTIONS
+from core.actions.implementations.file_tools import FILE_ACTIONS
 from core.actions.implementations.memory_tools import MEMORY_ACTIONS
 from core.actions.implementations.network_tools import NETWORK_ACTIONS
 from core.actions.implementations.project_tools import PROJECT_ACTIONS
@@ -161,6 +162,8 @@ def build_action_layer(
         action_registry.register(network_action())
     for memory_action in MEMORY_ACTIONS:
         action_registry.register(memory_action())
+    for file_action in FILE_ACTIONS:
+        action_registry.register(file_action())
 
     documents = document_config or document_search_config(config)
     applications, alias_map = application_maps(config)

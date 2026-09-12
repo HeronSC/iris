@@ -463,7 +463,12 @@ Git-specific items moved to 3.3.
 	`al_workspace` (`core/code/workspace.py`): name, publisher, version, platform, application,
 	runtime, id ranges, dependencies, AL launch targets, packages, and object counts by kind.
 - [ ] Learn preferred BC patterns and architecture (feeds 2.2).
-- [ ] Add controlled file editing later.
+- [x] Add controlled file editing later. **Built 2026-09-12:** `read_file` (a numbered window),
+	`edit_file` (replace exact text; the count of occurrences must match, the diff is shown for
+	approval, line endings and BOM are kept) and `write_file` (create, or replace with
+	`overwrite`), all confined to the document roots and never inside `.git`, `.alpackages` or
+	`node_modules`. Every write names its file, so the executor copies it first and `/undo`
+	puts it back; a new file is removed again. `core/actions/implementations/file_tools.py`.
 - [x] Run the BC compiler and read errors. **Built 2026-09-12:** `al_compile`
 	(`core/code/compiler.py`) finds `alc.exe` in the newest AL extension under
 	`~/.vscode/extensions` (or `code.alc_path` in `config.json`), runs it with the workspace's
@@ -472,8 +477,12 @@ Git-specific items moved to 3.3.
 	`file(line,col): error|warning CODE: message` into a table with duplicates dropped. The Kloter
 	Farms workspace compiles clean in 4 s with CodeCop, PerTenantExtensionCop and UICop. The tool
 	is execute-level, so policy decides whether it asks first.
-- [ ] Correct its own changes.
-- [ ] Run tests and read the results.
+- [~] Correct its own changes. The loop exists as tools -- read_file, edit_file, al_compile --
+	and each AL edit ends with "run al_compile and fix what it reports", so the agent can
+	compile, read the diagnostics and edit again; each edit still asks for approval, which is
+	right while the loop is new. An automatic retry budget is not set.
+- [ ] Run tests and read the results. AL tests run inside a Business Central service; without a
+	container or sandbox here there is nothing to invoke yet.
 - [ ] Show code diffs before significant changes — rendered per 2.7, gated per 10.
 - [ ] Target a VS Code-class coding experience.
 - [x] **Decided 2026-09-10, built 2026-09-12:** symbol and object awareness comes from parsing `SymbolReference.json`
