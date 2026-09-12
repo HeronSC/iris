@@ -85,6 +85,7 @@ class IrisAgent:
         knowledge_router: Any | None = None,
         checkpoint_path: str | Path | None = None,
         on_tool_success: Callable[[str, str, dict[str, Any]], None] | None = None,
+        tool_auditor: Any | None = None,
         max_iterations: int = MAX_ITERATIONS,
     ) -> None:
         self.coordinator = coordinator
@@ -92,6 +93,7 @@ class IrisAgent:
         self.action_executor = action_executor
         self.knowledge_router = knowledge_router
         self.on_tool_success = on_tool_success
+        self.tool_auditor = tool_auditor
         self.max_iterations = max(1, int(max_iterations))
         self._lock = threading.RLock()
         self._saver_context: Any = None
@@ -376,6 +378,11 @@ class IrisAgent:
         return LLMResponse(content=str(text or "").strip())
 
     def _run_tool(self, name: str, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
+        result = self._dispatch(name, arguments, user_message)
+        self._audit_tool(name, arguments, result)
+        return result
+
+    def _dispatch(self, name: str, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
         definition = self.tool_registry.get(name) if self.tool_registry is not None else None
         if definition is not None and self.tool_registry.is_enabled(name):
             if definition.kind == ToolKind.COMMAND:
@@ -385,6 +392,14 @@ class IrisAgent:
         if self.knowledge_router is not None:
             return self._run_capability(name, arguments)
         return {"status": "failed", "error": "unknown_tool", "message": f"I do not have a tool named {name}."}
+
+    def _audit_tool(self, name: str, arguments: dict[str, Any], result: dict[str, Any]) -> None:
+        if self.tool_auditor is None:
+            return
+        try:
+            self.tool_auditor.record(name, arguments, result, source="agent")
+        except Exception as error:
+            logger.warning("Tool audit failed for %s: %s", name, error)
 
     def _run_command(self, definition: Any, arguments: dict[str, Any], user_message: str) -> dict[str, Any]:
         handler = definition.handler

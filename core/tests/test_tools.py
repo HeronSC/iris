@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -205,7 +204,8 @@ class ExecutorToolTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def _audit_entries(self) -> list[dict[str, Any]]:
-        return [json.loads(line) for line in self.audit.log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        """Read back through the logger: the file itself is the shared schema now (2.8)."""
+        return self.audit.read_recent(limit=50)
 
     def test_declared_confirmation_gates_a_facet_and_flattens_it(self) -> None:
         result = self.executor.execute(ActionRequest(action="greet_loudly", arguments={"name": "Henry"}))

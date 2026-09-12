@@ -145,10 +145,12 @@ class AssistantCoordinator:
         action_executor: Any | None = None,
         example_store: Any | None = None,
         checkpoint_path: str | Path | None = None,
+        tool_auditor: Any | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._action_executor = action_executor
         self._example_store = example_store
+        self._tool_auditor = tool_auditor
         self._checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
         if self._agent is not None:
             self._agent.close()
@@ -164,6 +166,7 @@ class AssistantCoordinator:
                 knowledge_router=self.general_knowledge_router,
                 checkpoint_path=self._checkpoint_path,
                 on_tool_success=self._remember_tool_success,
+                tool_auditor=getattr(self, "_tool_auditor", None),
             )
         return self._agent
 

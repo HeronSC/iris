@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.assistant.output import OutputSink, emit_output
+from core.audit.stream import AuditCategory
 from core.observability.logging_setup import read_log_entries
 
 
@@ -19,12 +20,14 @@ class WhyCommandHandler:
         metrics: Any | None,
         action_audit: Any | None,
         last_request_id: Any,
+        audit_stream: Any | None = None,
         output: OutputSink | None = None,
     ) -> None:
         self.log_file = Path(log_file) if log_file else None
         self.trace_file = Path(trace_file) if trace_file else None
         self.metrics = metrics
         self.action_audit = action_audit
+        self.audit_stream = audit_stream
         self.last_request_id = last_request_id
         self.output = output
 
@@ -52,9 +55,11 @@ class WhyCommandHandler:
         trace = self._trace_entry(request_id)
         model_calls = self._model_calls(request_id)
         actions = self._actions(request_id)
+        tool_events = self._tools(request_id)
+        permission_events = self._permissions(request_id)
         log_lines = self._log_lines(request_id)
 
-        if turn is None and trace is None and not model_calls and not actions and not log_lines:
+        if turn is None and trace is None and not model_calls and not actions and not tool_events and not log_lines:
             return f"Nothing recorded for request {request_id}."
 
         lines = [f"Request {request_id}"]
@@ -68,13 +73,13 @@ class WhyCommandHandler:
         if model_calls:
             lines.append("Model calls:")
             for row in model_calls:
-                tools = f", called {', '.join(row['tool_calls'])}" if row.get("tool_calls") else ""
+                called = f", called {', '.join(row['tool_calls'])}" if row.get("tool_calls") else ""
                 note = "" if row.get("outcome") == "ok" else f" [{row.get('outcome')}: {row.get('error')}]"
                 fallback = " (fallback)" if row.get("fallback") else ""
                 lines.append(
                     f"- {row.get('task') or 'default'} -> {row.get('model')}{fallback}: "
                     f"{row.get('prompt_tokens', 0)}+{row.get('completion_tokens', 0)} tokens, "
-                    f"{float(row.get('wall_ms', 0)):.0f} ms{tools}{note}"
+                    f"{float(row.get('wall_ms', 0)):.0f} ms{called}{note}"
                 )
         if actions:
             lines.append("Actions:")
@@ -83,6 +88,18 @@ class WhyCommandHandler:
                 via = f" (via {tool})" if tool and tool != row.get("action") else ""
                 target = f" on {row['resolved_target']}" if row.get("resolved_target") else ""
                 lines.append(f"- {row.get('action')}{via}{target}: {row.get('status')} — {str(row.get('message', ''))[:120]}")
+        if tool_events:
+            lines.append("Tools:")
+            for event in tool_events:
+                kind = f" ({event.subject})" if event.subject else ""
+                note = f" — {event.message}" if event.message else ""
+                lines.append(f"- {event.event}{kind}: {event.status}{note}")
+        if permission_events:
+            lines.append("Permission:")
+            for event in permission_events:
+                target = f" on {event.target}" if event.target else ""
+                reason = f" — {event.message}" if event.message else ""
+                lines.append(f"- {event.event}{target}: {event.status}{reason}")
         warnings = [entry for entry in log_lines if str(entry.get("level", "")).lower() in {"warning", "error", "critical"}]
         if warnings:
             lines.append("Warnings:")
@@ -153,6 +170,20 @@ class WhyCommandHandler:
         matching = [row for row in rows if row.get("request_id") == request_id]
         matching.reverse()
         return matching
+
+    def _tools(self, request_id: str) -> list[Any]:
+        return self._stream_events(AuditCategory.TOOL, request_id)
+
+    def _permissions(self, request_id: str) -> list[Any]:
+        return self._stream_events(AuditCategory.PERMISSION, request_id)
+
+    def _stream_events(self, category: AuditCategory, request_id: str) -> list[Any]:
+        if self.audit_stream is None:
+            return []
+        try:
+            return self.audit_stream.read(category=category, request_id=request_id, limit=50)
+        except Exception:
+            return []
 
     def _actions(self, request_id: str) -> list[dict[str, Any]]:
         if self.action_audit is None:

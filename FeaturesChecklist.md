@@ -158,8 +158,11 @@ single feature is what made those features look larger than they are.
 	Declared on every tool; MCP tools derive it from their annotations.
 - [ ] Support dry-run / preview for any tool that writes.
 - [ ] Give tools a uniform error and timeout contract, and make long-running tools cancellable.
-- [~] Log every tool invocation and result (2.8). Actions and MCP calls are audited with the
-	tool name; command tools and knowledge providers are not yet.
+- [x] Log every tool invocation and result (2.8). **Closed 2026-09-12:** the audit happens at
+	the agent's dispatch point (`core/agent/graph.py` -> `core/tools/audit.py`), so command tools
+	and knowledge providers are recorded the same way actions and MCP calls already were, and a
+	tool nobody has written yet is covered by construction. Actions keep the executor's own entry
+	rather than getting a second line: it knows the resolved target and the confirmation.
 - [~] Version tools, so a saved workflow (8.3) does not silently change meaning. A `version`
 	field exists on the definition; nothing reads it yet.
 - [x] Let a tool be disabled or sandboxed without removing it. -> `/tools disable <name>`
@@ -275,8 +278,10 @@ for a problem Windows already solves.
 
 ### 2.8 Observability and Audit
 
-- [~] Log what Iris does. Exists for memory changes and actions -> `core/audit/logger.py`;
-	not yet uniform across tools, models, and integrations. Since 2026-09-10 every audit entry,
+- [x] Log what Iris does. One stream, one schema since 2026-09-12: memory changes, actions,
+	tool invocations (2.3), permission decisions (10), and scheduled jobs (8.2) all write
+	`Data\Audit\audit.jsonl` through `core/audit/stream.py`. Model calls stay in `llm_requests`,
+	which is a metrics table rather than an audit trail. Since 2026-09-10 every audit entry,
 	metrics row, trace entry, and log line carries the turn's `request_id`.
 - [x] Trace a request end to end: intent, plan, tools called, model used, timing.
 	-> `core/conversation/request_trace.py` (now with request id, model, usage), the `turn` log
@@ -293,10 +298,17 @@ for a problem Windows already solves.
 	(`Data\Metrics\metrics.db`); read by `/models usage`, not yet by the UI. OpenTelemetry was
 	passed over: the API package arrived with `mcp`, but a useful setup means an exporter and a
 	Jaeger/Grafana backend, which is three services for one user on one machine.
-- [~] Unify the two audit streams (`core/audit/logger.py` for memory, `core/actions/audit.py` for
-	actions) into one schema; the tool registry (2.3) then writes every invocation there. Both
-	carry `request_id` now and `/why` reads them together; the files and schemas are still two.
-- [ ] Never log secrets or credential values (10).
+- [x] **Built 2026-09-12:** one audit schema, one file. `AuditEvent` in `core/audit/stream.py`
+	is deliberately small -- when, which request, what category, what happened, to what, how it
+	ended -- with anything caller-specific in `data`. The two old loggers stay as adapters over it
+	so their callers and tests are untouched, and `memory_changes.jsonl` and `actions.jsonl` are
+	still read as history rather than migrated. `/why` now shows tool and permission lines beside
+	the actions.
+- [x] Never log secrets or credential values (10). **Built 2026-09-12:** redaction happens where
+	a record is written, never where it is read -- a credential that reached the file is already
+	leaked. A key whose name says credential is replaced whole; `user:password@host`, an
+	`Authorization` header, and a token in a query string are rewritten in free text.
+	-> `core/audit/redaction.py`.
 - [ ] Retention policy for traces, audit entries, and captured screen or camera data.
 
 ---
@@ -813,7 +825,8 @@ need; this section decides what is allowed.
 - [ ] Show exactly what will change before confirming — diff, file list, target device.
 - [ ] Backup before destructive file changes.
 - [ ] Provide undo/rollback where possible, and say plainly when an action is irreversible.
-- [ ] Log all changes Iris makes (2.8). Today only memory changes and actions are logged.
+- [x] Log all changes Iris makes (2.8). One stream since 2026-09-12, tools and permission
+	decisions included.
 - [ ] Show diffs.
 - [ ] Keep credentials and secrets separate from model reasoning: never in `config.json`, never in
 	a prompt, never in a log.

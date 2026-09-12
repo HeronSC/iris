@@ -63,6 +63,7 @@ from core.assistant.topic_commands import TopicCommandHandler
 from core.assistant.prompting import PROMPT_CANCEL_TOKEN, PromptRequest, PromptType
 from core.assistant.workflows import MemoryReviewWorkflow, SessionCloseWorkflow
 from core.audit.logger import AuditLogger
+from core.audit.stream import AuditStream
 from core.config.loader import ConfigError, ConfigLoader
 from core.conversation.context_builder import ContextBuilder
 from core.conversation.session import ConversationSession
@@ -104,6 +105,7 @@ from core.system.applications import ApplicationCatalog
 from core.system.places import KnownFolder, find_folders, root_subfolders, vscode_folders
 from core.tools.mcp_client import McpManager, load_server_configs
 from core.tools.models import PermissionLevel, ToolDefinition, ToolKind
+from core.tools.audit import ToolAuditor
 from core.tools.registry import ToolRegistry
 from core.watchers import InboxNotifier, LogNotifier, QuietHours, ToastNotifier, WatcherService
 from core.web.fetch import PageFetcher
@@ -261,7 +263,8 @@ class IrisApplication:
         self.project_handler: CommandHandler = ProjectCommandHandler(output=self._sink)
         self.save_handler: CommandHandler = SaveCommandHandler(output=self._sink)
         proposal_store = MemoryProposalStore(self.config.get("proposal_path") or Path(__file__).resolve().parents[1] / "memory" / "proposals")
-        audit_logger = AuditLogger(self.config.get("audit_path") or Path(__file__).resolve().parents[1] / "audit")
+        audit_folder = Path(self.config.get("audit_path") or Path(__file__).resolve().parents[1] / "audit")
+        audit_logger = AuditLogger(audit_folder)
         self.knowledge_review = KnowledgeReviewWorkflow(self.hypotheses, audit_logger=audit_logger)
         self.knowledge_handler: CommandHandler = KnowledgeCommandHandler(
             self.knowledge_review,
@@ -450,11 +453,13 @@ class IrisApplication:
             tool_registry=self.tool_registry,
         )
         self._register_capability_tools()
+        self.tool_auditor = ToolAuditor(AuditStream(audit_folder), self.tool_registry)
         self.coordinator.attach_tools(
             tool_registry=self.tool_registry,
             action_executor=self.action_executor,
             example_store=intent_example_store,
             checkpoint_path=Path(self.config.get("session_path") or Path(self.config["memory_path"]).parent / "Sessions") / "agent_checkpoints.db",
+            tool_auditor=self.tool_auditor,
         )
         self.mcp_manager = McpManager(
             load_server_configs(self.config.get("mcp_servers") if isinstance(self.config, dict) else None),
@@ -471,6 +476,7 @@ class IrisApplication:
             trace_file=getattr(getattr(self.coordinator, "trace_logger", None), "path", None),
             metrics=self.request_metrics,
             action_audit=action_audit,
+            audit_stream=self.tool_auditor.stream,
             last_request_id=lambda: getattr(self, "last_request_id", None),
             output=self._sink,
         )
