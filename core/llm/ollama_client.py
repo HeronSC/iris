@@ -19,6 +19,9 @@ class OllamaClientError(Exception):
 UsageListener = Callable[[LLMRequest, LLMResponse], None]
 
 
+PROBE_TIMEOUT_SECONDS = 3.0
+
+
 class OllamaClient:
 
     def __init__(
@@ -27,13 +30,16 @@ class OllamaClient:
         model: str,
         timeout_seconds: float | None = 30.0,
         usage_listener: UsageListener | None = None,
+        probe_timeout_seconds: float = PROBE_TIMEOUT_SECONDS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.probe_timeout_seconds = probe_timeout_seconds
         self.usage_listener = usage_listener
         self.last_response: LLMResponse | None = None
         self._client = ollama.Client(host=self.base_url, timeout=timeout_seconds)
+        self._probe = ollama.Client(host=self.base_url, timeout=probe_timeout_seconds)
 
 
     def generate(self, system_prompt: str, user_prompt: str, task: str | None = None) -> str:
@@ -91,7 +97,7 @@ class OllamaClient:
 
 
     def list_models(self) -> list[str]:
-        raw = self._call(self._client.list)
+        raw = self._call(self._probe.list)
         names: list[str] = []
         for item in getattr(raw, "models", None) or []:
             name = getattr(item, "model", None) or getattr(item, "name", None)

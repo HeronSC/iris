@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PLANNING_TASKS: tuple[str, ...] = ("intent", "decision")
 
+UNAVAILABLE_RETRY_SECONDS = 30.0
+
 
 @dataclass(frozen=True)
 class ModelRoutes:
@@ -80,6 +82,7 @@ class ModelRouter:
         self.request_id_provider = request_id_provider
         self.last_response: LLMResponse | None = None
         self._available: list[str] | None = None
+        self._unavailable_until = 0.0
         self._capabilities: dict[str, tuple[str, ...]] = {}
 
 
@@ -157,11 +160,15 @@ class ModelRouter:
 
     def available_models(self, refresh: bool = False) -> list[str]:
         if self._available is None or refresh:
+            if not refresh and time.monotonic() < self._unavailable_until:
+                return []
             try:
                 self._available = self.client.list_models()
             except OllamaClientError as error:
                 logger.warning("Could not list models: %s", error)
+                self._unavailable_until = time.monotonic() + UNAVAILABLE_RETRY_SECONDS
                 return []
+            self._unavailable_until = 0.0
         return list(self._available)
 
     def capabilities(self, model: str) -> tuple[str, ...]:

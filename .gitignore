@@ -37,3 +37,8 @@ Thumbs.db
 *.log
 *.swp
 *.swo
+
+# Runtime state written while Iris runs
+Data/
+core/sessions/
+core/memory/proposals/

@@ -230,6 +230,8 @@ class IrisHost:
         self.schedules.start()
         if self.api is not None:
             self._start_http()
+        warm = threading.Thread(target=self.model_router.available_models, name="iris-host-models", daemon=True)
+        warm.start()
         heartbeat = threading.Thread(target=self._heartbeat, name="iris-host-heartbeat", daemon=True)
         heartbeat.start()
         self._threads.append(heartbeat)
