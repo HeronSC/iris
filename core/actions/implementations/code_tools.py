@@ -11,7 +11,7 @@ from core.actions.models import ActionRequest, ActionResult, ValidationResult
 from core.code.search import SearchToolMissing
 from core.code.symbols import Symbol
 from core.code.workspace import ALWorkspace
-from core.results.models import Result, Source, code, status, table
+from core.results.models import Result, Source, code, file, status, table
 from core.results.models import text as text_result
 from core.tools.models import PermissionLevel, ToolDefinition
 
@@ -255,6 +255,68 @@ class ALSymbolAction:
         return "\n".join(lines), results
 
 
-CODE_ACTIONS = (RepoSearchAction, ALWorkspaceAction, ALSymbolAction)
+class ALCompileArguments(BaseModel):
+    path: str | None = Field(default=None, description="Workspace folder or name; the one in view when omitted")
+    analyzers: bool = Field(default=True, description="Also run the workspace's code analyzers (CodeCop, UICop, PerTenantExtensionCop) with its ruleset")
+    max_diagnostics: int = Field(default=40, ge=1, le=200)
 
-__all__ = ["ALSymbolAction", "ALWorkspaceAction", "CODE_ACTIONS", "RepoSearchAction"]
+
+class ALCompileAction:
+
+    name = "al_compile"
+    definition = ToolDefinition(
+        name="al_compile",
+        description="Compile the Business Central AL workspace with the AL compiler from the VS Code extension and return every error and warning with file, line and code. The .app goes to Iris's own build folder; the workspace is not touched.",
+        arguments=ALCompileArguments,
+        permission=PermissionLevel.EXECUTE,
+        keywords=("compile", "build the extension", "build the app", "does it compile", "compiler errors", "alc", "code analysis", "codecop"),
+    )
+
+    def validate(self, request: ActionRequest, context: object) -> ValidationResult:
+        try:
+            arguments = ALCompileArguments.model_validate(request.arguments)
+        except Exception as error:
+            return ValidationResult(ok=False, error=f"Invalid arguments: {error}")
+        service = _service(context)
+        if service is None:
+            return ValidationResult(ok=False, error=NO_SERVICE)
+        if not service.compiler.available:
+            return ValidationResult(ok=False, error="alc.exe was not found; install the AL Language extension for VS Code or set code.alc_path in config.json")
+        workspace, problem = _resolve(service, arguments.path)
+        if problem:
+            return ValidationResult(ok=False, error=problem)
+        return ValidationResult(ok=True, resolved_target=str(workspace.root), resolved_arguments={"path": str(workspace.root), "analyzers": arguments.analyzers, "max_diagnostics": arguments.max_diagnostics})
+
+    def execute(self, request: ActionRequest, context: object) -> ActionResult:
+        service = _service(context)
+        workspace = service.workspace_at(str(request.arguments.get("path") or ""))
+        if workspace is None:
+            return ActionResult(status="failed", message=NO_WORKSPACE, action=self.name, error="no_workspace")
+        try:
+            report = service.compile(workspace, analyzers=bool(request.arguments.get("analyzers", True)))
+        except FileNotFoundError as error:
+            return ActionResult(status="failed", message=str(error), action=self.name, error="alc_missing")
+        except Exception as error:
+            return ActionResult(status="failed", message=f"Compiling {workspace.name} failed to run: {error}", action=self.name, error="compile_failed")
+        source = Source("al_compile", "tool", str(workspace.root))
+        limit = int(request.arguments.get("max_diagnostics") or 40)
+        shown = list(report.errors) + list(report.warnings)
+        lines = [report.summary()]
+        for item in shown[:limit]:
+            lines.append(item.describe())
+        if len(shown) > limit:
+            lines.append(f"... {len(shown) - limit} more not shown")
+        if report.timed_out:
+            lines.append("The compiler did not finish; try again without analyzers or check the workspace in VS Code.")
+        results: list[Result] = [status("ok" if report.ok else ("warning" if report.timed_out else "error"), report.summary(), source=source)]
+        if shown:
+            rows = [(item.severity, item.code, item.file, item.line or "", item.message) for item in shown[:limit]]
+            results.append(table(("severity", "code", "file", "line", "message"), rows, source=source, title=f"Diagnostics for {workspace.name}"))
+        if report.output_path:
+            results.append(file(report.output_path, source=source, title="Built package"))
+        return ActionResult(status="success" if not report.timed_out else "failed", message="\n".join(lines), action=self.name, resolved_target=str(workspace.root), results=tuple(results), error=None if not report.timed_out else "timeout")
+
+
+CODE_ACTIONS = (RepoSearchAction, ALWorkspaceAction, ALSymbolAction, ALCompileAction)
+
+__all__ = ["ALCompileAction", "ALSymbolAction", "ALWorkspaceAction", "CODE_ACTIONS", "RepoSearchAction"]

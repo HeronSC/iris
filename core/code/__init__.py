@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.code.compiler import ALCompiler, CompileReport
 from core.code.search import RipgrepSearch, SearchOutcome
 from core.code.symbols import Symbol, SymbolIndex
 from core.code.workspace import ALWorkspace, find_workspace_by_name, find_workspace_root, find_workspaces, load_workspace
@@ -22,11 +23,14 @@ class CodeService:
         cache_dir: str | Path | None = None,
         context_service: Any = None,
         search: RipgrepSearch | None = None,
+        compiler: ALCompiler | None = None,
+        alc_path: str | Path | None = None,
     ) -> None:
         self.roots = [Path(item) for item in roots]
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.context_service = context_service
         self.search = search or RipgrepSearch()
+        self.compiler = compiler or ALCompiler(alc_path)
         self._workspaces: dict[str, ALWorkspace] = {}
         self._indexes: dict[str, SymbolIndex] = {}
         self._by_name: dict[str, Path | None] = {}
@@ -158,6 +162,10 @@ class CodeService:
 
     def search_text(self, pattern: str, root: str | Path, **options: Any) -> SearchOutcome:
         return self.search.search(pattern, root, **options)
+
+    def compile(self, workspace: ALWorkspace, *, analyzers: bool = True) -> CompileReport:
+        out_dir = (self.cache_dir.parent if self.cache_dir else Path.cwd()) / "al_build"
+        return self.compiler.compile(workspace, out_dir=out_dir, analyzers=analyzers)
 
 
 __all__ = ["CodeService"]

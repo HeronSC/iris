@@ -464,7 +464,14 @@ Git-specific items moved to 3.3.
 	runtime, id ranges, dependencies, AL launch targets, packages, and object counts by kind.
 - [ ] Learn preferred BC patterns and architecture (feeds 2.2).
 - [ ] Add controlled file editing later.
-- [ ] Run the BC compiler and read errors.
+- [x] Run the BC compiler and read errors. **Built 2026-09-12:** `al_compile`
+	(`core/code/compiler.py`) finds `alc.exe` in the newest AL extension under
+	`~/.vscode/extensions` (or `code.alc_path` in `config.json`), runs it with the workspace's
+	`.alpackages`, the analyzers named in its `.vscode/settings.json` and its ruleset, writes the
+	`.app` to `Data\Indexl_build` so the workspace is untouched, and parses every
+	`file(line,col): error|warning CODE: message` into a table with duplicates dropped. The Kloter
+	Farms workspace compiles clean in 4 s with CodeCop, PerTenantExtensionCop and UICop. The tool
+	is execute-level, so policy decides whether it asks first.
 - [ ] Correct its own changes.
 - [ ] Run tests and read the results.
 - [ ] Show code diffs before significant changes — rendered per 2.7, gated per 10.
@@ -476,9 +483,9 @@ Git-specific items moved to 3.3.
 	project's *own* objects come from its built `.app`, which carries the same file.
 	Passed over: the AL language server (licensed as part of the VS Code extension, built to be
 	driven by an editor), tree-sitter (no AL grammar), a custom AL parser.
-- [~] **Decided 2026-09-10:** text search is `rg` wrapped as a native tool (ripgrep 15.1 is
-	installed; built 2026-09-12); the compiler is `alc.exe` from the installed AL extension (18.0.2732683), wrapped
-	the same way (not yet).
+- [x] **Decided 2026-09-10, built 2026-09-12:** text search is `rg` wrapped as a native tool (ripgrep 15.1 is
+	installed); the compiler is `alc.exe` from the installed AL extension (18.0.2732683), wrapped
+	the same way.
 
 ### 3.3 Git and Azure DevOps
 

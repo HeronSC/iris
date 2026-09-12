@@ -421,10 +421,12 @@ class IrisApplication:
         )
         self.changes = ChangeLedger(Path(self.config["memory_path"]).parent / "Backups" / "undo", audit=self.audit_stream)
         self.context_service = build_context_service(self.config)
+        code_cfg = self.config.get("code", {}) if isinstance(self.config.get("code"), dict) else {}
         self.code_service = CodeService(
             document_config.root_paths(),
             cache_dir=Path(self.config["memory_path"]).parent / "Index" / "al_symbols",
             context_service=self.context_service,
+            alc_path=code_cfg.get("alc_path") or None,
         )
         self.project_service.ledger = self.changes
         self.project_service.context_service = self.context_service
