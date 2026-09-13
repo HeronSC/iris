@@ -1013,8 +1013,12 @@ rules out every hosted speech API, which leaves a short, good list.
 	`core/network/probes.py` wraps `ping`, `tracert`, `arp`, `socket` and two PowerShell
 	cmdlets (default route, DNS servers), parsed rather than echoed; tools `network_check`
 	(DNS timing, ping loss and latency, optional TCP port), `network_trace` (hops as a table),
-	`network_status`, `network_devices`. Throughput is not measured: it needs a download
-	target, which is a decision about what leaves the machine.
+	`network_status`, `network_devices`. Throughput is not measured yet.
+	**Decided 2026-09-13:** read the speed test the UniFi Dream Machine already runs against its
+	WAN rather than generating traffic from this box — it measures the line itself and nothing
+	leaves the house. It waits on the local UniFi key below. Ookla's CLI is out (an installer, a
+	licence prompt, and results posted to Ookla) and so is any third-party endpoint until a local
+	target is settled; LAN throughput will be a timed pull from the Synology once it is signed in.
 - [~] Device discovery. `network_devices` lists what the ARP table has seen per interface,
 	broadcast and multicast rows dropped. Passive, so a quiet device is missing until it is
 	pinged; active scanning and names wait for the UniFi client list below.
