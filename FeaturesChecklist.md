@@ -1027,8 +1027,17 @@ rules out every hosted speech API, which leaves a short, good list.
 	network status, connected clients, device health, logs, traffic/issues.
 - [ ] Add controlled configuration changes later (10 applies).
 - [ ] Watch for firmware updates and offline devices (8.2).
-- [ ] NAS integration. Storage behaviour is specified in 2.6; this covers the device itself —
-	health, volumes, SMART, temperature, backup jobs.
+- [~] NAS integration. Storage behaviour is specified in 2.6; this covers the device itself —
+	health, volumes, SMART, temperature, backup jobs. **Built 2026-09-13:** `core/nas/synology.py`
+	signs in to the DSM Web API, holds the session and signs in again when DSM expires it;
+	`nas_status` reports model, DSM version, uptime, temperature, CPU and memory load and how full
+	each volume is; `nas_storage` lists every drive with slot, size, status, SMART result and
+	temperature, red on a crashed or critical drive and amber past 50 °C. The DSM error codes are
+	translated, so a refusal says whether it was the password, 2FA, a disabled account or an
+	auto-blocked address. Backup jobs are not covered: this NAS has no Hyper Backup, only
+	`SYNO.Backup.Config.*` for DSM's own settings. Fifteen tests run against a fake DSM
+	(`core/tests/test_nas.py`); **the live path is still unverified** — DSM answers error 400 to the
+	`Iris` account, so the account or the password needs another look.
 - [ ] **Decided 2026-09-10:** the gateway is a UniFi Dream Machine, so the adapter uses the
 	official UniFi Network API on UniFi OS — an API key issued from the console, read-only
 	endpoints for sites, devices, and clients. In-house over `httpx`. Passed over unless the

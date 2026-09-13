@@ -73,6 +73,7 @@ class ActionExecutionContext:
     excel_service: Any = None
     knowledge: Any = None
     cameras: Any = None
+    nas: Any = None
     model_router: Any = None
     captures_dir: Any = None
 

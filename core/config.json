@@ -265,5 +265,11 @@
     ],
     "max_file_size_mb": 100,
     "catalog_path": "E:\\AI\\Iris\\Data\\Index\\documents.db"
+  },
+  "synology": {
+    "url": "https://192.168.1.37:5001",
+    "user": "Iris",
+    "verify_certificate": false,
+    "timeout_seconds": 15.0
   }
 }

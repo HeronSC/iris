@@ -18,6 +18,7 @@ from core.actions.implementations.excel_tools import EXCEL_ACTIONS
 from core.actions.implementations.file_tools import FILE_ACTIONS
 from core.actions.implementations.git_tools import GIT_ACTIONS
 from core.actions.implementations.memory_tools import MEMORY_ACTIONS
+from core.actions.implementations.nas_tools import NAS_ACTIONS
 from core.actions.implementations.network_tools import NETWORK_ACTIONS
 from core.actions.implementations.project_tools import PROJECT_ACTIONS
 from core.actions.implementations.fetch_web_page import FetchWebPageAction
@@ -133,6 +134,7 @@ def build_action_layer(
     excel_service: Any = None,
     knowledge: Any = None,
     cameras: Any = None,
+    nas: Any = None,
     model_router: Any = None,
     captures_dir: Any = None,
 ) -> ActionLayer:
@@ -179,6 +181,8 @@ def build_action_layer(
         action_registry.register(git_action())
     for camera_action in CAMERA_ACTIONS:
         action_registry.register(camera_action())
+    for nas_action in NAS_ACTIONS:
+        action_registry.register(nas_action())
 
     documents = document_config or document_search_config(config)
     applications, alias_map = application_maps(config)
@@ -206,6 +210,7 @@ def build_action_layer(
             excel_service=excel_service,
             knowledge=knowledge,
             cameras=cameras,
+            nas=nas,
             model_router=model_router,
             captures_dir=captures_dir,
         ),
