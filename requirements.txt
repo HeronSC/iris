@@ -21,6 +21,9 @@ openpyxl>=3.1
 python-docx>=1.1
 winocr>=0.0.10
 trafilatura>=2.0
+python-pptx>=1.0
+extract-msg>=0.54
+pygments>=2.18
 
 # Runtime services
 apscheduler>=3.10
@@ -31,5 +34,10 @@ windows-toasts>=1.1
 paho-mqtt>=2.0
 keyring>=25.0
 
+# Voice (6.1) - local speech to text and text to speech
+faster-whisper>=1.2
+piper-tts>=1.8
+
 # Windows integration (Excel COM, service host, foreground window) — pinned rather than left transitive
 pywin32>=306
+pywinauto>=0.6.9

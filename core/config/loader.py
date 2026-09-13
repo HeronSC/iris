@@ -301,6 +301,15 @@ class ConfigLoader:
             "backups": config.get("backups", {}),
             "llm": config.get("llm", {}),
             "resources": config.get("resources", {}),
+            "models": config.get("models", {}),
+            "blue_iris": config.get("blue_iris", {}),
+            "unifi": config.get("unifi", {}),
+            "synology": config.get("synology", {}),
+            "code": config.get("code", {}),
+            "context": config.get("context", {}),
+            "retention": config.get("retention", {}),
+            "ui": config.get("ui", {}),
+            "assistant_user": str(config.get("assistant_user", "")) or "user",
             "config_warnings": list(self.warnings),
         }
 

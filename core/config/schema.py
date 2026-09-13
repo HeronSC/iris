@@ -35,6 +35,8 @@ KNOWN_KEYS: dict[str, tuple[type, ...]] = {
     "latency_budget_ms": (dict,),
     "backups": (dict,),
     "blue_iris": (dict,),
+    "unifi": (dict,),
+    "synology": (dict,),
     "code": (dict,),
     "context": (dict,),
     "retention": (dict,),
