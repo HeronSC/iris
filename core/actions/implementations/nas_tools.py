@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from core.actions.models import ActionRequest, ActionResult, ValidationResult
-from core.nas import NasService, SynologyError
+from core.nas import NasService, SynologyError, SynologyPermissionError
 from core.results.models import Result, Source, status, table
 from core.system.probes import human_bytes
 from core.tools.models import PermissionLevel, ToolDefinition
 
 NO_SERVICE = "The NAS is not available in this host."
+NEEDS_ADMIN = "DSM keeps temperature, drive health and load for administrators, so this account sees capacity only. Add the account to the administrators group on the NAS to see the rest."
 
 
 def _ready(context: object) -> tuple[NasService | None, str | None]:
@@ -52,6 +53,8 @@ class NasStatusAction:
                 load = service.utilization()
             except SynologyError:
                 load = None
+        except SynologyPermissionError:
+            return self._capacity_only(service)
         except SynologyError as error:
             return ActionResult(status="failed", message=str(error), action=self.name, error="synology")
 
@@ -87,6 +90,31 @@ class NasStatusAction:
             results.append(table(("volume", "status", "filesystem", "size", "used", "free", "full"), rows, source=source, title="Volumes"))
         return ActionResult(status="success", message="\n".join(lines), action=self.name, results=tuple(results))
 
+    def _capacity_only(self, service: NasService) -> ActionResult:
+        source = _source(self.name, service)
+        try:
+            host = service.hostname()
+            shares = service.shares()
+        except SynologyError as error:
+            return ActionResult(status="failed", message=str(error), action=self.name, error="synology")
+        if not shares:
+            return ActionResult(status="failed", message=NEEDS_ADMIN, action=self.name, error="nas_needs_admin")
+        biggest = max(shares, key=lambda share: share.total_bytes)
+        headline = f"{host or 'The NAS'}: {human_bytes(biggest.free_bytes)} free of {human_bytes(biggest.total_bytes)}"
+        lines = [headline, NEEDS_ADMIN]
+        for share in shares:
+            lines.append(f"{share.name} ({share.real_path or share.path}): {human_bytes(share.free_bytes)} free of {human_bytes(share.total_bytes)}{', read only' if share.read_only else ''}")
+        rows = [
+            (share.name, share.real_path or share.path, human_bytes(share.total_bytes), human_bytes(share.free_bytes), f"{share.percent_used:.0f}%", "yes" if share.read_only else "no")
+            for share in shares
+        ]
+        state = "warning" if biggest.percent_used >= 90.0 else "ok"
+        results: list[Result] = [
+            status(state, headline, source=source, details={"host": host, "reading": "capacity only"}),
+            table(("share", "path", "size", "free", "full", "read only"), rows, source=source, title="Shares"),
+        ]
+        return ActionResult(status="success", message="\n".join(lines), action=self.name, results=tuple(results))
+
 
 class NasStorageAction:
 
@@ -108,6 +136,8 @@ class NasStorageAction:
             return ActionResult(status="failed", message=problem, action=self.name, error="nas_unavailable")
         try:
             volumes, disks = service.storage()
+        except SynologyPermissionError:
+            return ActionResult(status="failed", message=NEEDS_ADMIN, action=self.name, error="nas_needs_admin")
         except SynologyError as error:
             return ActionResult(status="failed", message=str(error), action=self.name, error="synology")
 

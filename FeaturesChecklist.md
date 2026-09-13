@@ -1039,9 +1039,20 @@ rules out every hosted speech API, which leaves a short, good list.
 	temperature, red on a crashed or critical drive and amber past 50 °C. The DSM error codes are
 	translated, so a refusal says whether it was the password, 2FA, a disabled account or an
 	auto-blocked address. Backup jobs are not covered: this NAS has no Hyper Backup, only
-	`SYNO.Backup.Config.*` for DSM's own settings. Fifteen tests run against a fake DSM
-	(`core/tests/test_nas.py`); **the live path is still unverified** — DSM answers error 400 to the
-	`Iris` account, so the account or the password needs another look.
+	`SYNO.Backup.Config.*` for DSM's own settings. Eighteen tests run against a fake DSM
+	(`core/tests/test_nas.py`).
+	**Live 2026-09-13** against `Bespin` at `192.168.1.37`, signed in as `Iris`. Two findings.
+	DSM refuses the login with error 402 when `SYNO.API.Auth` carries a `session` name it does not
+	recognise, so the call sends none. And DSM reserves `SYNO.Core.System` (1006),
+	`SYNO.Core.System.Utilization` and `SYNO.Storage.CGI.Storage` (105) for the administrators
+	group: the `Iris` account is deliberately a non-admin with read-only access to two shares, so
+	`nas_status` falls back to `SYNO.FileStation.Info` and `list_share` — host name, every share it
+	can reach, and capacity from `volume_status` (23.3 TB free of 36.7 TB) — and says in the reply
+	what an administrator account would add. `nas_storage` needs the real thing and says so.
+- [ ] **Open:** drive health on the NAS — temperature, SMART, volume state — needs either the
+	`Iris` account in the administrators group, or SNMP v3, which DSM offers read-only by design
+	and the 2026-09-10 note already names as the fallback. SNMP would need `pysnmp`; Windows has
+	no built-in client. The user's call.
 - [ ] **Decided 2026-09-10:** the gateway is a UniFi Dream Machine, so the adapter uses the
 	official UniFi Network API on UniFi OS — an API key issued from the console, read-only
 	endpoints for sites, devices, and clients. In-house over `httpx`. Passed over unless the

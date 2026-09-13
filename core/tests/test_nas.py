@@ -19,10 +19,12 @@ SID = "sid-1234"
 
 
 class FakeDsm:
-    def __init__(self, *, auth_error: int | None = None, failing_disk: bool = False, hot: bool = False) -> None:
+    def __init__(self, *, auth_error: int | None = None, failing_disk: bool = False, hot: bool = False, non_admin: bool = False, shares: bool = True) -> None:
         self.auth_error = auth_error
         self.failing_disk = failing_disk
         self.hot = hot
+        self.non_admin = non_admin
+        self.shares = shares
         self.logins = 0
         self.calls: list[str] = []
 
@@ -32,6 +34,8 @@ class FakeDsm:
         method = params.get("method", "")
         self.calls.append(f"{api}.{method}")
         if api == "SYNO.API.Auth" and method == "login":
+            if "session" in params:
+                return httpx.Response(200, json={"success": False, "error": {"code": 402}})
             if self.auth_error is not None:
                 return httpx.Response(200, json={"success": False, "error": {"code": self.auth_error}})
             if params.get("account") != "Iris" or params.get("passwd") != "hunter2":
@@ -42,6 +46,36 @@ class FakeDsm:
             return httpx.Response(200, json={"success": True})
         if params.get("_sid") != SID:
             return httpx.Response(200, json={"success": False, "error": {"code": 119}})
+        if self.non_admin and api in {"SYNO.Core.System", "SYNO.Core.System.Utilization", "SYNO.Storage.CGI.Storage"}:
+            return httpx.Response(200, json={"success": False, "error": {"code": 1006 if api == "SYNO.Core.System" else 105}})
+        if api == "SYNO.FileStation.Info":
+            return httpx.Response(200, json={"success": True, "data": {"hostname": "Bespin", "is_manager": False}})
+        if api == "SYNO.FileStation.List":
+            if not self.shares:
+                return httpx.Response(200, json={"success": True, "data": {"shares": [], "total": 0}})
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "shares": [
+                            {
+                                "name": "Henry",
+                                "path": "/Henry",
+                                "isdir": True,
+                                "additional": {"real_path": "/volume1/Henry", "volume_status": {"freespace": 25609713729536, "totalspace": 40307065483264, "readonly": False}},
+                            },
+                            {
+                                "name": "EagleLeasing",
+                                "path": "/EagleLeasing",
+                                "isdir": True,
+                                "additional": {"real_path": "/volume1/EagleLeasing", "volume_status": {"freespace": 25609713729536, "totalspace": 40307065483264, "readonly": True}},
+                            },
+                        ],
+                        "total": 2,
+                    },
+                },
+            )
         if api == "SYNO.Core.System":
             return httpx.Response(
                 200,
@@ -212,6 +246,29 @@ class NasToolTests(unittest.TestCase):
             result = action.execute(ActionRequest(action=action.name, arguments={}), context)
             self.assertEqual(result.status, "failed")
             self.assertEqual(result.error, "nas_unavailable")
+
+    def test_status_falls_back_to_capacity_for_a_non_admin_account(self) -> None:
+        context = SimpleNamespace(nas=service_for(FakeDsm(non_admin=True)))
+        result = NasStatusAction().execute(ActionRequest(action="nas_status", arguments={}), context)
+        self.assertEqual(result.status, "success")
+        self.assertIn("Bespin", result.message)
+        self.assertIn("Henry", result.message)
+        self.assertIn("administrators group", result.message)
+        table = [item for item in result.results if item.kind == ResultKind.TABLE][0]
+        self.assertEqual(table.title, "Shares")
+        self.assertEqual(len(table.data["rows"]), 2)
+
+    def test_storage_says_it_needs_an_administrator(self) -> None:
+        context = SimpleNamespace(nas=service_for(FakeDsm(non_admin=True)))
+        result = NasStorageAction().execute(ActionRequest(action="nas_storage", arguments={}), context)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error, "nas_needs_admin")
+
+    def test_status_gives_up_when_a_non_admin_sees_no_shares(self) -> None:
+        context = SimpleNamespace(nas=service_for(FakeDsm(non_admin=True, shares=False)))
+        result = NasStatusAction().execute(ActionRequest(action="nas_status", arguments={}), context)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error, "nas_needs_admin")
 
     def test_tools_report_a_refused_sign_in(self) -> None:
         context = SimpleNamespace(nas=service_for(FakeDsm(auth_error=400)))

@@ -8,8 +8,10 @@ from typing import Any
 from core.nas.synology import (
     PASSWORD_SECRET,
     Disk,
+    Share,
     SynologyClient,
     SynologyError,
+    SynologyPermissionError,
     SystemInfo,
     Utilization,
     Volume,
@@ -67,9 +69,15 @@ class NasService:
     def storage(self) -> tuple[list[Volume], list[Disk]]:
         return self._require().storage()
 
+    def shares(self) -> list[Share]:
+        return self._require().shares()
+
+    def hostname(self) -> str:
+        return self._require().hostname()
+
     def unhealthy(self) -> tuple[list[Volume], list[Disk]]:
         volumes, disks = self.storage()
         return [volume for volume in volumes if not volume.healthy], [disk for disk in disks if not disk.healthy]
 
 
-__all__ = ["NasService", "NOT_CONFIGURED", "SynologyError"]
+__all__ = ["NasService", "NOT_CONFIGURED", "SynologyError", "SynologyPermissionError"]

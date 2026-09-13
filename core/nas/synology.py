@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
 PASSWORD_SECRET = "synology:password"
-SESSION_NAME = "IrisAssistant"
+PERMISSION_CODES = frozenset({105, 1006})
 
 AUTH_ERRORS = {
     400: "DSM does not know that account, or the password is wrong. Check the user name and reset the secret with /secrets set synology:password <value>.",
@@ -32,13 +32,18 @@ REQUEST_ERRORS = {
     101: "DSM says the request was missing something.",
     102: "DSM does not offer that API on this model.",
     103: "DSM does not offer that method.",
-    105: "That DSM account is not allowed to read this.",
+    105: "That DSM account is not an administrator, and DSM reserves the system and storage readings for administrators.",
     106: "The DSM session expired.",
     119: "The DSM session is no longer valid.",
+    1006: "That DSM account is not an administrator, and DSM reserves the system readings for administrators.",
 }
 
 
 class SynologyError(RuntimeError):
+    pass
+
+
+class SynologyPermissionError(SynologyError):
     pass
 
 
@@ -102,6 +107,24 @@ class Disk:
     @property
     def healthy(self) -> bool:
         return self.status.lower() in {"normal", "healthy"} and self.smart_status.lower() in {"normal", "healthy", ""}
+
+
+@dataclass(frozen=True)
+class Share:
+    name: str
+    path: str
+    real_path: str
+    total_bytes: int
+    free_bytes: int
+    read_only: bool
+
+    @property
+    def used_bytes(self) -> int:
+        return max(0, self.total_bytes - self.free_bytes)
+
+    @property
+    def percent_used(self) -> float:
+        return (self.used_bytes / self.total_bytes * 100.0) if self.total_bytes else 0.0
 
 
 @dataclass(frozen=True)
@@ -197,6 +220,19 @@ def _network_total(value: Any) -> dict[str, Any]:
     return {}
 
 
+def parse_share(data: dict[str, Any]) -> Share:
+    additional = data.get("additional") if isinstance(data.get("additional"), dict) else {}
+    volume = additional.get("volume_status") if isinstance(additional.get("volume_status"), dict) else {}
+    return Share(
+        name=str(data.get("name") or ""),
+        path=str(data.get("path") or ""),
+        real_path=str(additional.get("real_path") or ""),
+        total_bytes=_int(volume.get("totalspace")),
+        free_bytes=_int(volume.get("freespace")),
+        read_only=bool(volume.get("readonly")),
+    )
+
+
 def parse_utilization(data: dict[str, Any]) -> Utilization:
     cpu = data.get("cpu") if isinstance(data.get("cpu"), dict) else {}
     memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
@@ -267,7 +303,6 @@ class SynologyClient:
                     "method": "login",
                     "account": self.user,
                     "passwd": self.password,
-                    "session": SESSION_NAME,
                     "format": "sid",
                 },
             )
@@ -292,7 +327,10 @@ class SynologyClient:
                 payload = self._get("/webapi/entry.cgi", params)
         if not payload.get("success"):
             code = _int((payload.get("error") or {}).get("code"))
-            raise SynologyError(REQUEST_ERRORS.get(code, f"DSM refused {api}.{method} (error {code})."))
+            message = REQUEST_ERRORS.get(code, f"DSM refused {api}.{method} (error {code}).")
+            if code in PERMISSION_CODES:
+                raise SynologyPermissionError(message)
+            raise SynologyError(message)
         data = payload.get("data")
         return data if isinstance(data, dict) else {}
 
@@ -310,13 +348,26 @@ class SynologyClient:
         disks = [parse_disk(item) for item in raw_disks if isinstance(item, dict)]
         return volumes, disks
 
+    def shares(self) -> list[Share]:
+        data = self._request(
+            "SYNO.FileStation.List",
+            "list_share",
+            "2",
+            additional='["real_path","volume_status"]',
+        )
+        raw = data.get("shares") if isinstance(data.get("shares"), list) else []
+        return [parse_share(item) for item in raw if isinstance(item, dict)]
+
+    def hostname(self) -> str:
+        return str(self._request("SYNO.FileStation.Info", "get", "2").get("hostname") or "")
+
     def logout(self) -> None:
         if self._sid is None:
             return
         try:
             self._get(
                 "/webapi/entry.cgi",
-                {"api": "SYNO.API.Auth", "version": "7", "method": "logout", "session": SESSION_NAME, "_sid": self._sid},
+                {"api": "SYNO.API.Auth", "version": "7", "method": "logout", "_sid": self._sid},
             )
         except SynologyError:
             logger.info("DSM logout did not answer; dropping the session anyway")
@@ -328,13 +379,16 @@ __all__ = [
     "DEFAULT_TIMEOUT_SECONDS",
     "Disk",
     "PASSWORD_SECRET",
-    "SESSION_NAME",
+    "PERMISSION_CODES",
+    "Share",
     "SynologyClient",
     "SynologyError",
+    "SynologyPermissionError",
     "SystemInfo",
     "Utilization",
     "Volume",
     "parse_disk",
+    "parse_share",
     "parse_system_info",
     "parse_utilization",
     "parse_volume",
