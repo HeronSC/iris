@@ -15,6 +15,16 @@ DEFAULT_TIMEOUT_SECONDS = 15.0
 PASSWORD_SECRET = "synology:password"
 PERMISSION_CODES = frozenset({105, 1006})
 
+READ_CALLS = frozenset(
+    {
+        ("SYNO.Core.System", "info"),
+        ("SYNO.Core.System.Utilization", "get"),
+        ("SYNO.Storage.CGI.Storage", "load_info"),
+        ("SYNO.FileStation.Info", "get"),
+        ("SYNO.FileStation.List", "list_share"),
+    }
+)
+
 AUTH_ERRORS = {
     400: "DSM does not know that account, or the password is wrong. Check the user name and reset the secret with /secrets set synology:password <value>.",
     401: "That DSM account is disabled.",
@@ -61,7 +71,8 @@ class SystemInfo:
 
     @property
     def summary(self) -> str:
-        parts = [f"{self.model} on DSM {self.firmware}"]
+        release = self.firmware if self.firmware.upper().startswith("DSM") else f"DSM {self.firmware}"
+        parts = [f"{self.model} on {release}"]
         if self.temperature_c is not None:
             parts.append(f"{self.temperature_c:.0f} °C")
         if self.uptime:
@@ -153,9 +164,13 @@ def _uptime(value: Any) -> str:
     if not text:
         return ""
     pieces = text.split(":")
-    if len(pieces) != 4:
+    if len(pieces) == 4:
+        days, hours, minutes, _seconds = (_int(piece) for piece in pieces)
+    elif len(pieces) == 3:
+        hours, minutes, _seconds = (_int(piece) for piece in pieces)
+        days, hours = divmod(hours, 24)
+    else:
         return text
-    days, hours, minutes, _seconds = (_int(piece) for piece in pieces)
     if days:
         return f"{days} day{'s' if days != 1 else ''} {hours}h {minutes}m"
     return f"{hours}h {minutes}m"
@@ -191,7 +206,9 @@ def parse_volume(data: dict[str, Any]) -> Volume:
 def parse_disk(data: dict[str, Any]) -> Disk:
     temperature = data.get("temp")
     container = data.get("container")
-    slot = str((container or {}).get("str") or "") if isinstance(container, dict) else str(container or "")
+    enclosure = str((container or {}).get("str") or "") if isinstance(container, dict) else str(container or "")
+    slot_id = data.get("slot_id", data.get("num_id"))
+    slot = f"Bay {_int(slot_id)}" if slot_id not in (None, "") else enclosure
     return Disk(
         id=str(data.get("id") or ""),
         name=str(data.get("name") or data.get("id") or ""),
@@ -316,6 +333,8 @@ class SynologyClient:
             return sid
 
     def _request(self, api: str, method: str, version: str = "1", **fields: Any) -> dict[str, Any]:
+        if (api, method) not in READ_CALLS:
+            raise SynologyError(f"Iris may only call the readings on the NAS, and {api}.{method} is not one of them")
         sid = self._sid or self.login()
         params = {"api": api, "method": method, "version": version, "_sid": sid, **fields}
         payload = self._get("/webapi/entry.cgi", params)

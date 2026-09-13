@@ -1047,12 +1047,17 @@ rules out every hosted speech API, which leaves a short, good list.
 	`SYNO.Core.System.Utilization` and `SYNO.Storage.CGI.Storage` (105) for the administrators
 	group: the `Iris` account is deliberately a non-admin with read-only access to two shares, so
 	`nas_status` falls back to `SYNO.FileStation.Info` and `list_share` — host name, every share it
-	can reach, and capacity from `volume_status` (23.3 TB free of 36.7 TB) — and says in the reply
-	what an administrator account would add. `nas_storage` needs the real thing and says so.
-- [ ] **Open:** drive health on the NAS — temperature, SMART, volume state — needs either the
-	`Iris` account in the administrators group, or SNMP v3, which DSM offers read-only by design
-	and the 2026-09-10 note already names as the fallback. SNMP would need `pysnmp`; Windows has
-	no built-in client. The user's call.
+	can reach, and capacity from `volume_status` — and says in the reply what an administrator
+	account would add. That fallback stands for any narrower account.
+	**Resolved 2026-09-13:** the user put `Iris` in the administrators group on the condition that
+	files stay read-only, so the full reading works: `RS819` on DSM 7.2.2-72806 Update 9, up 29
+	days, volume_1 13.4 TB of 36.7 TB used, four 12.7 TB Seagates in bays 1-4, all SMART normal,
+	43-47 °C. Read-only is enforced on Iris's side rather than DSM's: `READ_CALLS` in
+	`core/nas/synology.py` is the whole list of API calls the client may make — the five readings —
+	and anything else is refused before a request leaves the machine. `SYNO.Core.System` also
+	carries `shutdown` and `reboot`, which is why the guard names methods and not just APIs.
+	Bays come from `slot_id` (the disk `id` is `sda`, and `container.str` is the enclosure model,
+	the same for every drive).
 - [ ] **Decided 2026-09-10:** the gateway is a UniFi Dream Machine, so the adapter uses the
 	official UniFi Network API on UniFi OS — an API key issued from the console, read-only
 	endpoints for sites, devices, and clients. In-house over `httpx`. Passed over unless the

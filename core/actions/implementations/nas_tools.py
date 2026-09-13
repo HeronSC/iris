@@ -167,7 +167,7 @@ class NasStorageAction:
         ]
         results: list[Result] = [status(state, headline, source=source)]
         if rows:
-            results.append(table(("drive", "slot", "model", "size", "status", "smart", "°C"), rows, source=source, title="Drives"))
+            results.append(table(("drive", "bay", "model", "size", "status", "smart", "°C"), rows, source=source, title="Drives"))
         return ActionResult(status="success", message="\n".join(lines), action=self.name, results=tuple(results))
 
 

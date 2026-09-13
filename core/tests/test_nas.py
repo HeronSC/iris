@@ -12,7 +12,7 @@ import httpx
 from core.actions.implementations.nas_tools import NasStatusAction, NasStorageAction
 from core.actions.models import ActionRequest
 from core.nas import NasService
-from core.nas.synology import SynologyClient, SynologyError
+from core.nas.synology import READ_CALLS, SynologyClient, SynologyError, _uptime
 from core.results.models import ResultKind
 
 SID = "sid-1234"
@@ -117,8 +117,8 @@ class FakeDsm:
                             {"id": "volume_1", "display_name": "Volume 1", "status": "normal", "fs_type": "btrfs", "size": {"total": "8000000000000", "used": "7600000000000"}},
                         ],
                         "disks": [
-                            {"id": "sata1", "name": "Drive 1", "model": "WD80EFZZ", "serial": "WD-A1", "status": "normal", "smart_status": "normal", "temp": 55 if self.hot else 38, "size_total": "8001563222016", "container": {"str": "Disk 1"}, "diskType": "SATA"},
-                            {"id": "sata2", "name": "Drive 2", "model": "WD80EFZZ", "serial": "WD-A2", "status": "crashed" if self.failing_disk else "normal", "smart_status": "critical" if self.failing_disk else "normal", "temp": 39, "size_total": "8001563222016", "container": {"str": "Disk 2"}, "diskType": "SATA"},
+                            {"id": "sata1", "name": "Drive 1", "model": "WD80EFZZ", "serial": "WD-A1", "status": "normal", "smart_status": "normal", "temp": 55 if self.hot else 38, "size_total": "8001563222016", "container": {"str": "RS819"}, "slot_id": 1, "diskType": "SATA"},
+                            {"id": "sata2", "name": "Drive 2", "model": "WD80EFZZ", "serial": "WD-A2", "status": "crashed" if self.failing_disk else "normal", "smart_status": "critical" if self.failing_disk else "normal", "temp": 39, "size_total": "8001563222016", "container": {"str": "RS819"}, "slot_id": 2, "diskType": "SATA"},
                         ],
                     },
                 },
@@ -182,10 +182,41 @@ class SynologyClientTests(unittest.TestCase):
         self.assertEqual(volumes[0].name, "Volume 1")
         self.assertEqual(volumes[0].free_bytes, 400000000000)
         self.assertAlmostEqual(volumes[0].percent_used, 95.0)
-        self.assertEqual([disk.slot for disk in disks], ["Disk 1", "Disk 2"])
+        self.assertEqual([disk.slot for disk in disks], ["Bay 1", "Bay 2"])
         self.assertEqual(load.cpu_percent, 11.0)
         self.assertEqual(load.memory_percent, 46.0)
         self.assertEqual(load.network_up_bytes, 500)
+
+
+class ReadOnlyTests(unittest.TestCase):
+    def test_a_call_outside_the_readings_never_reaches_the_nas(self) -> None:
+        fake = FakeDsm()
+        client = SynologyClient("https://nas.test:5001", "Iris", "hunter2", transport=httpx.MockTransport(fake.handle))
+        with self.assertRaises(SynologyError) as raised:
+            client._request("SYNO.Core.System", "shutdown", "1")
+        self.assertIn("readings", str(raised.exception))
+        self.assertEqual(fake.calls, [])
+
+    def test_every_reading_the_client_makes_is_on_the_list(self) -> None:
+        fake = FakeDsm()
+        client = SynologyClient("https://nas.test:5001", "Iris", "hunter2", transport=httpx.MockTransport(fake.handle))
+        client.system_info()
+        client.utilization()
+        client.storage()
+        client.shares()
+        client.hostname()
+        allowed = {f"{api}.{method}" for api, method in READ_CALLS} | {"SYNO.API.Auth.login"}
+        self.assertLessEqual(set(fake.calls), allowed)
+
+    def test_uptime_is_read_in_hours_or_days(self) -> None:
+        self.assertEqual(_uptime("12:04:31:07"), "12 days 4h 31m")
+        self.assertEqual(_uptime("712:21:38"), "29 days 16h 21m")
+        self.assertEqual(_uptime(""), "")
+
+    def test_the_release_is_not_said_twice(self) -> None:
+        fake = FakeDsm()
+        client = SynologyClient("https://nas.test:5001", "Iris", "hunter2", transport=httpx.MockTransport(fake.handle))
+        self.assertNotIn("DSM DSM", client.system_info().summary)
 
 
 class NasServiceTests(unittest.TestCase):
