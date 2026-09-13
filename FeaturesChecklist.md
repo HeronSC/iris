@@ -335,7 +335,8 @@ for a problem Windows already solves.
 - [x] NAS is reached by UNC path. Handle an offline or unreachable root without hanging or losing
 	data — the scanner's `exists()` guard is the start; a UNC root that vanishes mid-scan is the
 	case to test.
-- [ ] OneDrive is not synced to this PC today. When it is needed, sync it rather than reaching it
+- [ ] **Decided 2026-09-13:** left alone for now — not synced, not indexed, not a Graph call.
+	OneDrive is not synced to this PC today. When it is needed, sync it rather than reaching it
 	through Microsoft Graph, and turn Files On-Demand *off* for any indexed folder — a placeholder
 	reads like a file but downloads on access, so indexing an on-demand tree pulls down the whole
 	tree. Detect the placeholder attribute via `os.stat` and refuse to index it. Graph stays a 4.5
@@ -561,18 +562,28 @@ Git-specific items moved to 3.3.
 	roots. `git_diff`, `git_diff_staged`, `git_diff_unstaged` render as
 	diff results (2.7). The reference server has no blame; that waits for a second server or a
 	wrapped `git blame`.
-- [ ] Pull requests: list, read, comment, create.
-- [ ] Build status and pipelines.
-- [ ] Work items: read, link to commits and PRs, update.
+- [x] Pull requests: list, read, comment, create. **Built 2026-09-13:** `repo_pull_request` and
+	`repo_pull_request_thread` read; `repo_pull_request_write` and `repo_pull_request_thread_write`
+	create and comment, both through confirm.
+- [x] Build status and pipelines. `pipelines_build`, `pipelines_build_log`,
+	`pipelines_definition`, `pipelines_artifact` read; `pipelines_run` and `pipelines_write`
+	confirm first. Watching them is 8.2.
+- [x] Work items: read, link to commits and PRs, update. `wit_work_item`, `wit_query`,
+	`wit_backlog` and `search_workitem` read; `wit_work_item_write`, `wit_work_item_comment_write`
+	and `wit_work_item_link_write` confirm first.
 - [ ] Relate a work item or PR back to the project it belongs to (3.4).
 - [ ] Eventually support full development workflow management.
-- [~] **Decided 2026-09-10:** Iris's first two MCP servers (2.3) — `mcp-server-git` (the reference
+- [x] **Decided 2026-09-10:** Iris's first two MCP servers (2.3) — `mcp-server-git` (the reference
 	server, via `uvx`) and Microsoft's official `@azure-devops/mcp` (via `npx`). Both pass through
 	the confirm/audit spine, so a commit or a work-item update still gets a preview. Read-only
-	surfaces first. Git is running (above); Azure DevOps is not configured yet.
-- [ ] **Decided 2026-09-10:** Azure DevOps authenticates through `az login` (Entra). Iris stores no
-	secret; the CLI owns token refresh. `az` 2.87 is installed.
-- [ ] Passed over: GitPython/pygit2 and hand-wrapping `az devops` — the servers already exist and
+	surfaces first. **Built 2026-09-13:** both are running. `@azure-devops/mcp` 2.10 registers 40
+	tools against `https://dev.azure.com/ElephasCorporation`; the 25 read tools are listed in
+	`no_confirm`, so every `_write`, `pipelines_run`, `repo_create_branch`, `wiki_upsert_page` and
+	the attachment download asks first. Projects seen: Elephas, Kloter Farms, WildCreek Consulting.
+- [x] **Decided 2026-09-10:** Azure DevOps authenticates through `az login` (Entra). Iris stores no
+	secret; the CLI owns token refresh. `az` 2.87 is installed. The server runs with `-a azcli`;
+	its default is `interactive`, which hangs a headless start on a browser prompt.
+- [x] Passed over: GitPython/pygit2 and hand-wrapping `az devops` — the servers already exist and
 	are maintained by their owners.
 
 ### 3.4 Project and Task Awareness
@@ -757,6 +768,8 @@ holds only the Creative Cloud shell, which is why an earlier check missed them.
 - [ ] **Decided 2026-09-10:** Iris serves the work tenant (`elephas.us`), the identity `az` is
 	already signed in with. Still to settle: app registration, delegated scopes, and whether tenant
 	admin consent is available. This remains the most likely hard blocker in this section.
+	**Parked 2026-09-13** at the user's word: the whole section waits until the network, storage
+	and camera sections are done. Nothing here is started before then.
 - [ ] Options: Microsoft Graph with MSAL device-code or interactive auth (the real path);
 	Outlook COM as a local-only fallback; Graph change notifications for push; Exchange Web
 	Services only if Graph cannot reach something.
@@ -1025,6 +1038,10 @@ rules out every hosted speech API, which leaves a short, good list.
 	Web API — login, `SYNO.Core.System` for volumes and temperature, `SYNO.Storage.CGI.Storage` for
 	disks and SMART, backup task status. In-house over `httpx`; credentials in Credential Manager
 	(10). SNMP and SSH stay as fallbacks. File access is unchanged: UNC path through `pathlib` (2.6).
+	**Found 2026-09-13:** the NAS answers on `192.168.1.37`, DSM on 5000 (http) and 5001 (https,
+	self-signed); `SYNO.API.Info` advertises `SYNO.API.Auth` v7, `SYNO.Core.System` v3 and
+	`SYNO.Storage.CGI.Storage` v1. The user created a DSM account named `Iris`; config takes
+	`synology.url` and `synology.user`, the password lives in the `synology:password` secret.
 
 ---
 
@@ -1195,10 +1212,11 @@ rules out every hosted speech API, which leaves a short, good list.
 	Example: "When X happens and nobody is home, do Y."
 - [ ] Require controlled permissions for physical-world actions (10), with rate limits and an
 	obvious way to stop everything.
-- [ ] **Decided 2026-09-10:** Home Assistant is the intended hub. It is not running today but can
-	be; when 9.2 starts it runs in Docker beside SearXNG (5.1), owns the devices, and Iris talks to
-	its REST/WebSocket API. The MQTT broker that already serves Blue Iris (9.1) is the shared bus.
-	Vendor clouds, Matter, and Zigbee2MQTT are Home Assistant's concern, not Iris's.
+- [ ] **Decided 2026-09-10, approved 2026-09-13:** Home Assistant is the hub, and the user has
+	approved a full install and configuration, not a token one. It runs in Docker beside SearXNG
+	(5.1), owns the devices, and Iris talks to its REST/WebSocket API. The MQTT broker that already
+	serves Blue Iris (9.1) is the shared bus. Vendor clouds, Matter, and Zigbee2MQTT are Home
+	Assistant's concern, not Iris's.
 - [ ] **Open:** which devices are actually in the house today — a Home Assistant install answers
 	that by discovery rather than by list.
 
@@ -1380,8 +1398,9 @@ and the `Data/` tree.
 	database, watcher and schedule state, the newest backup, and a `broken` list; `status` is
 	`degraded` whenever that list is not empty. -> `core/host/health.py`, one builder for the
 	service, the desktop, and the MCP server.
-- [ ] **Open:** is Iris ever reachable from a phone or another machine? That answer drives the UI
-	choice in 6 and the auth story in 10.
+- [x] **Decided 2026-09-13:** not today, but yes eventually. Nothing is exposed off this box now;
+	the UI choice in 6 and the auth story in 10 must not assume desktop-only, so the HTTP surface
+	stays the seam a phone client would use.
 
 ---
 

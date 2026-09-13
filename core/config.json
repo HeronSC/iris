@@ -52,6 +52,47 @@
       },
       "no_confirm": [],
       "confirm": []
+    },
+    "azure_devops": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@azure-devops/mcp",
+        "ElephasCorporation",
+        "-a",
+        "azcli"
+      ],
+      "enabled": true,
+      "no_confirm": [
+        "core_list_projects",
+        "core_list_project_teams",
+        "core_get_identity_ids",
+        "work",
+        "pipelines_build",
+        "pipelines_build_log",
+        "pipelines_definition",
+        "pipelines_artifact",
+        "repo_repository",
+        "repo_branch",
+        "repo_file",
+        "repo_pull_request",
+        "repo_pull_request_thread",
+        "repo_search_commits",
+        "wit_work_item",
+        "wit_query",
+        "wit_backlog",
+        "wiki",
+        "testplan",
+        "testplan_show_test_results_from_build_id",
+        "search_code",
+        "search_wiki",
+        "search_workitem",
+        "advsec_get_alerts",
+        "advsec_get_alert_details"
+      ],
+      "confirm": [],
+      "ready_timeout_seconds": 120.0,
+      "timeout_seconds": 90.0
     }
   },
   "conversation": {
