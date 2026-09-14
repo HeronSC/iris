@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -54,11 +54,14 @@ from core.results.html import render_confirmation, render_search_results
 #! @allow-local-import
 from ui.results_panel import ResultsPanel, markdown_to_html, results_fragment
 #! @allow-local-import
-from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, CommandPalette, GlobalHotkey, QuickInput, TrayController, apply_dark_palette, make_icon
+from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, CommandPalette, GlobalHotkey, QuickInput, TrayController, apply_dark_palette, apply_light_palette, make_icon
 #! @allow-local-import
 from core.assistant.why_command import describe_activity
 #! @allow-local-import
 from core.assistant.tool_progress import is_tool_progress
+
+
+LINE_BREAK = chr(0x2028)
 
 
 class ChatInput(QTextEdit):
@@ -313,12 +316,14 @@ class IrisWindow(QMainWindow):
 
         self.status_label = QLabel("Starting")
         self.conversation_view = QTextBrowser()
+        self.conversation_view.setStyleSheet("QTextBrowser { color: palette(text); background: palette(base); }")
         self.conversation_view.setOpenExternalLinks(False)
         self.conversation_view.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
         self.history = self.conversation_view
 
         self.details_title = QLabel("Details")
         self.details_view = QTextBrowser()
+        self.details_view.setStyleSheet("QTextBrowser { color: palette(text); background: palette(base); }")
         self.details_view.setOpenExternalLinks(False)
         self.details_view.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
         self.details_actions_row = QWidget()
@@ -336,6 +341,7 @@ class IrisWindow(QMainWindow):
 
         self.input_box = ChatInput()
         self.input_box.setPlaceholderText("Type a message...")
+        self.input_box.setStyleSheet("QTextEdit { color: palette(text); background: palette(base); }")
         self.input_box.submitRequested.connect(self.send_message)
 
         self.send_button = QPushButton("Send")
@@ -682,6 +688,8 @@ class IrisWindow(QMainWindow):
             self.set_status("Ready")
 
     def _append_message(self, role: MessageRole, text: str, label: str | None = None) -> None:
+        if role == MessageRole.SYSTEM:
+            return
         role_label = label or {
             MessageRole.USER: "You",
             MessageRole.ASSISTANT: "Iris",
@@ -690,8 +698,22 @@ class IrisWindow(QMainWindow):
             MessageRole.ERROR: "Error",
             MessageRole.CONFIRMATION: "Confirmation",
         }[role]
-        self.history.append(f"{role_label}\n{text}\n")
+        alignment = Qt.AlignmentFlag.AlignRight if role == MessageRole.USER else Qt.AlignmentFlag.AlignLeft
         cursor = self.history.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        if not self.history.document().isEmpty():
+            cursor.insertBlock()
+        block_format = QTextBlockFormat()
+        block_format.setAlignment(alignment)
+        block_format.setBottomMargin(10.0)
+        cursor.setBlockFormat(block_format)
+        label_format = QTextCharFormat()
+        label_format.setFontWeight(QFont.Weight.Bold)
+        body_format = QTextCharFormat()
+        body_format.setFontWeight(QFont.Weight.Normal)
+        cursor.setCharFormat(label_format)
+        cursor.insertText(role_label, label_format)
+        cursor.insertText(LINE_BREAK + text.replace(chr(10), LINE_BREAK), body_format)
         cursor.movePosition(cursor.MoveOperation.End)
         self.history.setTextCursor(cursor)
 
@@ -723,12 +745,11 @@ class IrisWindow(QMainWindow):
         self._stream_text = getattr(self, "_stream_text", "") + delta
         self._rewrite_placeholder(assistant_name, self._stream_text)
 
-    def _rewrite_placeholder(self, label: str, text: str) -> None:
+    def _clear_placeholder(self) -> bool:
         start_block = getattr(self, "_placeholder_block", None)
         document = self.history.document()
         if start_block is None or start_block >= document.blockCount():
-            self._append_message(MessageRole.ASSISTANT, text, label=label)
-            return
+            return False
         cursor = self.history.textCursor()
         cursor.beginEditBlock()
         cursor.setPosition(document.findBlockByNumber(start_block).position())
@@ -736,29 +757,40 @@ class IrisWindow(QMainWindow):
         cursor.removeSelectedText()
         cursor.deletePreviousChar()
         cursor.endEditBlock()
+        return True
+
+    def _rewrite_placeholder(self, label: str, text: str) -> None:
+        self._clear_placeholder()
         self._append_message(MessageRole.ASSISTANT, text, label=label)
 
     def _render_response(self, response) -> None:
         assistant_name = self.app_service.config.get("assistant_name", "Iris") if isinstance(self.app_service.config, dict) else "Iris"
         conversation = self._response_conversation(response)
-        streamed = bool(getattr(self, "_stream_text", ""))
         self._stream_text = ""
         if conversation is not None and conversation.message.strip():
-            if streamed:
-                self._rewrite_placeholder(assistant_name, conversation.message.strip())
-            else:
-                self._append_message(MessageRole.ASSISTANT, conversation.message.strip(), label=assistant_name)
+            self._rewrite_placeholder(assistant_name, conversation.message.strip())
         else:
+            self._clear_placeholder()
+            rendered = False
             for message in response.messages:
-                if message.role == MessageRole.USER:
+                if message.role in {MessageRole.USER, MessageRole.SYSTEM}:
                     continue
                 if message.role == MessageRole.ASSISTANT:
                     self._append_message(MessageRole.ASSISTANT, message.text, label=assistant_name)
                 else:
                     self._append_message(message.role, message.text)
+                rendered = True
+            if not rendered:
+                self._append_message(MessageRole.ERROR, self._unrendered_failure_text(response))
 
         self._append_details_section(response)
         self._set_confirmation_controls_visible(response.status == IrisStatus.AWAITING_CONFIRMATION)
+
+    def _unrendered_failure_text(self, response) -> str:
+        for message in response.messages:
+            if message.role == MessageRole.SYSTEM and message.text.strip():
+                return message.text.strip()
+        return "Iris could not complete that request."
 
     def _append_details_section(self, response) -> None:
         details = self._response_details(response)
@@ -1333,8 +1365,10 @@ def _resolve_config_path(argv: list[str]) -> tuple[Path, list[str]]:
 def main() -> None:
     config_path, qt_argv = _resolve_config_path(sys.argv[1:])
     app = QApplication([sys.argv[0], *qt_argv])
-    if str(QSettings("Iris", "IrisUI").value("window/theme") or "dark").lower() == "dark":
+    if str(QSettings("Iris", "IrisUI").value("window/theme") or "light").lower() == "dark":
         apply_dark_palette(app)
+    else:
+        apply_light_palette(app)
     configure_logging(log_dir_for(None, config_path))
     window = IrisWindow(config_path)
     if window._start_maximized:

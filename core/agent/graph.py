@@ -236,6 +236,10 @@ class IrisAgent:
         tools = self._tool_specs()
         if not tools:
             return {"tool_calls": [], "iterations": state.get("iterations", 0) + 1, "answer": ""}
+        if not state.get("tool_results"):
+            routed = self._deterministic_route(state["user_message"])
+            if routed is not None:
+                return self._turn_from_routed(state, routed)
         prepared = self.coordinator.prepare_turn(state["user_message"], state.get("project_id"))
         system_prompt = f"{prepared['system_prompt']}\n\n{TOOL_GUIDANCE}"
         context_block = str(prepared.get("context_block") or "").strip()
@@ -252,6 +256,48 @@ class IrisAgent:
             update["answer"] = self.coordinator.complete_turn(prepared, response.content.strip(), selected_tool=state.get("selected_tool"), tool_arguments=state.get("tool_arguments") or {}, tool_status=state.get("tool_status") or {"status": "skipped"})
             update["resolved_by"] = state.get("resolved_by") or "model"
         return update
+
+    def _deterministic_route(self, user_message: str) -> Any | None:
+        route = getattr(self.knowledge_router, "route", None)
+        if not callable(route):
+            return None
+        try:
+            result = route(user_message)
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
+            logger.warning("Deterministic routing failed: %s", error)
+            return None
+        if result is None or not str(getattr(result, "response", "") or "").strip():
+            return None
+        return result
+
+    def _turn_from_routed(self, state: AgentState, routed: Any) -> dict[str, Any]:
+        prepared = self.coordinator.prepare_turn(state["user_message"], state.get("project_id"))
+        capability = {
+            "provider": routed.provider,
+            "detail_type": getattr(routed, "detail_type", "text"),
+            "detail_title": getattr(routed, "detail_title", None),
+            "detail_content": getattr(routed, "detail_content", None),
+            "metadata": getattr(routed, "metadata", None) or {},
+        }
+        status = {"status": "success"}
+        answer = self.coordinator.complete_turn(
+            prepared,
+            str(routed.response).strip(),
+            selected_tool=routed.provider,
+            tool_arguments={},
+            tool_status=status,
+            capability=capability,
+        )
+        return {
+            "tool_calls": [],
+            "iterations": state.get("iterations", 0) + 1,
+            "answer": answer,
+            "selected_tool": routed.provider,
+            "tool_arguments": {},
+            "tool_status": status,
+            "capability": capability,
+            "resolved_by": "capability",
+        }
 
     @staticmethod
     def _after_plan(state: AgentState) -> str:

@@ -181,7 +181,7 @@ class TrayController(QObject):
             self.showRequested.emit()
 
 
-__all__ = ["DEFAULT_HOTKEY", "GlobalHotkey", "HOTKEY_ID", "TrayController", "WM_HOTKEY", "make_icon", "parse_hotkey"]
+__all__ = ["DEFAULT_HOTKEY", "GlobalHotkey", "HOTKEY_ID", "TrayController", "WM_HOTKEY", "apply_dark_palette", "apply_light_palette", "make_icon", "parse_hotkey"]
 
 
 def apply_dark_palette(application: QApplication) -> QPalette:
@@ -212,6 +212,34 @@ def apply_dark_palette(application: QApplication) -> QPalette:
     return palette
 
 
+def apply_light_palette(application: QApplication) -> QPalette:
+    palette = QPalette()
+    window = QColor(243, 243, 245)
+    base = QColor(255, 255, 255)
+    text = QColor(24, 24, 27)
+    accent = QColor(37, 99, 235)
+    palette.setColor(QPalette.ColorRole.Window, window)
+    palette.setColor(QPalette.ColorRole.WindowText, text)
+    palette.setColor(QPalette.ColorRole.Base, base)
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(246, 246, 248))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, base)
+    palette.setColor(QPalette.ColorRole.ToolTipText, text)
+    palette.setColor(QPalette.ColorRole.Text, text)
+    palette.setColor(QPalette.ColorRole.Button, QColor(238, 238, 241))
+    palette.setColor(QPalette.ColorRole.ButtonText, text)
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(176, 32, 32))
+    palette.setColor(QPalette.ColorRole.Highlight, accent)
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.Link, QColor(29, 78, 216))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(130, 130, 138))
+    palette.setColor(QPalette.ColorRole.Mid, QColor(110, 110, 118))
+    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(160, 160, 166))
+    application.setStyle("Fusion")
+    application.setPalette(palette)
+    return palette
+
+
 class QuickInput(QDialog):
     submitted = Signal(str)
 
@@ -225,6 +253,7 @@ class QuickInput(QDialog):
         self.edit = QLineEdit(self)
         self.edit.setPlaceholderText(placeholder)
         self.edit.setClearButtonEnabled(True)
+        self.edit.setStyleSheet("QLineEdit { color: palette(text); background: palette(base); }")
         font = self.edit.font()
         font.setPointSize(max(12, font.pointSize() + 3))
         self.edit.setFont(font)

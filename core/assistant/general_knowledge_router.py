@@ -441,6 +441,8 @@ class WeatherProvider(KnowledgeProvider):
         if not self._last_location:
             return False
         lowered = text.lower()
+        if re.match(r"^(?:good|greetings)\b", lowered.strip()):
+            return False
         follow_up_markers = [
             "how about",
             "afternoon",

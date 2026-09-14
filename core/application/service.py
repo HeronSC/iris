@@ -1545,6 +1545,8 @@ class IrisApplication:
             return MessageRole.CONFIRMATION
         if lowered.startswith("error") or lowered.startswith("assistant could not"):
             return MessageRole.ERROR
+        if lowered.startswith("i could not") or lowered.startswith("i need a valid"):
+            return MessageRole.ERROR
         return MessageRole.SYSTEM
 
     def _emit_message(self, role: MessageRole, text: str, status: IrisStatus | None = None) -> None:

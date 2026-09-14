@@ -1,3 +1,5 @@
+# File: core/conversation/persistent_memory/text.py
+
 from __future__ import annotations
 
 import re
@@ -302,11 +304,9 @@ def _looks_like_topic_enrichment(text: str) -> bool:
         "battery",
         "display",
         "compare",
-        "configuration",
         "ram",
         "ssd",
         "spec",
-        "details",
         "for those",
         "for the remaining",
     )
