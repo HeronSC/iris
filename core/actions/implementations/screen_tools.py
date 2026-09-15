@@ -112,6 +112,10 @@ class ScreenLookAction:
         )
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
         destination = captures / f"screen-{stamp}.png"
+        attempt = 1
+        while destination.exists():
+            destination = captures / f"screen-{stamp}-{attempt}.png"
+            attempt += 1
         try:
             self.capture(destination)
         except (RuntimeError, OSError) as error:

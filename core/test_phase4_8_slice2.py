@@ -1144,18 +1144,79 @@ class PhaseFourPointEightSliceTwoTests(unittest.TestCase):
                 session=session,
             )
 
-            class NoRouteLegacyStub(WeatherRouterStub):
-                def route(self, text: str):
-                    self.route_provider_calls.append(("legacy_route", text))
-                    return self.route_provider("weather", text)
+            class UnclaimedRouteStub(WeatherRouterStub):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.legacy_route_calls: list[str] = []
 
-            router_stub = NoRouteLegacyStub()
+                def route(self, text: str):
+                    self.legacy_route_calls.append(text)
+
+            router_stub = UnclaimedRouteStub()
             coordinator.general_knowledge_router = router_stub
 
             response = coordinator.respond("how about the rest of the week?")
 
             self.assertEqual(response, "summary-ready")
             self.assertEqual(router_stub.route_provider_calls, [])
+            self.assertEqual(router_stub.legacy_route_calls, ["how about the rest of the week?"])
+
+    def test_coordinator_prefers_the_deterministic_route_over_the_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_llm = FakeLLM()
+            session = ConversationSession(max_messages=4)
+            coordinator = AssistantCoordinator(
+                assistant_name="Iris",
+                memory_store=MemoryStoreStub(),
+                config={
+                    "assistant_name": "Iris",
+                    "conversation": {"recent_message_limit": 4, "summary_trigger_message_count": 24},
+                    "audit_path": tmpdir,
+                },
+                ollama_client=fake_llm,
+                session=session,
+            )
+
+            class ClaimingRouteStub(WeatherRouterStub):
+                def route(self, text: str):
+                    return self.route_provider("weather", text)
+
+            router_stub = ClaimingRouteStub()
+            coordinator.general_knowledge_router = router_stub
+
+            response = coordinator.respond("what is the weather?")
+
+            self.assertEqual(response, "Current weather in Anderson, SC: Sunny, 82.0F.")
+            self.assertEqual(router_stub.route_provider_calls, [("weather", "what is the weather?")])
+
+    def test_deterministic_route_is_skipped_when_it_returns_no_response(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_llm = FakeLLM()
+            session = ConversationSession(max_messages=4)
+            coordinator = AssistantCoordinator(
+                assistant_name="Iris",
+                memory_store=MemoryStoreStub(),
+                config={
+                    "assistant_name": "Iris",
+                    "conversation": {"recent_message_limit": 4, "summary_trigger_message_count": 24},
+                    "audit_path": tmpdir,
+                },
+                ollama_client=fake_llm,
+                session=session,
+            )
+
+            class BlankRouteStub(WeatherRouterStub):
+                def route(self, text: str):
+                    result = self.route_provider("weather", text)
+                    result.response = "   "
+                    return result
+
+            router_stub = BlankRouteStub()
+            coordinator.general_knowledge_router = router_stub
+
+            response = coordinator.respond("what is the weather?")
+
+            self.assertEqual(response, "summary-ready")
 
     def test_active_weather_capability_persists_after_non_tool_turn(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

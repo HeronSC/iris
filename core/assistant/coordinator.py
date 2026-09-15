@@ -102,6 +102,7 @@ class AssistantCoordinator:
         if isinstance(audit_path, str):
             audit_path = Path(audit_path)
         self.trace_logger = RequestTraceLogger(audit_path / "request_trace.jsonl" if isinstance(audit_path, Path) else None)
+        self._apply_router_defaults()
 
     def respond(self, user_message: str, project_id: str | None = None) -> str:
         return self.respond_detailed(user_message, project_id=project_id).text

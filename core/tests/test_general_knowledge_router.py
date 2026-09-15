@@ -1,3 +1,5 @@
+# File: core/tests/test_general_knowledge_router.py
+
 from __future__ import annotations
 
 import unittest
@@ -203,6 +205,34 @@ class GeneralKnowledgeRouterTests(unittest.TestCase):
         self.assertIsNotNone(follow_up_result)
         follow_up = str(follow_up_result.response if follow_up_result is not None else "")
         self.assertIn("Forecast in bluffton sc this afternoon", follow_up)
+
+    def test_weather_provider_ignores_greetings_as_follow_ups(self) -> None:
+        provider = WeatherProvider(lambda url: {})
+        provider._last_location = "Anderson, SC"
+
+        for greeting in ["good afternoon", "goood afternoon", "gooood evening", "good morning", "hey there"]:
+            self.assertFalse(provider.can_handle_follow_up(greeting), greeting)
+
+    def test_weather_provider_ignores_unrelated_time_of_day_mentions(self) -> None:
+        provider = WeatherProvider(lambda url: {})
+        provider._last_location = "Anderson, SC"
+
+        for text in ["I have a meeting this afternoon", "lunch tomorrow", "call me in the morning"]:
+            self.assertFalse(provider.can_handle_follow_up(text), text)
+
+    def test_weather_provider_keeps_genuine_follow_ups(self) -> None:
+        provider = WeatherProvider(lambda url: {})
+        provider._last_location = "Anderson, SC"
+
+        for text in [
+            "what about this afternoon?",
+            "how about tonight",
+            "hey what about tomorrow",
+            "will it rain this afternoon",
+            "good morning, any rain today?",
+            "temperature tonight",
+        ]:
+            self.assertTrue(provider.can_handle_follow_up(text), text)
 
     def test_weather_provider_handles_outside_phrase_with_default_location(self) -> None:
         sample_payload = {

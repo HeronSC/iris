@@ -1,4 +1,6 @@
-﻿import json
+# File: core/test_phase1.py
+
+import json
 import sys
 import tempfile
 import unittest
@@ -40,7 +42,7 @@ class PhaseOneTests(unittest.TestCase):
             self.assertEqual(config["model"], "qwen3:30b-a3b")
             self.assertTrue(isinstance(config["memory_path"], Path))
 
-    def test_context_builder_includes_profile_and_preferences(self) -> None:
+    def test_context_builder_omits_profile_and_includes_preferences(self) -> None:
         memory_data = {
             "profile": {
                 "profile": {
@@ -79,8 +81,11 @@ class PhaseOneTests(unittest.TestCase):
         context = builder.build_context("How should I write code?", project_id=None)
 
         self.assertIn("Assistant identity", context)
-        self.assertIn("Henry", context)
-        self.assertIn("Developer", context)
+        self.assertNotIn("User profile", context)
+        self.assertNotIn("Henry", context)
+        self.assertNotIn("Developer", context)
+        self.assertNotIn("Python", context)
+        self.assertNotIn("Windows", context)
         self.assertIn("Prefer minimal changes", context)
         self.assertNotIn("Add comments", context)
 

@@ -35,26 +35,9 @@ class ContextBuilder:
         session_summary: str | None = None,
         recent_messages: list[dict[str, Any]] | None = None,
     ) -> str:
-        profile = self.memory_store.get_profile().get("profile", {})
-        professional = profile.get("professional", {})
-        technical_environment = profile.get("technical_environment", {})
-        location = profile.get("location", {})
-
         lines: list[str] = []
         lines.append("Assistant identity:")
         lines.append(f"- Name: {self.assistant_name}")
-        lines.append("")
-        lines.append("User profile:")
-        if profile.get("display_name"):
-            lines.append(f"- Name: {profile['display_name']}")
-        if professional.get("primary_role"):
-            lines.append(f"- Role: {professional['primary_role']}")
-        if professional.get("primary_language"):
-            lines.append(f"- Primary language: {professional['primary_language']}")
-        if technical_environment.get("primary_os"):
-            lines.append(f"- OS: {technical_environment['primary_os']}")
-        if location.get("city"):
-            lines.append(f"- Location: {location['city']}")
 
         lines.append("")
         lines.append("Working preferences:")

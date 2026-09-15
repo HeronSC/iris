@@ -11,9 +11,10 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
-from urllib import error as urllib_error, request
+from urllib import error as urllib_error
+from urllib import request
 
 
 class ProviderExecutionError(RuntimeError):
@@ -31,6 +32,88 @@ class GeneralKnowledgeResult:
     detail_title: str | None = None
     detail_content: str | None = None
     metadata: dict[str, Any] | None = None
+
+
+WEATHER_GREETING_PATTERN = re.compile(
+    r"^(?:g+o+d+|greetings?|g'?day|h+e+l+o+|h+e+y+|h+i+|howdy|yo)\b"
+)
+
+WEATHER_FOLLOW_UP_PHRASES = (
+    "how about",
+    "what about",
+    "rest of the day",
+    "rest of today",
+    "rest of the week",
+    "rest of week",
+    "rain chances",
+    "hourly",
+    "outlook",
+    "later today",
+    "weekend",
+)
+
+WEATHER_TIME_MARKERS = (
+    "afternoon",
+    "morning",
+    "tonight",
+    "evening",
+    "tomorrow",
+)
+
+WEATHER_FOLLOW_UP_CUES = (
+    "weather",
+    "forecast",
+    "rain",
+    "temperature",
+    "temp",
+    "hot",
+    "cold",
+    "warm",
+    "cool",
+    "sunny",
+    "cloudy",
+    "wind",
+    "humid",
+    "snow",
+    "storm",
+    "umbrella",
+    "jacket",
+    "outside",
+)
+
+WEATHER_PRIMARY_SOURCE = "wttr.in"
+WEATHER_FALLBACK_SOURCE = "open-meteo.com"
+
+WMO_WEATHER_DESCRIPTIONS = {
+    0: "Clear",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    48: "Depositing rime fog",
+    51: "Light drizzle",
+    53: "Moderate drizzle",
+    55: "Dense drizzle",
+    56: "Light freezing drizzle",
+    57: "Dense freezing drizzle",
+    61: "Slight rain",
+    63: "Moderate rain",
+    65: "Heavy rain",
+    66: "Light freezing rain",
+    67: "Heavy freezing rain",
+    71: "Slight snow fall",
+    73: "Moderate snow fall",
+    75: "Heavy snow fall",
+    77: "Snow grains",
+    80: "Slight rain showers",
+    81: "Moderate rain showers",
+    82: "Violent rain showers",
+    85: "Slight snow showers",
+    86: "Heavy snow showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm with slight hail",
+    99: "Thunderstorm with heavy hail",
+}
 
 
 @dataclass(frozen=True)
@@ -337,9 +420,7 @@ class GeneralKnowledgeRouter:
             return True
         if re.search(r"\b(?:read|summarize|open|search|find|locate)\b.*\b(?:file|folder|path|document)\b", lowered):
             return True
-        if re.search(r"[a-zA-Z]:[\\/].+", text):
-            return True
-        return False
+        return bool (re.search(r"[a-zA-Z]:[\\/].+", text))
 
     def _register(self, provider: KnowledgeProvider, enabled: dict[str, Any], key: str) -> None:
         flag = enabled.get(key, True)
@@ -379,6 +460,7 @@ class WeatherProvider(KnowledgeProvider):
         self.fetch_json = fetch_json
         self._last_location = ""
         self._default_location = str(default_location).strip()
+        self._source = WEATHER_PRIMARY_SOURCE
 
     def set_default_location(self, location: str | None) -> None:
         self._default_location = str(location or "").strip()
@@ -440,28 +522,17 @@ class WeatherProvider(KnowledgeProvider):
     def can_handle_follow_up(self, text: str) -> bool:
         if not self._last_location:
             return False
-        lowered = text.lower()
-        if re.match(r"^(?:good|greetings)\b", lowered.strip()):
+        lowered = text.lower().strip()
+        if not lowered:
             return False
-        follow_up_markers = [
-            "how about",
-            "afternoon",
-            "morning",
-            "tonight",
-            "evening",
-            "later today",
-            "tomorrow",
-            "what about",
-            "hourly",
-            "weekend",
-            "rest of the day",
-            "rest of today",
-            "rest of the week",
-            "rest of week",
-            "outlook",
-            "rain chances",
-        ]
-        return any(marker in lowered for marker in follow_up_markers)
+        if any(marker in lowered for marker in WEATHER_FOLLOW_UP_PHRASES):
+            return True
+        has_cue = any(cue in lowered for cue in WEATHER_FOLLOW_UP_CUES)
+        if WEATHER_GREETING_PATTERN.match(lowered) and not has_cue:
+            return False
+        if any(marker in lowered for marker in WEATHER_TIME_MARKERS):
+            return has_cue
+        return False
 
     def execute(self, text: str) -> str:
         result = self.execute_detailed(text)
@@ -484,9 +555,7 @@ class WeatherProvider(KnowledgeProvider):
             raise ProviderExecutionError("weather provider requires a WeatherRequest", unavailable=False)
         weather_request = request_obj
         location = weather_request.location
-        encoded = urllib.parse.quote(location) if location else ""
-        url = f"https://wttr.in/{encoded}?format=j1"
-        data = self.fetch_json(url)
+        data = self._fetch_weather_payload(location)
         current = data.get("current_condition")
         if not isinstance(current, list) or not current:
             raise ProviderExecutionError("Missing weather data")
@@ -632,7 +701,6 @@ class WeatherProvider(KnowledgeProvider):
 
         if weather_request.range_name == "next_week":
             daily_lines, coverage_note = self._format_multi_day_forecast(data, "week")
-            available_window = " ".join(daily_lines[:3]).strip()
             response = (
                 f"Next week's forecast for {location} is not available through this source. "
                 if location
@@ -662,6 +730,185 @@ class WeatherProvider(KnowledgeProvider):
             )
 
         raise ProviderExecutionError(f"unsupported weather range: {weather_request.range_name}", unavailable=False)
+
+    def _fetch_weather_payload(self, location: str) -> dict[str, Any]:
+        encoded = urllib.parse.quote(location) if location else ""
+        primary_url = f"https://wttr.in/{encoded}?format=j1"
+        try:
+            payload = self.fetch_json(primary_url)
+            if not self._has_current_condition(payload):
+                raise ProviderExecutionError("wttr.in returned no current conditions")
+            self._source = WEATHER_PRIMARY_SOURCE
+            return payload
+        except ProviderExecutionError as primary_error:
+            try:
+                payload = self._fetch_open_meteo_payload(location)
+            except ProviderExecutionError as fallback_error:
+                raise ProviderExecutionError(
+                    f"no weather source responded ({WEATHER_PRIMARY_SOURCE}: {primary_error}; "
+                    f"{WEATHER_FALLBACK_SOURCE}: {fallback_error})"
+                ) from fallback_error
+            self._source = WEATHER_FALLBACK_SOURCE
+            return payload
+
+    def _has_current_condition(self, payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        current = payload.get("current_condition")
+        return isinstance(current, list) and bool(current) and isinstance(current[0], dict)
+
+    def _fetch_open_meteo_payload(self, location: str) -> dict[str, Any]:
+        latitude, longitude = self._geocode_location(location)
+        query = urllib.parse.urlencode(
+            {
+                "latitude": f"{latitude:.4f}",
+                "longitude": f"{longitude:.4f}",
+                "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
+                "hourly": "temperature_2m,precipitation_probability,weather_code",
+                "daily": "temperature_2m_max,temperature_2m_min,weather_code",
+                "temperature_unit": "celsius",
+                "wind_speed_unit": "mph",
+                "timezone": "auto",
+                "forecast_days": "7",
+            }
+        )
+        payload = self.fetch_json(f"https://api.open-meteo.com/v1/forecast?{query}")
+        return self._open_meteo_to_j1(payload)
+
+    def _geocode_location(self, location: str) -> tuple[float, float]:
+        name = str(location or "").strip()
+        if not name:
+            raise ProviderExecutionError("a location is required for the fallback weather source")
+        segments = [part.strip() for part in name.split(",") if part.strip()]
+        query = urllib.parse.urlencode({"name": segments[0], "count": "10", "language": "en", "format": "json"})
+        payload = self.fetch_json(f"https://geocoding-api.open-meteo.com/v1/search?{query}")
+        results = payload.get("results")
+        if not isinstance(results, list) or not results:
+            raise ProviderExecutionError(f"could not resolve coordinates for {name}")
+        best = self._best_geocode_match(results, segments[1:])
+        latitude = self._safe_float(best.get("latitude"))
+        longitude = self._safe_float(best.get("longitude"))
+        if latitude is None or longitude is None:
+            raise ProviderExecutionError(f"could not resolve coordinates for {name}")
+        return latitude, longitude
+
+    def _best_geocode_match(self, results: list[Any], qualifiers: list[str]) -> dict[str, Any]:
+        candidates = [item for item in results if isinstance(item, dict)]
+        if not candidates:
+            raise ProviderExecutionError("geocoding returned no usable results")
+        if not qualifiers:
+            return candidates[0]
+        wanted = [item.lower() for item in qualifiers]
+        best = candidates[0]
+        best_score = -1
+        for candidate in candidates:
+            haystack = " ".join(
+                str(candidate.get(key, "")).lower()
+                for key in ("admin1", "admin2", "country", "country_code")
+            )
+            score = sum(1 for item in wanted if item and item in haystack)
+            if score > best_score:
+                best = candidate
+                best_score = score
+        return best
+
+    def _open_meteo_to_j1(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ProviderExecutionError("unexpected payload from the fallback weather source")
+        current = payload.get("current")
+        if not isinstance(current, dict):
+            raise ProviderExecutionError("fallback weather source returned no current conditions")
+
+        current_condition = {
+            "temp_C": self._as_text(current.get("temperature_2m")),
+            "FeelsLikeC": self._as_text(current.get("apparent_temperature")),
+            "humidity": self._as_text(current.get("relative_humidity_2m")),
+            "windspeedMiles": self._as_text(current.get("wind_speed_10m")),
+            "weatherDesc": [{"value": self._wmo_description(current.get("weather_code"))}],
+        }
+
+        hourly_by_date = self._open_meteo_hourly_by_date(payload.get("hourly"))
+        daily = payload.get("daily")
+        days: list[dict[str, Any]] = []
+        if isinstance(daily, dict):
+            dates = daily.get("time")
+            highs = daily.get("temperature_2m_max")
+            lows = daily.get("temperature_2m_min")
+            codes = daily.get("weather_code")
+            if isinstance(dates, list):
+                for index, raw_date in enumerate(dates):
+                    date_text = str(raw_date).strip()
+                    hourly = hourly_by_date.get(date_text, [])
+                    if not hourly:
+                        hourly = [
+                            {
+                                "time": "1200",
+                                "tempC": self._element_text(highs, index),
+                                "chanceofrain": "",
+                                "weatherDesc": [{"value": self._wmo_description(self._element(codes, index))}],
+                            }
+                        ]
+                    days.append(
+                        {
+                            "date": date_text,
+                            "maxtempC": self._element_text(highs, index),
+                            "mintempC": self._element_text(lows, index),
+                            "hourly": hourly,
+                        }
+                    )
+
+        return {"current_condition": [current_condition], "weather": days}
+
+    def _open_meteo_hourly_by_date(self, hourly: Any) -> dict[str, list[dict[str, Any]]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        if not isinstance(hourly, dict):
+            return grouped
+        stamps = hourly.get("time")
+        if not isinstance(stamps, list):
+            return grouped
+        temperatures = hourly.get("temperature_2m")
+        chances = hourly.get("precipitation_probability")
+        codes = hourly.get("weather_code")
+        for index, raw_stamp in enumerate(stamps):
+            stamp_text = str(raw_stamp).strip()
+            if "T" not in stamp_text:
+                continue
+            date_text, _, clock_text = stamp_text.partition("T")
+            hour_text = clock_text.split(":")[0]
+            try:
+                hour = int(hour_text)
+            except ValueError:
+                continue
+            grouped.setdefault(date_text, []).append(
+                {
+                    "time": str(hour * 100),
+                    "tempC": self._element_text(temperatures, index),
+                    "chanceofrain": self._element_text(chances, index),
+                    "weatherDesc": [{"value": self._wmo_description(self._element(codes, index))}],
+                }
+            )
+        return grouped
+
+    def _element(self, values: Any, index: int) -> Any:
+        if isinstance(values, list) and 0 <= index < len(values):
+            return values[index]
+        return None
+
+    def _element_text(self, values: Any, index: int) -> str:
+        return self._as_text(self._element(values, index))
+
+    def _as_text(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value).strip()
+
+    def _wmo_description(self, code: Any) -> str:
+        numeric = self._safe_float(code)
+        if numeric is None:
+            return "conditions"
+        return WMO_WEATHER_DESCRIPTIONS.get(int(numeric), "conditions")
 
     def _parse_weather_request(self, text: str) -> WeatherRequest:
         lowered = text.lower().strip()
@@ -747,7 +994,7 @@ class WeatherProvider(KnowledgeProvider):
             temp_text = f"around {self._c_to_f(avg_temp_c):.1f}F"
         rain_text = "rain chance unavailable"
         if max_rain is not None:
-            rain_text = f"up to {int(round(max_rain))}% chance of rain"
+            rain_text = f"up to {round(max_rain)}% chance of rain"
         return f"{label}: {summary_desc}, {temp_text}, {rain_text}."
 
     def _format_rain_forecast(self, day: dict[str, Any] | None, label: str) -> str:
@@ -766,7 +1013,7 @@ class WeatherProvider(KnowledgeProvider):
             level = "possible"
         else:
             level = "unlikely"
-        return f"Rain is {level} {label} (peak chance around {int(round(max_rain))}%)."
+        return f"Rain is {level} {label} (peak chance around {round(max_rain)}%)."
 
     def _format_daily_forecast(self, day: dict[str, Any] | None, *, label: str) -> str:
         if day is None:
@@ -813,8 +1060,7 @@ class WeatherProvider(KnowledgeProvider):
         raw_date = str(day.get("date", "")).strip()
         if raw_date:
             try:
-                stamp = datetime.strptime(raw_date, "%Y-%m-%d")
-                return stamp.strftime("%A")
+                return date.fromisoformat(raw_date).strftime("%A")
             except ValueError:
                 pass
         if index == 0:
@@ -827,7 +1073,7 @@ class WeatherProvider(KnowledgeProvider):
         if not raw_date:
             return False
         try:
-            stamp = datetime.strptime(raw_date, "%Y-%m-%d")
+            stamp = date.fromisoformat(raw_date)
         except ValueError:
             return False
         return stamp.weekday() >= 5
@@ -928,7 +1174,7 @@ class WeatherProvider(KnowledgeProvider):
             lines.extend(extra_lines)
         lines.append("")
         lines.append(f"Retrieved: {retrieved_at.strftime('%Y-%m-%d %I:%M %p UTC')}")
-        lines.append("Source: wttr.in")
+        lines.append(f"Source: {self._source}")
 
         facts: dict[str, Any] = {
             "location": weather_request.location or "default",
@@ -949,6 +1195,8 @@ class WeatherProvider(KnowledgeProvider):
         warnings: list[str] = []
         if weather_request.range_name == "next_week":
             warnings.append("Requested next_week is outside provider forecast window.")
+        if self._source != WEATHER_PRIMARY_SOURCE:
+            warnings.append(f"{WEATHER_PRIMARY_SOURCE} was unavailable; this reading came from {self._source}.")
         coverage_summary = "full"
         if weather_request.range_name in {"week", "weekend", "next_week"}:
             coverage_summary = "provider_limited_window"
@@ -966,7 +1214,7 @@ class WeatherProvider(KnowledgeProvider):
                 "weather_range": weather_request.range_name,
                 "weather_granularity": weather_request.granularity,
                 "facts": facts,
-                "source": "wttr.in",
+                "source": self._source,
                 "retrieved_at": retrieved_at_iso,
                 "valid_until": None,
                 "coverage": {"summary": coverage_summary},
@@ -1106,7 +1354,7 @@ class StockProvider(KnowledgeProvider):
             return True
         if re.fullmatch(r"[A-Za-z]{1,5}", lowered):
             return True
-        return any(name in lowered for name in self.company_map.keys())
+        return any(name in lowered for name in self.company_map)
 
     def execute(self, text: str) -> str:
         ticker = self._extract_ticker(text)
@@ -1211,13 +1459,11 @@ class CalculatorProvider(KnowledgeProvider):
             return False
         if re.search(r"\b[a-z0-9_.-]+\.(md|txt|pdf|xlsx|xls|json|py|ps1|cs|jsonl|yml|yaml|xml|toml)\b", lowered):
             return False
-        if lowered.startswith("calc ") or lowered.startswith("calculate "):
+        if lowered.startswith(("calc ", "calculate ")):
             return True
         if "sqrt" in lowered:
             return True
-        if re.search(r"\d", lowered) and re.search(r"[+\-*/^()]", lowered):
-            return True
-        return False
+        return bool (re.search(r"\d", lowered) and re.search(r"[+\-*/^()]", lowered))
 
     def execute(self, text: str) -> str:
         expression = text.strip().lower()
