@@ -54,7 +54,7 @@ from core.results.html import render_confirmation, render_search_results
 #! @allow-local-import
 from ui.results_panel import ResultsPanel, markdown_to_html, results_fragment
 #! @allow-local-import
-from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, CommandPalette, GlobalHotkey, QuickInput, TrayController, apply_dark_palette, apply_light_palette, make_icon
+from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, CommandPalette, GlobalHotkey, QuickInput, TrayController, apply_dark_palette, apply_light_palette, make_icon, set_app_model_id
 #! @allow-local-import
 from core.assistant.why_command import describe_activity
 #! @allow-local-import
@@ -1364,7 +1364,9 @@ def _resolve_config_path(argv: list[str]) -> tuple[Path, list[str]]:
 
 def main() -> None:
     config_path, qt_argv = _resolve_config_path(sys.argv[1:])
+    set_app_model_id()
     app = QApplication([sys.argv[0], *qt_argv])
+    app.setWindowIcon(make_icon())
     if str(QSettings("Iris", "IrisUI").value("window/theme") or "light").lower() == "dark":
         apply_dark_palette(app)
     else:

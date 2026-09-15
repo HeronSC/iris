@@ -50,6 +50,7 @@ from core.documents.roots import probe_roots
 from core.scheduler.jobs import audit_retention
 from core.assistant.eval_command import EvalCommandHandler
 from core.assistant.principles_command import PrinciplesCommandHandler
+from core.assistant.uncensored_command import UncensoredCommandHandler
 from core.knowledge.principles import PrincipleService
 from core.assistant.tool_progress import describe_tool_event
 from core.assistant.stop_command import StopCommandHandler
@@ -198,6 +199,7 @@ class IrisApplication:
         self.knowledge_handler: CommandHandler = _NoopCommandHandler()
         self.tools_handler: CommandHandler = _NoopCommandHandler()
         self.models_handler: CommandHandler = _NoopCommandHandler()
+        self.uncensored_handler: CommandHandler = _NoopCommandHandler()
         self.why_handler: CommandHandler = _NoopCommandHandler()
         self.watch_handler: CommandHandler = _NoopCommandHandler()
         self.permissions_handler: CommandHandler = _NoopCommandHandler()
@@ -526,6 +528,7 @@ class IrisApplication:
         self.tools_handler = ToolsCommandHandler(self.tool_registry, self.mcp_manager, output=self._sink)
         self.latency_budget = LatencyBudget.from_config(self.config)
         self.models_handler = ModelsCommandHandler(self.model_router, self.request_metrics, output=self._sink, budget=self.latency_budget)
+        self.uncensored_handler = UncensoredCommandHandler(self.model_router, output=self._sink)
         self.principles = PrincipleService(self.knowledge.records)
         self.learning = LearningLoop(self.knowledge, request_id=lambda: getattr(self, "last_request_id", None))
         self.principles_handler = PrinciplesCommandHandler(self.principles, output=self._sink, actor=str(self.config.get("assistant_user", "user")))
@@ -725,6 +728,8 @@ class IrisApplication:
             if self._handle_slash_command(self.tools_handler, stripped, status, command_prefixes=("/tools",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.models_handler, stripped, status, command_prefixes=("/models",)):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.uncensored_handler, stripped, status, command_prefixes=("/uncensored",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.why_handler, stripped, status, command_prefixes=("/why",)):
                 return self._build_response(status, cancel_event)

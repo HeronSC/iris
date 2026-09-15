@@ -88,13 +88,13 @@ def configure_logging(
             structlog.processors.KeyValueRenderer(key_order=["timestamp", "level", "logger", "event", "request_id"]),
         ],
     )
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setFormatter(console_formatter)
-    console_handler.setLevel(console_level)
-    setattr(console_handler, _CONFIGURED_MARKER, True)
-
     root.addHandler(file_handler)
-    root.addHandler(console_handler)
+    if sys.stderr is not None:
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setFormatter(console_formatter)
+        console_handler.setLevel(console_level)
+        setattr(console_handler, _CONFIGURED_MARKER, True)
+        root.addHandler(console_handler)
     root.setLevel(level)
     return log_file
 

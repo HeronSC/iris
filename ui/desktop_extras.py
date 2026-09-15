@@ -7,6 +7,7 @@ import ctypes.wintypes
 import logging
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QEvent, QObject, Qt, Signal
@@ -20,9 +21,22 @@ MODIFIERS = {"alt": 0x0001, "ctrl": 0x0002, "control": 0x0002, "shift": 0x0004, 
 VIRTUAL_KEYS = {"space": 0x20, "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73, "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77, "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B}
 DEFAULT_HOTKEY = "ctrl+alt+i"
 HOTKEY_ID = 0x4952
+ICON_PATH = Path(__file__).resolve().parent / "assets" / "iris.ico"
+APP_MODEL_ID = "Iris.Assistant.Desktop"
+
+
+def set_app_model_id() -> None:
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_MODEL_ID)
+    except Exception:
+        logger.debug("Could not set the AppUserModelID", exc_info=True)
 
 
 def make_icon(letter: str = "I", size: int = 64) -> QIcon:
+    if ICON_PATH.exists():
+        icon = QIcon(str(ICON_PATH))
+        if not icon.isNull():
+            return icon
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -374,6 +388,7 @@ PALETTE_COMMANDS: tuple[tuple[str, str], ...] = (
     ("/corrections", "Corrections Iris has taken"),
     ("/tools", "Tools available right now"),
     ("/models", "Model routes and what is pulled"),
+    ("/uncensored", "Pin replies to the unrestricted model"),
     ("/context", "What Iris sees on screen"),
     ("/search ", "Find files by words"),
     ("/index status", "Document index state"),
