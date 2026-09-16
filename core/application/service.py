@@ -106,7 +106,7 @@ from core.knowledge.review import KnowledgeReviewWorkflow
 from core.llm.metrics import RequestMetricsStore
 from core.assistant.why_command import WhyCommandHandler
 from core.observability import bind_request, clear_request, current_request_id, log_dir_for
-from core.observability.logging_setup import LOG_FILE_NAME
+from core.observability.logging_setup import LOG_FILE_NAME, redact_for_log
 from core.llm.ollama_client import OllamaClient, OllamaClientError
 from core.llm.router import ModelRouter, ModelRoutes
 from core.profile.loader import AssistantMemoryError, MemoryLoader
@@ -837,7 +837,7 @@ class IrisApplication:
                 route=self._turn_route,
                 status=self._current_status.value,
                 elapsed_ms=round((time.perf_counter() - self._turn_started) * 1000, 1),
-                user_message=user_message[:200],
+                user_message=redact_for_log(user_message),
                 replies=int(roles.get(MessageRole.ASSISTANT, 0)),
                 errors=int(roles.get(MessageRole.ERROR, 0)),
             )

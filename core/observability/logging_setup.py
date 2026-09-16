@@ -16,6 +16,26 @@ DEFAULT_BACKUPS = 5
 LOG_FILE_NAME = "iris.jsonl"
 
 _CONFIGURED_MARKER = "_iris_logging_handler"
+SECRET_COMMAND_PREFIX = "/secret"
+SECRET_SUBCOMMANDS = {"list", "set", "clear", "remove", "delete"}
+REDACTED = "[redacted]"
+
+
+def redact_for_log(text: str, limit: int = 200) -> str:
+    message = (text or "").strip()
+    if not message.lower().startswith(SECRET_COMMAND_PREFIX):
+        return message[:limit]
+    parts = message.split()
+    command = parts[0]
+    subcommand = parts[1].lower() if len(parts) > 1 else ""
+    if subcommand not in SECRET_SUBCOMMANDS:
+        return f"{command} {REDACTED}" if len(parts) > 1 else command
+    if subcommand == "list" or len(parts) == 2:
+        return f"{command} {subcommand}"
+    name = parts[2]
+    if subcommand == "set" and len(parts) > 3:
+        return f"{command} {subcommand} {name} {REDACTED}"
+    return f"{command} {subcommand} {name}"
 
 
 def log_dir_for(config: dict[str, Any] | None, config_path: str | Path | None = None) -> Path:

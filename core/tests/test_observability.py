@@ -21,7 +21,7 @@ from core.observability import (
     new_request_id,
     request_scope,
 )
-from core.observability.logging_setup import read_log_entries
+from core.observability.logging_setup import read_log_entries, redact_for_log
 from core.storage.sqlite_database import SQLiteDatabase
 
 
@@ -88,6 +88,21 @@ class LoggingSetupTests(unittest.TestCase):
     def test_log_dir_defaults_beside_the_data_folder(self) -> None:
         self.assertEqual(log_dir_for({"memory_path": "E:\\AI\\Iris\\Data\\Memory"}), Path("E:\\AI\\Iris\\Data\\logs"))
         self.assertEqual(log_dir_for({"log_path": "D:\\logs"}), Path("D:\\logs"))
+
+    def test_secret_values_never_reach_the_turn_log(self) -> None:
+        self.assertEqual(redact_for_log("/secrets set blue_iris:password hunter2"), "/secrets set blue_iris:password [redacted]")
+        self.assertEqual(redact_for_log("/secrets set api_token:vscode a b c"), "/secrets set api_token:vscode [redacted]")
+        self.assertEqual(redact_for_log("/Secrets SET synology:password x"), "/Secrets set synology:password [redacted]")
+        self.assertEqual(redact_for_log("/secrets blue_iris.password hunter2"), "/secrets [redacted]")
+        self.assertEqual(redact_for_log("/secret blue_iris:password hunter2"), "/secret [redacted]")
+        self.assertEqual(redact_for_log("/secrets set"), "/secrets set")
+        self.assertEqual(redact_for_log("/secrets set blue_iris:password"), "/secrets set blue_iris:password")
+        self.assertEqual(redact_for_log("/secrets list"), "/secrets list")
+        self.assertEqual(redact_for_log("/secrets"), "/secrets")
+        self.assertEqual(redact_for_log("/secrets clear unifi:api_key"), "/secrets clear unifi:api_key")
+        self.assertEqual(redact_for_log("what's the weather"), "what's the weather")
+        self.assertEqual(redact_for_log("x" * 300), "x" * 200)
+        self.assertNotIn("hunter2", redact_for_log("/secrets set a:b hunter2"))
 
 
 class WhyCommandTests(unittest.TestCase):
