@@ -953,7 +953,7 @@ rules out every hosted speech API, which leaves a short, good list.
 
 - [x] Push-to-talk first; a wake word only if hands-free use is actually wanted. **Built
 	2026-09-16:** `core/voice/` (recorder, transcriber, speaker, service) and `ui/voice_controls.py`.
-	Hold Ctrl+Alt+Space to talk and release to send; a quick tap toggles listening on until the
+	Hold Ctrl+Alt+T to talk and release to send; a quick tap toggles listening on until the
 	next tap. The transcript goes through the same path as typed text, so every command and tool
 	works unchanged. Config section `voice` (hotkey, models, devices, `speak_replies`). No wake word.
 - [x] Speech to text on this machine. `faster-whisper` `small.en`, model in `Data\Models\whisper`.

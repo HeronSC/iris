@@ -138,9 +138,9 @@ class DesktopExtrasTests(unittest.TestCase):
         extras = self.extras
         calls: list[tuple[int, int, int]] = []
         talk = extras.GlobalHotkey(lambda: None, hotkey_id=extras.TALK_HOTKEY_ID, register=lambda hotkey_id, modifiers, key: calls.append((hotkey_id, modifiers, key)) or True, unregister=lambda hotkey_id: calls.append((hotkey_id, -1, -1)))
-        self.assertTrue(talk.register("ctrl+alt+space"))
-        self.assertEqual(calls[-1], (extras.TALK_HOTKEY_ID, 0x0003, 0x20))
-        self.assertEqual(talk.key, 0x20)
+        self.assertTrue(talk.register("ctrl+alt+t"))
+        self.assertEqual(calls[-1], (extras.TALK_HOTKEY_ID, 0x0003, ord("T")))
+        self.assertEqual(talk.key, ord("T"))
         self.assertNotEqual(extras.TALK_HOTKEY_ID, extras.HOTKEY_ID)
         talk.unregister()
         self.assertEqual(calls[-1], (extras.TALK_HOTKEY_ID, -1, -1))

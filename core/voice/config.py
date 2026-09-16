@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-DEFAULT_TALK_HOTKEY = "ctrl+alt+space"
+DEFAULT_TALK_HOTKEY = "ctrl+alt+t"
 DEFAULT_WHISPER_MODEL = "small.en"
 DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
 SPEAK_MODES = ("voice", "always", "never")

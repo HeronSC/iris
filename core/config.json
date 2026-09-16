@@ -286,7 +286,7 @@
   },
   "voice": {
     "enabled": true,
-    "hotkey": "ctrl+alt+space",
+    "hotkey": "ctrl+alt+t",
     "whisper_model": "small.en",
     "whisper_device": "auto",
     "piper_voice": "en_US-lessac-medium",

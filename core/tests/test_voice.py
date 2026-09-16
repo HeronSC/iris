@@ -30,7 +30,7 @@ class VoiceConfigTests(unittest.TestCase):
     def test_defaults_and_models_path_sit_beside_the_data_folder(self) -> None:
         config = VoiceConfig.from_config({"memory_path": "E:\\AI\\Iris\\Data\\Memory"})
         self.assertEqual(config.models_path, Path("E:\\AI\\Iris\\Data\\Models"))
-        self.assertEqual(config.hotkey, "ctrl+alt+space")
+        self.assertEqual(config.hotkey, "ctrl+alt+t")
         self.assertEqual(config.whisper_model, "small.en")
         self.assertEqual(config.speak_replies, "voice")
         self.assertTrue(config.enabled)
@@ -307,7 +307,7 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertTrue(service.transcriber.loaded)
         self.assertTrue(service.speaker.loaded)
         self.assertIsNone(service.warm_error)
-        self.assertIn("ctrl+alt+space", service.describe())
+        self.assertIn("ctrl+alt+t", service.describe())
 
     def test_notifications_are_read_as_title_then_body(self) -> None:
         service = _service()
