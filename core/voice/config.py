@@ -28,6 +28,13 @@ class VoiceConfig:
     max_spoken_chars: int = 600
     max_seconds: float = 60.0
     sample_rate: int = 16000
+    conversation: bool = True
+    stream_speech: bool = True
+    end_silence_ms: int = 700
+    idle_seconds: float = 20.0
+    max_utterance_seconds: float = 30.0
+    answer_timeout_seconds: float = 10.0
+    end_phrases: tuple[str, ...] = ()
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "VoiceConfig":
@@ -52,6 +59,13 @@ class VoiceConfig:
             max_spoken_chars=int(section.get("max_spoken_chars", 600)),
             max_seconds=float(section.get("max_seconds", 60.0)),
             sample_rate=int(section.get("sample_rate", 16000)),
+            conversation=bool(section.get("conversation", True)),
+            stream_speech=bool(section.get("stream_speech", True)),
+            end_silence_ms=int(section.get("end_silence_ms", 700)),
+            idle_seconds=float(section.get("idle_seconds", 20.0)),
+            max_utterance_seconds=float(section.get("max_utterance_seconds", 30.0)),
+            answer_timeout_seconds=float(section.get("answer_timeout_seconds", 10.0)),
+            end_phrases=tuple(str(item) for item in section.get("end_phrases") or ()),
         )
 
 

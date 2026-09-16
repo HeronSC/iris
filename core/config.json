@@ -291,6 +291,10 @@
     "whisper_device": "auto",
     "piper_voice": "en_US-lessac-medium",
     "speak_replies": "voice",
-    "max_spoken_chars": 600
+    "max_spoken_chars": 600,
+    "conversation": true,
+    "stream_speech": true,
+    "end_silence_ms": 700,
+    "idle_seconds": 20
   }
 }

@@ -9,7 +9,7 @@ import sys
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEventLoop, QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat
 from PySide6.QtWidgets import (
     QGridLayout,    QApplication,
@@ -56,13 +56,18 @@ from ui.results_panel import ResultsPanel, markdown_to_html, results_fragment
 #! @allow-local-import
 from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, TALK_HOTKEY_ID, CommandPalette, GlobalHotkey, QuickInput, TrayController, apply_dark_palette, apply_light_palette, make_icon, set_app_model_id
 #! @allow-local-import
-from ui.voice_controls import VoiceController
+from ui.voice_controls import AskThread, VoiceController
+#! @allow-local-import
+from core.voice.text import interpret_yes_no
 #! @allow-local-import
 from core.assistant.why_command import describe_activity
 #! @allow-local-import
 from core.assistant.tool_progress import is_tool_progress
 
 LISTENING_HINT = "Listening… release the key to send, or press it again."
+CONVERSATION_HINT = "Conversation on: just talk. Say \"that's all\" or tap the talk key to end."
+VOICE_HINTS = {LISTENING_HINT, CONVERSATION_HINT, "Transcribing…", "Hearing you…"}
+CONVERSATION_END_TEXT = {"idle": "Conversation ended after a quiet stretch.", "phrase": "Conversation ended.", "stopped": "Conversation ended.", "shutdown": "Conversation ended."}
 
 
 LINE_BREAK = chr(0x2028)
@@ -93,10 +98,11 @@ class ProcessThread(QThread):
     failedSignal = Signal(str)
     promptSignal = Signal(object)
 
-    def __init__(self, app_service: IrisApplication, text: str) -> None:
+    def __init__(self, app_service: IrisApplication, text: str, channel: str = "text") -> None:
         super().__init__()
         self.app_service = app_service
         self.text = text
+        self.channel = channel
         self.cancel_event = threading.Event()
         self._prompt_wait = threading.Event()
         self._prompt_response = ""
@@ -121,6 +127,7 @@ class ProcessThread(QThread):
                 cancel_event=self.cancel_event,
                 event_handler=_handler,
                 prompt_provider=_prompt,
+                channel=self.channel,
             )
         except (RuntimeError, OSError, ValueError, AssertionError) as error:
             self.failedSignal.emit(str(error))
@@ -484,6 +491,8 @@ class IrisWindow(QMainWindow):
         self.hotkey.register(str(self.settings.value("window/hotkey") or DEFAULT_HOTKEY))
         self.voice_controller: VoiceController | None = None
         self._speak_next_response = False
+        self._active_turn_voice = False
+        self._voice_streamer = None
         self.talk_hotkey = GlobalHotkey(self.on_talk_hotkey, hotkey_id=TALK_HOTKEY_ID)
         if application is not None:
             application.installNativeEventFilter(self.talk_hotkey)
@@ -501,6 +510,7 @@ class IrisWindow(QMainWindow):
         self.voice_controller.transcribed.connect(self._submit_from_voice)
         self.voice_controller.stateChanged.connect(self._on_voice_state)
         self.voice_controller.failed.connect(self._on_voice_failed)
+        self.voice_controller.conversationEnded.connect(self._on_conversation_ended)
         if voice.available:
             self.talk_hotkey.register(str(self.settings.value("window/talk_hotkey") or voice.config.hotkey))
 
@@ -513,23 +523,63 @@ class IrisWindow(QMainWindow):
         if not self.engine_available or (self.worker is not None and self.worker.isRunning()):
             self._on_voice_failed("Iris is still working on the last request.")
             return
+        voice = self._voice_service()
         self._speak_next_response = True
+        self._voice_streamer = None
+        if voice is not None and voice.config.stream_speech and voice.should_speak_reply(from_voice=True):
+            self._voice_streamer = voice.sentence_streamer()
+        if voice is not None:
+            voice.hold_conversation()
         self.bring_to_front()
         self._submit_command(text)
 
     def _on_voice_state(self, state: str) -> None:
-        if state == "listening":
-            self.set_status("Listening")
-            self.activity_label.setText(LISTENING_HINT)
+        hints = {"listening": ("Listening", LISTENING_HINT), "transcribing": ("Transcribing", "Transcribing…"), "conversation": ("Conversation", CONVERSATION_HINT), "conversation-hearing": ("Hearing you", "Hearing you…"), "conversation-transcribing": ("Transcribing", "Transcribing…")}
+        found = hints.get(state)
+        if found is not None:
+            status, hint = found
+            if self.worker is None:
+                self.set_status(status)
+            self.activity_label.setText(hint)
             self.activity_label.setVisible(True)
             return
-        if state == "transcribing":
-            self.set_status("Transcribing")
-            self.activity_label.setText("Transcribing…")
-            return
-        if self.activity_label.text() in {LISTENING_HINT, "Transcribing…"}:
+        if self.activity_label.text() in VOICE_HINTS:
             self.activity_label.setVisible(False)
         self._set_ready_if_idle()
+
+    def _on_conversation_ended(self, reason: str) -> None:
+        self._on_voice_failed(CONVERSATION_END_TEXT.get(reason, f"Conversation ended ({reason})."))
+
+    def _voice_prompt_answer(self, request: PromptRequest) -> str | None:
+        voice = self._voice_service()
+        if voice is None or not self._active_turn_voice or not voice.in_conversation:
+            return None
+        if request.prompt_type not in {PromptType.YES_NO_CANCEL, PromptType.TEXT, PromptType.CHOICE} or getattr(request, "sensitive", False):
+            return None
+        question = request.text
+        if request.prompt_type == PromptType.CHOICE and request.choices:
+            question = f"{request.text} The choices are: {', '.join(request.choices)}."
+        answer: list[object] = []
+        loop = QEventLoop(self)
+        asker = AskThread(voice, question)
+        asker.answered.connect(lambda value: (answer.append(value), loop.quit()))
+        asker.start()
+        self.activity_label.setText("Waiting for your answer…")
+        self.activity_label.setVisible(True)
+        loop.exec()
+        asker.wait(1000)
+        heard = str(answer[0]).strip() if answer and answer[0] else ""
+        if not heard:
+            return None
+        if request.prompt_type == PromptType.YES_NO_CANCEL:
+            return interpret_yes_no(heard)
+        if request.prompt_type == PromptType.CHOICE:
+            lowered = heard.lower()
+            for choice in request.choices or ():
+                if choice.lower() in lowered or lowered in choice.lower():
+                    return choice
+            return None
+        return heard
 
     def _on_voice_failed(self, text: str) -> None:
         self.activity_label.setText(text)
@@ -548,15 +598,24 @@ class IrisWindow(QMainWindow):
 
     def _speak_response(self, response) -> None:
         from_voice, self._speak_next_response = self._speak_next_response, False
+        streamer, self._voice_streamer = self._voice_streamer, None
         voice = self._voice_service()
-        if voice is None or not voice.should_speak_reply(from_voice=from_voice):
+        if voice is None:
             return
-        conversation = self._response_conversation(response)
-        if conversation is not None and conversation.message.strip():
-            text = conversation.message
-        else:
-            text = " ".join(message.text for message in response.messages if message.role == MessageRole.ASSISTANT and message.text.strip())
-        voice.speak(text)
+        try:
+            if not voice.should_speak_reply(from_voice=from_voice):
+                return
+            if streamer is not None and streamer.started:
+                streamer.finish()
+                return
+            conversation = self._response_conversation(response)
+            if conversation is not None and conversation.message.strip():
+                text = conversation.message
+            else:
+                text = " ".join(message.text for message in response.messages if message.role == MessageRole.ASSISTANT and message.text.strip())
+            voice.speak(text)
+        finally:
+            voice.resume_conversation()
 
     def on_hotkey(self) -> None:
         if self.isActiveWindow() and self.isVisible() and not self.isMinimized():
@@ -656,6 +715,9 @@ class IrisWindow(QMainWindow):
     def _handle_event(self, event: IrisEvent) -> None:
         if event.delta:
             self._append_stream_delta(event.delta)
+            streamer = self._voice_streamer
+            if streamer is not None:
+                streamer.feed(event.delta)
             return
         status_text = event.status.value.replace("_", " ").title()
         if event.progress_current is not None and event.progress_total is not None:
@@ -684,6 +746,7 @@ class IrisWindow(QMainWindow):
         voice = self._voice_service()
         if voice is not None:
             voice.stop_speaking()
+        self._active_turn_voice = self._speak_next_response
         self._append_message(MessageRole.USER, text)
         assistant_name = self.app_service.config.get("assistant_name", "Iris") if isinstance(self.app_service.config, dict) else "Iris"
         self._placeholder_block = self.history.document().blockCount()
@@ -705,7 +768,7 @@ class IrisWindow(QMainWindow):
             self.details_title.setText("Live command details")
             self.details_view.setPlainText("Waiting for updates...")
 
-        self.worker = ProcessThread(self.app_service, text)
+        self.worker = ProcessThread(self.app_service, text, channel="voice" if self._active_turn_voice else "text")
         self.worker.eventSignal.connect(self._on_worker_event)
         self.worker.finishedSignal.connect(self._on_worker_finished)
         self.worker.failedSignal.connect(self._on_worker_failed)
@@ -743,6 +806,10 @@ class IrisWindow(QMainWindow):
         self._live_details_active = False
         self._active_input_text = ""
         self._speak_next_response = False
+        self._voice_streamer = None
+        voice = self._voice_service()
+        if voice is not None:
+            voice.resume_conversation()
         self._append_message(MessageRole.ERROR, error_text)
         self.set_status("Error")
         if self.pending_text is not None and not self.input_box.toPlainText().strip():
@@ -758,6 +825,11 @@ class IrisWindow(QMainWindow):
             prompt_type=PromptType.TEXT,
             text=prompt_request,
         )
+
+        spoken_answer = self._voice_prompt_answer(request)
+        if spoken_answer is not None and self.worker is not None:
+            self.worker.provide_prompt_response(spoken_answer)
+            return
 
         if request.prompt_type == PromptType.YES_NO_CANCEL:
             button = QMessageBox.question(
@@ -809,7 +881,14 @@ class IrisWindow(QMainWindow):
     def _reset_input_state(self) -> None:
         self._set_controls_enabled(self.engine_available)
         self.stop_button.setEnabled(False)
-        self.input_box.setFocus()
+        self._active_turn_voice = False
+        controller = self.voice_controller
+        if controller is not None and controller.in_conversation:
+            self.set_status("Conversation")
+            self.activity_label.setText(CONVERSATION_HINT)
+            self.activity_label.setVisible(True)
+        else:
+            self.input_box.setFocus()
         self.worker = None
 
     def _set_ready_if_idle(self) -> None:

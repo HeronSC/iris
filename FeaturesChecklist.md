@@ -953,14 +953,24 @@ rules out every hosted speech API, which leaves a short, good list.
 
 - [x] Push-to-talk first; a wake word only if hands-free use is actually wanted. **Built
 	2026-09-16:** `core/voice/` (recorder, transcriber, speaker, service) and `ui/voice_controls.py`.
-	Hold Ctrl+Alt+T to talk and release to send; a quick tap toggles listening on until the
-	next tap. The transcript goes through the same path as typed text, so every command and tool
-	works unchanged. Config section `voice` (hotkey, models, devices, `speak_replies`). No wake word.
+	Hold Ctrl+Alt+T to talk and release to send. The transcript goes through the same path as
+	typed text, so every command and tool works unchanged. Config section `voice` (hotkey, models,
+	devices, `speak_replies`). No wake word.
+- [x] Conversation mode, no buttons. **Built 2026-09-16:** tap Ctrl+Alt+T (or `/voice start`) and
+	the mic stays open. `ConversationSession` runs Silero VAD frame by frame (bundled with
+	faster-whisper, 0.1 ms a frame), cuts an utterance at 700 ms of silence, transcribes it and
+	sends it; the reply is spoken sentence by sentence as the model streams it. Speaking while Iris
+	speaks stops her (barge-in). "That's all", "thanks Iris", "goodbye" or twenty quiet seconds end
+	it; so does another tap. A voice turn tells the model it is being heard (`VOICE_TURN_BLOCK`), so
+	answers come back as one to three plain sentences. Yes/no, text and choice prompts raised by a
+	tool during a voice turn are spoken and answered by voice, with the dialog as the fallback.
+	`/voice` reports status; `start`, `stop`, `mute`, `unmute`, `say`. Headset only: no echo
+	cancellation, so speakers would make Iris hear herself. Wake word still not built.
 - [x] Speech to text on this machine. `faster-whisper` `small.en`, model in `Data\Models\whisper`.
 	Loads on the GPU when the CUDA runtime is present and falls back to CPU int8 by itself (the
 	probe transcribes a second of silence at load time, which is where a missing cuBLAS shows up).
-	On this box it runs on CPU today: about 1 s for a short sentence. Installing
-	`nvidia-cublas-cu12` and `nvidia-cudnn-cu12` would move it to the 4060 Ti.
+	`nvidia-cublas-cu12` and `nvidia-cudnn-cu12` (approved 2026-09-16, in requirements) put it on
+	the 4060 Ti: 0.18 s for a short sentence, against 1.1 s on CPU.
 - [x] Text to speech on this machine, for replies and for notifications (8.2) read aloud. Piper
 	`en_US-lessac-medium` in `Data\Models\piper`, fetched once on first use. Replies are spoken when
 	the request came by voice (`speak_replies: voice`), always, or never. Watchers get a `voice`
@@ -974,8 +984,8 @@ rules out every hosted speech API, which leaves a short, good list.
 	stops playback within one audio block; muting stops it too.
 - [x] **Decided 2026-09-16:** STT `faster-whisper`, TTS `Piper`, audio I/O `sounddevice`. Passed
 	over: `whisper.cpp`, Windows Speech Recognition, SAPI, `Kokoro`, `openWakeWord` (no wake word
-	until hands-free use is wanted). Next: a conversational mode where Iris keeps listening after
-	it answers.
+	until hands-free use is wanted). Next, if wanted: a wake word (`openWakeWord`, with a "Hey
+	Iris" model trained from Piper samples locally) and echo cancellation for speakers.
 
 ---
 

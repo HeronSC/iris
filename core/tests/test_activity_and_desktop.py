@@ -147,14 +147,34 @@ class DesktopExtrasTests(unittest.TestCase):
 
 
 class _FakeVoiceService:
-    def __init__(self, text: str = "what time is it", *, available: bool = True) -> None:
+    def __init__(self, text: str = "what time is it", *, available: bool = True, conversation: bool = False) -> None:
         self.text = text
         self.available = available
         self.problem = None if available else "Voice needs sounddevice installed."
         self.recorder = SimpleNamespace(full=False, active=False)
+        self.config = SimpleNamespace(conversation=conversation)
         self.speaking = False
         self.stopped = 0
         self.cancelled = 0
+        self.in_conversation = False
+        self.ended: list[str] = []
+        self.on_utterance = None
+        self.on_conversation_state = None
+        self.on_conversation_end = None
+
+    def start_conversation(self) -> None:
+        self.in_conversation = True
+        if self.on_conversation_state is not None:
+            self.on_conversation_state("waiting")
+
+    def end_conversation(self, reason: str = "stopped") -> bool:
+        if not self.in_conversation:
+            return False
+        self.in_conversation = False
+        self.ended.append(reason)
+        if self.on_conversation_end is not None:
+            self.on_conversation_end(reason)
+        return True
 
     def start_listening(self) -> None:
         self.recorder.active = True
@@ -245,6 +265,34 @@ class VoiceControllerTests(unittest.TestCase):
         missing.on_hotkey()
         self.assertEqual(self.failures, ["Voice needs sounddevice installed."])
         self.assertEqual(missing.state, "idle")
+
+    def test_a_quick_tap_starts_a_conversation_and_the_next_tap_ends_it(self) -> None:
+        service = _FakeVoiceService(conversation=True)
+        now = [0.0]
+        controller = self._controller(service, key_down=lambda: False, clock=lambda: now[0])
+        controller.on_hotkey()
+        now[0] = 0.1
+        controller.poll()
+        self.assertTrue(service.in_conversation)
+        self.assertEqual(service.cancelled, 1)
+        self.assertTrue(controller.in_conversation)
+        self.assertEqual(controller.state, "conversation")
+        service.on_conversation_state("speaking")
+        service.on_conversation_state("transcribing")
+        service.on_utterance("turn on the lights")
+        for _ in range(10):
+            self.app.processEvents()
+        self.assertEqual(self.heard, ["turn on the lights"])
+        self.assertEqual(self.states, ["listening", "idle", "conversation", "conversation-hearing", "conversation-transcribing"])
+        ended: list[str] = []
+        controller.conversationEnded.connect(ended.append)
+        controller.on_hotkey()
+        for _ in range(10):
+            self.app.processEvents()
+        self.assertFalse(service.in_conversation)
+        self.assertEqual(ended, ["stopped"])
+        self.assertEqual(controller.state, "idle")
+        self.assertEqual(service.stopped, 1)
 
     def test_the_hotkey_interrupts_speech_and_cancel_drops_the_recording(self) -> None:
         service = _FakeVoiceService()

@@ -33,6 +33,13 @@ from core.llm.ollama_client import OllamaClientError
 
 logger = logging.getLogger(__name__)
 
+VOICE_TURN_BLOCK = (
+    "The user is speaking to you and will hear this answer read aloud.\n"
+    "Answer in one to three short plain sentences, the way a person would say it.\n"
+    "No markdown, headings, lists, tables, code or URLs unless the user asks for them.\n"
+    "If you need something from the user, ask exactly one short question.\n\n"
+)
+
 CODE_ANSWER_GUIDANCE = (
     "This is a request for code. Answer with working code first, in a fenced block, in the language the request "
     "implies: Business Central or NAV means AL (a codeunit or procedure with SetRange or SetFilter for filters); "
@@ -823,8 +830,10 @@ class AssistantCoordinator:
         principles = self._principles_block()
         if principles:
             context = context + "\n\n" + principles
+        voice = VOICE_TURN_BLOCK if getattr(self, "input_channel", "text") == "voice" else ""
         return (
             f"You are {self.assistant_name}, a personal assistant.\n\n"
+            f"{voice}"
             "Default to the most likely ordinary-language interpretation when one meaning is clearly dominant.\n"
             "Ask for clarification only when multiple interpretations are genuinely plausible.\n"
             "Answer the likely request first; mention ambiguity afterward only when still useful.\n"

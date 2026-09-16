@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -16,10 +18,32 @@ logger = logging.getLogger(__name__)
 MIN_SECONDS = 0.3
 
 
+def add_cuda_runtime_dirs() -> list[Path]:
+    added: list[Path] = []
+    if sys.platform != "win32":
+        return added
+    for entry in sys.path:
+        base = Path(entry) / "nvidia"
+        if not base.is_dir():
+            continue
+        for folder in sorted(base.glob("*/bin")):
+            if not any(folder.glob("*.dll")):
+                continue
+            try:
+                os.add_dll_directory(str(folder))
+            except (OSError, AttributeError):
+                continue
+            os.environ["PATH"] = str(folder) + os.pathsep + os.environ.get("PATH", "")
+            added.append(folder)
+    return added
+
+
 def default_model_factory(model_name: str, device: str, compute_type: str, download_root: Path | None) -> Any:
     #! @allow-local-import
     from faster_whisper import WhisperModel
 
+    if device != "cpu":
+        add_cuda_runtime_dirs()
     return WhisperModel(model_name, device=device, compute_type=compute_type, download_root=str(download_root) if download_root else None)
 
 

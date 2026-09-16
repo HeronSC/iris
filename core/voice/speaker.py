@@ -57,7 +57,9 @@ class Speaker:
         self._downloader = downloader or default_downloader
         self._player_factory = player_factory or default_player_factory
         self._voice: Any = None
-        self._lock = threading.Lock()
+        self._load_lock = threading.Lock()
+        self._queue_lock = threading.Lock()
+        self._queue: list[str] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.last_error: str | None = None
@@ -76,7 +78,7 @@ class Speaker:
         return thread is not None and thread.is_alive()
 
     def load(self) -> Any:
-        with self._lock:
+        with self._load_lock:
             if self._voice is not None:
                 return self._voice
             path = self.model_path
@@ -93,45 +95,72 @@ class Speaker:
             return self._voice
 
     def speak(self, text: str, *, wait: bool = False) -> bool:
+        if not (text or "").strip():
+            return False
+        self.stop()
+        return self.enqueue(text, wait=wait)
+
+    def enqueue(self, text: str, *, wait: bool = False) -> bool:
         spoken = (text or "").strip()
         if not spoken:
             return False
-        self.stop()
         voice = self.load()
-        self._stop.clear()
-        thread = threading.Thread(target=self._run, args=(voice, spoken), name="iris-speaker", daemon=True)
-        self._thread = thread
-        thread.start()
+        with self._queue_lock:
+            self._queue.append(spoken)
+            thread = self._thread
+            if thread is None or not thread.is_alive():
+                self._stop.clear()
+                thread = threading.Thread(target=self._run, args=(voice,), name="iris-speaker", daemon=True)
+                self._thread = thread
+                thread.start()
         if wait:
             thread.join()
         return True
 
     def stop(self) -> None:
-        thread = self._thread
+        with self._queue_lock:
+            self._queue.clear()
+            thread = self._thread
         if thread is None or not thread.is_alive():
             return
         self._stop.set()
         thread.join(timeout=2.0)
 
-    def _run(self, voice: Any, text: str) -> None:
+    def _next(self) -> str | None:
+        with self._queue_lock:
+            if not self._queue or self._stop.is_set():
+                self._thread = None
+                return None
+            return self._queue.pop(0)
+
+    def _run(self, voice: Any) -> None:
         player: Any = None
         self.last_error = None
         try:
-            for chunk in voice.synthesize(text):
-                if self._stop.is_set():
+            while True:
+                text = self._next()
+                if text is None:
                     break
-                rate = int(getattr(chunk, "sample_rate", 0) or getattr(getattr(voice, "config", None), "sample_rate", 22050))
-                if player is None:
-                    player = self._player_factory(rate, self.device)
-                samples = np.asarray(chunk.audio_int16_array, dtype=np.int16).reshape(-1)
-                for start in range(0, samples.shape[0], BLOCK_SAMPLES):
+                for chunk in voice.synthesize(text):
                     if self._stop.is_set():
                         break
-                    player.write(samples[start : start + BLOCK_SAMPLES].reshape(-1, 1))
+                    rate = int(getattr(chunk, "sample_rate", 0) or getattr(getattr(voice, "config", None), "sample_rate", 22050))
+                    if player is None:
+                        player = self._player_factory(rate, self.device)
+                    samples = np.asarray(chunk.audio_int16_array, dtype=np.int16).reshape(-1)
+                    for start in range(0, samples.shape[0], BLOCK_SAMPLES):
+                        if self._stop.is_set():
+                            break
+                        player.write(samples[start : start + BLOCK_SAMPLES].reshape(-1, 1))
+                if self._stop.is_set():
+                    break
         except (OSError, ValueError, RuntimeError, TypeError) as error:
             self.last_error = str(error)
             logger.warning("Speech playback failed: %s", error)
         finally:
+            with self._queue_lock:
+                if self._thread is threading.current_thread():
+                    self._thread = None
             if player is not None:
                 try:
                     if self._stop.is_set() and hasattr(player, "abort"):

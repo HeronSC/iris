@@ -15,6 +15,24 @@ EMPHASIS = re.compile(r"(\*\*|__|\*|_|~~)")
 TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$", re.MULTILINE)
 SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
 WHITESPACE = re.compile(r"\s+")
+PUNCTUATION = re.compile(r"[^\w\s']")
+YES_WORDS = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead", "do it", "please do", "affirmative", "correct", "right", "confirm")
+NO_WORDS = ("no", "nope", "nah", "don't", "do not", "cancel", "stop", "negative", "never mind", "abort")
+
+
+def normalize_phrase(text: str) -> str:
+    return " ".join(PUNCTUATION.sub(" ", (text or "").lower()).split())
+
+
+def interpret_yes_no(text: str) -> str | None:
+    spoken = normalize_phrase(text)
+    if not spoken:
+        return None
+    for answer, words in (("yes", YES_WORDS), ("no", NO_WORDS)):
+        for word in words:
+            if spoken == word or spoken.startswith(word + " ") or spoken.endswith(" " + word):
+                return answer
+    return None
 
 
 def speech_text(text: str, limit: int = 600) -> str:

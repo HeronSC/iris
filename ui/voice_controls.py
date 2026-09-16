@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 HOLD_THRESHOLD_SECONDS = 0.4
 POLL_MS = 40
+SESSION_STATES = {"waiting": "conversation", "speaking": "conversation-hearing", "transcribing": "conversation-transcribing"}
 
 
 class TranscribeThread(QThread):
@@ -33,10 +34,30 @@ class TranscribeThread(QThread):
             self.failedSignal.emit(f"Transcription failed: {error}")
 
 
+class AskThread(QThread):
+    answered = Signal(object)
+
+    def __init__(self, service: Any, question: str) -> None:
+        super().__init__()
+        self.service = service
+        self.question = question
+
+    def run(self) -> None:
+        try:
+            self.answered.emit(self.service.ask(self.question))
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
+            logger.warning("Spoken prompt failed: %s", error)
+            self.answered.emit(None)
+
+
 class VoiceController(QObject):
     transcribed = Signal(str)
     stateChanged = Signal(str)
     failed = Signal(str)
+    conversationEnded = Signal(str)
+    _utteranceSignal = Signal(str)
+    _sessionStateSignal = Signal(str)
+    _sessionEndSignal = Signal(str)
 
     def __init__(self, service: Any, parent: QObject | None = None, *, key_is_down: Callable[[], bool] | None = None, clock: Callable[[], float] | None = None) -> None:
         super().__init__(parent)
@@ -50,18 +71,36 @@ class VoiceController(QObject):
         self.timer = QTimer(self)
         self.timer.setInterval(POLL_MS)
         self.timer.timeout.connect(self.poll)
+        self._utteranceSignal.connect(self._on_utterance)
+        self._sessionStateSignal.connect(self._on_session_state)
+        self._sessionEndSignal.connect(self._on_session_end)
+        service.on_utterance = self._utteranceSignal.emit
+        service.on_conversation_state = self._sessionStateSignal.emit
+        service.on_conversation_end = self._sessionEndSignal.emit
 
     @property
     def listening(self) -> bool:
         return self.state == "listening"
 
     @property
+    def in_conversation(self) -> bool:
+        return bool(getattr(self.service, "in_conversation", False))
+
+    @property
     def busy(self) -> bool:
         return self.state in {"listening", "transcribing"}
+
+    @property
+    def conversation_wanted(self) -> bool:
+        config = getattr(self.service, "config", None)
+        return bool(getattr(config, "conversation", False))
 
     def on_hotkey(self) -> None:
         if not self.service.available:
             self.failed.emit(self.service.problem or "Voice is not available.")
+            return
+        if self.in_conversation:
+            self.end_conversation()
             return
         if self.state == "transcribing":
             return
@@ -96,6 +135,10 @@ class VoiceController(QObject):
             self.finish()
             return
         self.timer.stop()
+        if self.conversation_wanted:
+            self.service.cancel_listening()
+            self._set_state("idle")
+            self.start_conversation()
 
     def finish(self) -> None:
         self.timer.stop()
@@ -113,13 +156,42 @@ class VoiceController(QObject):
         self.timer.stop()
         if self.state == "listening":
             self.service.cancel_listening()
+        if self.in_conversation:
+            self.service.end_conversation("stopped")
         self._set_state("idle")
+
+    def start_conversation(self) -> bool:
+        try:
+            self.service.start_conversation()
+        except VoiceError as error:
+            self.failed.emit(str(error))
+            return False
+        self._set_state("conversation")
+        return True
+
+    def end_conversation(self) -> None:
+        self.service.end_conversation("stopped")
+        self.service.stop_speaking()
 
     def stop_speaking(self) -> bool:
         if self.service.speaking:
             self.service.stop_speaking()
             return True
         return False
+
+    def _on_utterance(self, text: str) -> None:
+        cleaned = (text or "").strip()
+        if cleaned:
+            self.transcribed.emit(cleaned)
+
+    def _on_session_state(self, state: str) -> None:
+        mapped = SESSION_STATES.get(state)
+        if mapped is not None:
+            self._set_state(mapped)
+
+    def _on_session_end(self, reason: str) -> None:
+        self._set_state("idle")
+        self.conversationEnded.emit(reason)
 
     def _on_result(self, text: str) -> None:
         self._set_state("idle")

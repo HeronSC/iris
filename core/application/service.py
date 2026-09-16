@@ -51,6 +51,7 @@ from core.scheduler.jobs import audit_retention
 from core.assistant.eval_command import EvalCommandHandler
 from core.assistant.principles_command import PrinciplesCommandHandler
 from core.assistant.uncensored_command import UncensoredCommandHandler
+from core.assistant.voice_command import VoiceCommandHandler
 from core.knowledge.principles import PrincipleService
 from core.assistant.tool_progress import describe_tool_event
 from core.assistant.stop_command import StopCommandHandler
@@ -209,6 +210,7 @@ class IrisApplication:
         self.tools_handler: CommandHandler = _NoopCommandHandler()
         self.models_handler: CommandHandler = _NoopCommandHandler()
         self.uncensored_handler: CommandHandler = _NoopCommandHandler()
+        self.voice_handler: CommandHandler = _NoopCommandHandler()
         self.why_handler: CommandHandler = _NoopCommandHandler()
         self.watch_handler: CommandHandler = _NoopCommandHandler()
         self.permissions_handler: CommandHandler = _NoopCommandHandler()
@@ -546,6 +548,7 @@ class IrisApplication:
         self.latency_budget = LatencyBudget.from_config(self.config)
         self.models_handler = ModelsCommandHandler(self.model_router, self.request_metrics, output=self._sink, budget=self.latency_budget)
         self.uncensored_handler = UncensoredCommandHandler(self.model_router, output=self._sink)
+        self.voice_handler = VoiceCommandHandler(self.voice, output=self._sink)
         self.principles = PrincipleService(self.knowledge.records)
         self.learning = LearningLoop(self.knowledge, request_id=lambda: getattr(self, "last_request_id", None))
         self.principles_handler = PrinciplesCommandHandler(self.principles, output=self._sink, actor=str(self.config.get("assistant_user", "user")))
@@ -644,10 +647,13 @@ class IrisApplication:
         cancel_event: threading.Event | None = None,
         event_handler: EventHandler | None = None,
         prompt_provider: Callable[[PromptRequest | str], str] | None = None,
+        channel: str = "text",
     ) -> IrisResponse:
         if not self.initialized:
             raise RuntimeError("IrisApplication is not initialized")
 
+        self.input_channel = channel
+        self.coordinator.input_channel = channel
         self._active_event_handler = event_handler if event_handler is not None else self.event_handler
         self._active_prompt_provider = prompt_provider if prompt_provider is not None else self.prompt_provider
         self._streamed_message_counts = {}
@@ -750,6 +756,8 @@ class IrisApplication:
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.uncensored_handler, stripped, status, command_prefixes=("/uncensored",)):
                 return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.voice_handler, stripped, status, command_prefixes=("/voice",)):
+                return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.why_handler, stripped, status, command_prefixes=("/why",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.watch_handler, stripped, status, command_prefixes=("/watch",)):
@@ -820,6 +828,8 @@ class IrisApplication:
             return self._build_response(IrisStatus.ERROR, cancel_event)
         finally:
             self._log_turn(stripped)
+            self.input_channel = "text"
+            self.coordinator.input_channel = "text"
             clear_request()
             self.state.pop("cancel_event", None)
             self._active_event_handler = None

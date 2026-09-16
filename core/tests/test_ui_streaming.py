@@ -54,7 +54,7 @@ class _FakeIrisApplication:
     def initialize(self, event_handler=None) -> None:
         self.startup_messages = [IrisMessage(MessageRole.SYSTEM, "Iris is ready.")]
 
-    def process_message(self, text: str, cancel_event=None, event_handler=None, prompt_provider=None):
+    def process_message(self, text: str, cancel_event=None, event_handler=None, prompt_provider=None, channel="text"):
         return IrisResponse(messages=[IrisMessage(MessageRole.ASSISTANT, f"echo: {text}")], status=IrisStatus.COMPLETE)
 
     def shutdown(self) -> None:

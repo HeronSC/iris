@@ -65,7 +65,7 @@ class _FakeIrisApplication:
     def initialize(self, event_handler=None) -> None:
         self.startup_messages = [IrisMessage(MessageRole.SYSTEM, "Iris is ready.")]
 
-    def process_message(self, text: str, cancel_event=None, event_handler=None, prompt_provider=None):
+    def process_message(self, text: str, cancel_event=None, event_handler=None, prompt_provider=None, channel="text"):
         return IrisResponse(
             messages=[IrisMessage(MessageRole.ASSISTANT, f"echo: {text}")],
             status=IrisStatus.COMPLETE,
@@ -107,7 +107,7 @@ class _DummyWorker:
 
 
 class _PromptBlockingIrisApplication(_FakeIrisApplication):
-    def process_message(self, text: str, cancel_event=None, event_handler=None, prompt_provider=None):
+    def process_message(self, text: str, cancel_event=None, event_handler=None, prompt_provider=None, channel="text"):
         if prompt_provider is None:
             raise RuntimeError("prompt provider missing")
         prompt_provider("Root is not in config roots. Add and scan? [y/N]:")
