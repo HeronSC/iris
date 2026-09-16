@@ -1,4 +1,8 @@
+# File: core/conversation/persistent_memory/repositories.py
+
 from __future__ import annotations
+
+from difflib import SequenceMatcher
 
 import json
 from typing import Any
@@ -124,10 +128,86 @@ class TopicRepository:
     def list_recent(self, limit: int = 20) -> list[TopicRecord]:
         with self.database.connect() as conn:
             rows = conn.execute(
-                "SELECT id, name, summary, created_at, updated_at, last_active_at, status FROM topics ORDER BY last_active_at DESC LIMIT ?",
+                "SELECT id, name, summary, created_at, updated_at, last_active_at, status FROM topics WHERE status != 'archived' ORDER BY last_active_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         return [_topic_from_row(row) for row in rows]
+
+    def find_similar(self, name: str, *, threshold: float = 0.86) -> TopicRecord | None:
+        wanted = " ".join((name or "").lower().split())
+        if not wanted:
+            return None
+        best: TopicRecord | None = None
+        best_ratio = 0.0
+        for topic in self.list_candidates():
+            existing = " ".join(topic.name.lower().split())
+            ratio = 1.0 if existing == wanted else SequenceMatcher(None, wanted, existing).ratio()
+            if ratio > best_ratio:
+                best, best_ratio = topic, ratio
+        if best is not None and best_ratio >= threshold:
+            return best
+        return None
+
+    def rename_topic(self, topic_id: int, name: str, *, provisional: bool = False) -> None:
+        cleaned = " ".join((name or "").split())[:220]
+        if not cleaned:
+            return
+        state = self.get_state(topic_id)
+        state["title"] = cleaned
+        state["title_provisional"] = bool(provisional)
+        now = _utc_now()
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE topics SET name = ?, state_json = ?, updated_at = ? WHERE id = ?",
+                (cleaned, json.dumps(state, ensure_ascii=True), now, topic_id),
+            )
+            conn.commit()
+
+    def set_status(self, topic_id: int, status: str) -> None:
+        now = _utc_now()
+        with self.database.connect() as conn:
+            conn.execute("UPDATE topics SET status = ?, updated_at = ? WHERE id = ?", (status, now, topic_id))
+            conn.commit()
+
+    def merge_into(self, source_id: int, target_id: int) -> int:
+        if source_id == target_id:
+            raise ValueError("A topic cannot be merged into itself")
+        source = self.get_topic(source_id)
+        target = self.get_topic(target_id)
+        source_state = self.get_state(source_id)
+        target_state = self.get_state(target_id)
+        for key in ("requirements", "items", "decisions", "open_questions", "notes"):
+            incoming = source_state.get(key) if isinstance(source_state.get(key), list) else []
+            current = target_state.get(key) if isinstance(target_state.get(key), list) else []
+            seen = {json.dumps(entry, sort_keys=True, ensure_ascii=True) for entry in current}
+            for entry in incoming:
+                marker = json.dumps(entry, sort_keys=True, ensure_ascii=True)
+                if marker not in seen:
+                    current.append(entry)
+                    seen.add(marker)
+            target_state[key] = current
+        if not str(target_state.get("goal", "")).strip() and str(source_state.get("goal", "")).strip():
+            target_state["goal"] = source_state["goal"]
+        target_state["version"] = int(target_state.get("version", 1)) + 1
+        summary = target.summary
+        if source.summary.strip() and source.summary.strip() not in summary:
+            summary = (summary.rstrip() + "\n\n" + source.summary.strip()).strip()
+        change_log = self.get_change_log(target_id)
+        change_log.append({"op": "merge_topic", "source_topic_id": source_id, "source_name": source.name, "at": _utc_now()})
+        self.update_state(target_id, target_state, change_log, summary)
+        now = _utc_now()
+        with self.database.connect() as conn:
+            moved = conn.execute("UPDATE messages SET topic_id = ? WHERE topic_id = ?", (target_id, source_id)).rowcount
+            conn.execute("UPDATE conversations SET current_topic_id = ? WHERE current_topic_id = ?", (target_id, source_id))
+            has_links = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'topic_links'").fetchone() is not None
+            if has_links:
+                conn.execute("UPDATE topic_links SET source_topic_id = ? WHERE source_topic_id = ?", (target_id, source_id))
+                conn.execute("UPDATE topic_links SET target_topic_id = ? WHERE target_topic_id = ?", (target_id, source_id))
+                conn.execute("DELETE FROM topic_links WHERE source_topic_id = target_topic_id")
+            conn.execute("UPDATE topics SET status = 'archived', updated_at = ? WHERE id = ?", (now, source_id))
+            conn.execute("UPDATE topics SET last_active_at = ?, updated_at = ? WHERE id = ?", (now, now, target_id))
+            conn.commit()
+        return int(moved or 0)
 
     def list_candidates(self) -> list[TopicRecord]:
         with self.database.connect() as conn:

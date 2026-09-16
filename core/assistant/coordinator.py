@@ -58,6 +58,7 @@ class CoordinatorTurn:
     topic_title: str | None = None
     awaiting_confirmation: bool = False
     resolved_by: str = "model"
+    selected_tool: str | None = None
     results: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -208,6 +209,7 @@ class AssistantCoordinator:
             topic_title=self._active_topic_title,
             awaiting_confirmation=result.awaiting_confirmation,
             resolved_by=result.resolved_by,
+            selected_tool=result.selected_tool,
             results=[item for outcome in result.tool_results for item in (outcome.get("results") or []) if isinstance(item, dict)],
         )
 
@@ -294,7 +296,7 @@ class AssistantCoordinator:
         persistent_memory_context = ""
         memory_diagnostics: dict[str, Any] | None = None
         try:
-            if self.topic_memory_service is not None and self.topic_memory_service.config.enabled and session.id is not None:
+            if self.topic_memory_service is not None and self.topic_memory_service.config.enabled and session.id is not None and not self.topic_memory_service.is_transient(user_message):
                 prepared_memory = self.topic_memory_service.prepare_user_turn(
                     conversation_id=session.id,
                     conversation_title=getattr(session, "title", None),
@@ -1299,11 +1301,12 @@ class AssistantCoordinator:
             "- /index errors\n"
             "- /search <query>\n"
             "- /search recent\n"
-            "- /topics\n"
-            "- /topic <name-or-id>\n"
+            "- /topics | /topics prune | /topics retitle\n"
+            "- /topic <name-or-id> | /topic rename <name-or-id> <new name> | /topic merge <source> into <target> | /topic delete <name-or-id>\n"
             "- /conversations\n"
             "- /resume <session-id>\n"
             "- /eval | /eval add <kind> :: <request> | /eval list | /eval failures\n"
+            "- /keep [title]\n"
             "- /new"
         )
         return self._trace_and_persist(
@@ -1357,6 +1360,7 @@ class AssistantCoordinator:
             finalized_public_recall = self.topic_memory_service.finalize_assistant_turn(prepared_memory, response, topic_patch=topic_patch)
             if isinstance(finalized_public_recall, dict):
                 self._last_recalled_public_context = finalized_public_recall
+            self._active_topic_title = self.topic_memory_service.current_topic_name(prepared_memory.topic_id)
         except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Persistent memory finalize failed: %s", error)
 
@@ -1394,6 +1398,7 @@ class AssistantCoordinator:
             self.topic_memory_service is None
             or not self.topic_memory_service.config.enabled
             or session.id is None
+            or self.topic_memory_service.is_transient(user_message)
         ):
             return
         try:
@@ -1407,7 +1412,7 @@ class AssistantCoordinator:
             if isinstance(finalized_public_recall, dict):
                 self._last_recalled_public_context = finalized_public_recall
             self._active_topic_id = str(prepared.topic_id)
-            self._active_topic_title = prepared.topic_name
+            self._active_topic_title = self.topic_memory_service.current_topic_name(prepared.topic_id)
             self._log_memory_diagnostics(prepared.diagnostics)
         except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Persistent memory turn persistence failed: %s", error)

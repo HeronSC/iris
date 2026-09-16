@@ -70,6 +70,19 @@
       "source": "successful:heuristic",
       "corrected_from": null,
       "updated_at": "2026-08-05T17:38:41+00:00"
+    },
+    {
+      "utterance": "can you list the saved topics?",
+      "intent": "recall_conversation",
+      "arguments": {
+        "query": "",
+        "role": "any",
+        "full_text": true,
+        "limit": 5
+      },
+      "source": "successful:agent",
+      "corrected_from": null,
+      "updated_at": "2026-09-16T12:08:15+00:00"
     }
   ]
 }

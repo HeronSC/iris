@@ -68,6 +68,7 @@ from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
 from core.assistant.proposal_commands import ProposalCommandHandler
 from core.assistant.save_command import SaveCommandHandler
+from core.assistant.keep_command import KeepCommandHandler
 from core.assistant.search_commands import SearchCommandHandler
 from core.assistant.session_commands import SessionCommandHandler
 from core.assistant.tools_command import ToolsCommandHandler
@@ -75,11 +76,13 @@ from core.assistant.watch_command import WatchCommandHandler
 from core.assistant.topic_commands import TopicCommandHandler
 from core.assistant.prompting import PROMPT_CANCEL_TOKEN, PromptRequest, PromptType
 from core.assistant.workflows import MemoryReviewWorkflow, SessionCloseWorkflow
+from core.application.instance_lock import InstanceLock
 from core.audit.logger import AuditLogger
 from core.audit.stream import AuditStream
 from core.config.loader import ConfigError, ConfigLoader
 from core.conversation.context_builder import ContextBuilder
 from core.conversation.session import ConversationSession
+from core.conversation.creations import CreationStore
 from core.conversation.session_manager import SessionManager
 from core.conversation.session_repository import SessionRepository
 from core.conversation.persistent_memory import MemoryConfig, TopicMemoryService
@@ -183,12 +186,17 @@ class IrisApplication:
         self._topic_counter = 0
         self._section_counter = 0
         self.initialized = False
+        self.instance_lock: InstanceLock | None = None
+        self.startup_cancel = threading.Event()
+        self.startup_status_handler: Callable[[str], None] | None = None
         self.startup_messages: list[IrisMessage] = []
         self.topic_memory_service: TopicMemoryService | None = None
         self._last_coordinator_turn: CoordinatorTurn | None = None
 
         self.topic_handler: CommandHandler = _NoopCommandHandler()
         self.save_handler: CommandHandler = _NoopCommandHandler()
+        self.keep_handler: CommandHandler = _NoopCommandHandler()
+        self.creations: CreationStore | None = None
         self.session_handler: CommandHandler = _NoopCommandHandler()
         self.proposal_handler: CommandHandler = _NoopCommandHandler()
         self.memory_handler: CommandHandler = _NoopCommandHandler()
@@ -228,6 +236,7 @@ class IrisApplication:
             self._emit_message(MessageRole.ERROR, f"Assistant could not start: {error}", IrisStatus.ERROR)
             raise
 
+        self._wait_for_previous_shutdown()
         self.store = MemoryStore(memory_data)
         self.writer = MemoryWriter(self.config["memory_path"])
         context_builder = ContextBuilder(self.config["assistant_name"], self.store)
@@ -281,6 +290,7 @@ class IrisApplication:
         memory_config = MemoryConfig.from_config(self.config)
         if memory_config.enabled:
             self.topic_memory_service = TopicMemoryService(memory_config)
+            self.topic_memory_service.namer = self._name_topic_with_model
             self.topic_handler = TopicCommandHandler(self.topic_memory_service, output=self._sink)
             self.coordinator.topic_memory_service = self.topic_memory_service
         else:
@@ -404,6 +414,8 @@ class IrisApplication:
                 PdfExtractor(ocr=self._build_ocr()),
             ],
         )
+        self.creations = CreationStore(Path(self.config["memory_path"]).parent / "Creations", indexer=scanner.index_file)
+        self.keep_handler = KeepCommandHandler(self.creations, self.session_manager, output=self._sink)
         parser = FileSearchQueryParser(QueryParserConfig(default_roots=document_config.root_paths()))
         self.document_embeddings = DocumentEmbeddingIndex(document_db, self.model_router, DocumentEmbeddingConfig.from_config(self.config))
         document_search_service = DocumentSearchService(document_catalog, parser, embeddings=self.document_embeddings)
@@ -462,6 +474,8 @@ class IrisApplication:
             nas=self.nas_service,
             model_router=self.model_router,
             captures_dir=Path(self.config["memory_path"]).parent / "Captures",
+            session_repository=self.session_repository,
+            creations=self.creations,
             audit_folder=self.config.get("action_audit_path") or Path(__file__).resolve().parents[1] / "audit",
             permissions=self.permissions,
             ledger=self.changes,
@@ -714,6 +728,8 @@ class IrisApplication:
             if stripped.lower().startswith("/resume "):
                 stripped = "/session resume " + stripped.split(maxsplit=1)[1]
             if self._handle_slash_command(self.save_handler, stripped, status, command_prefixes=("/save",)):
+                return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.keep_handler, stripped, status, command_prefixes=("/keep",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.session_handler, stripped, status, command_prefixes=("/session",)):
                 return self._build_response(status, cancel_event)
@@ -1042,14 +1058,48 @@ class IrisApplication:
                 )
             )
 
+    def _name_topic_with_model(self, system_prompt: str, prompt: str) -> str:
+        return self.ollama_client.generate(system_prompt, prompt, task="topic_name")
+
+    def _shutdown_lock_timeout(self) -> float:
+        return float(self.config.get("llm_timeout_seconds", 180) or 180) + 30.0
+
+    def _wait_for_previous_shutdown(self) -> None:
+        lock_path = Path(self.config["memory_path"]).parent / "iris.lock"
+        lock = InstanceLock(lock_path)
+        self.instance_lock = lock
+
+        def _on_wait(remaining: float) -> None:
+            handler = self.startup_status_handler
+            if handler is not None:
+                handler(f"Waiting for the previous Iris to finish saving ({int(remaining)}s)")
+
+        if lock.acquire(timeout=self._shutdown_lock_timeout(), on_wait=_on_wait, cancel=self.startup_cancel):
+            lock.release()
+
     def shutdown(self) -> None:
         if not self.initialized:
             return
+        lock = self.instance_lock
+        if lock is not None:
+            lock.acquire(timeout=self._shutdown_lock_timeout())
         try:
             self._note_session_state()
+            self._stop_background_services()
             self.session_handler.handle("/session close", self.state)
-        except (OSError, ValueError, RuntimeError, TypeError):
-            pass
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
+            logger.warning("Shutdown step failed", error=str(error))
+        finally:
+            self.initialized = False
+            self._release_instance_lock()
+
+    def _release_instance_lock(self) -> None:
+        lock = self.instance_lock
+        self.instance_lock = None
+        if lock is not None:
+            lock.release()
+
+    def _stop_background_services(self) -> None:
         stop = getattr(self, "_embedding_stop", None)
         if stop is not None:
             stop.set()
@@ -1086,7 +1136,6 @@ class IrisApplication:
                 mcp_manager.stop()
             except (OSError, ValueError, RuntimeError, TypeError):
                 pass
-        self.initialized = False
 
     def _status_for_input(self, user_input: str) -> IrisStatus:
         lowered = user_input.lower()
@@ -1128,6 +1177,11 @@ class IrisApplication:
         self._detail_type_override = "command_output"
         self._detail_title_override = f"{command_name} details"
         self._detail_metadata_override["command"] = user_input
+        command_detail = self.state.pop("command_detail", None)
+        if isinstance(command_detail, dict) and str(command_detail.get("content", "")).strip():
+            self._detail_type_override = str(command_detail.get("type") or "markdown")
+            self._detail_title_override = str(command_detail.get("title") or self._detail_title_override)
+            self._detail_content_override = str(command_detail["content"])
         return True
 
     def _message_role_counts(self) -> dict[MessageRole, int]:
@@ -1217,6 +1271,25 @@ class IrisApplication:
         if self._active_event_handler is not None and text:
             self._active_event_handler(IrisEvent(status=IrisStatus.THINKING, delta=text))
 
+    def _capture_creation(self, user_message: str, turn: Any) -> str:
+        response_text = str(getattr(turn, "text", "") or "")
+        creations = getattr(self, "creations", None)
+        if creations is None or getattr(turn, "awaiting_confirmation", False):
+            return response_text
+        try:
+            creation = creations.capture(
+                user_message=user_message,
+                response=response_text,
+                session_id=self._active_session_id(),
+                selected_tool=getattr(turn, "selected_tool", None),
+            )
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
+            logger.warning("Creation capture failed", error=str(error))
+            return response_text
+        if creation is None:
+            return response_text
+        return f"{response_text.rstrip()}\n\nSaved to {creation.path}"
+
     def _respond_with_coordinator(self, stripped: str, cancel_event: threading.Event | None) -> IrisResponse:
         turn = self.coordinator.respond_detailed(
             stripped,
@@ -1225,7 +1298,7 @@ class IrisApplication:
             cancel_event=cancel_event,
         )
         self._last_coordinator_turn = turn
-        response_text = turn.text
+        response_text = self._capture_creation(stripped, turn)
         self._detail_type_override = "markdown"
         self._detail_content_override = response_text
         self._detail_title_override = self._derive_detail_title(stripped)

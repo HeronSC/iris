@@ -1,0 +1,7 @@
+{
+  "includeCoAuthoredBy": true,
+  "attribution": {
+    "commit": "Co-Authored-By: Claude",
+    "pr": "🤖 Generated with [Claude Code]"
+  }
+}

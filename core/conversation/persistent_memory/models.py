@@ -1,3 +1,5 @@
+# File: core/conversation/persistent_memory/models.py
+
 from __future__ import annotations
 
 import json
@@ -23,6 +25,7 @@ class MemoryConfig:
     semantic_weight: float
     current_topic_bonus: float
     recency_bonus_max: float
+    name_topics_with_llm: bool = True
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> MemoryConfig:
@@ -54,6 +57,7 @@ class MemoryConfig:
             semantic_weight=float(memory_cfg.get("semantic_weight", 0.75)),
             current_topic_bonus=float(memory_cfg.get("current_topic_bonus", 0.12)),
             recency_bonus_max=float(memory_cfg.get("recency_bonus_max", 0.13)),
+            name_topics_with_llm=bool(memory_cfg.get("name_topics_with_llm", True)),
         )
 
 
@@ -88,6 +92,7 @@ class PreparedMemoryContext:
     related_topic_ids: list[int]
     context_block: str
     diagnostics: dict[str, Any]
+    created: bool = False
 
 
 def _json_object_or_empty(value: Any) -> dict[str, Any]:

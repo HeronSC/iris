@@ -76,6 +76,8 @@ class ActionExecutionContext:
     nas: Any = None
     model_router: Any = None
     captures_dir: Any = None
+    session_repository: Any = None
+    creations: Any = None
 
 
 @dataclass(frozen=True)

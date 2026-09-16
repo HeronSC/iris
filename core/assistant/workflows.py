@@ -37,11 +37,11 @@ class SessionCloseWorkflow:
             self.session_manager.close_active_session()
             return 0, None
 
+        self.session_manager.close_active_session()
+
         proposals = self.proposal_generator.generate_proposals(closing_session, self.store.to_dict())
         for proposal in proposals:
             self.proposal_store.add(proposal)
-
-        self.session_manager.close_active_session()
 
         if self.proposal_generator.last_error:
             return len(proposals), f"Scan warning: {self.proposal_generator.last_error}"

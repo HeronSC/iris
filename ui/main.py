@@ -12,7 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat
 from PySide6.QtWidgets import (
-    QApplication,
+    QGridLayout,    QApplication,
     QDialog,
     QFileDialog,
     QHeaderView,
@@ -62,6 +62,10 @@ from core.assistant.tool_progress import is_tool_progress
 
 
 LINE_BREAK = chr(0x2028)
+
+
+BOTTOM_ROW_HEIGHT = 170
+EXPLORE_COLUMNS = 2
 
 
 class ChatInput(QTextEdit):
@@ -131,12 +135,17 @@ class ProcessThread(QThread):
 class InitializeThread(QThread):
     initializedSignal = Signal()
     failedSignal = Signal(str)
+    statusSignal = Signal(str)
 
     def __init__(self, app_service: IrisApplication) -> None:
         super().__init__()
         self.app_service = app_service
 
+    def cancel_wait(self) -> None:
+        self.app_service.startup_cancel.set()
+
     def run(self) -> None:
+        self.app_service.startup_status_handler = self.statusSignal.emit
         try:
             self.app_service.initialize()
         except (ConfigError, AssistantMemoryError) as error:
@@ -146,6 +155,20 @@ class InitializeThread(QThread):
             self.failedSignal.emit(f"Unexpected startup error: {error}")
             return
         self.initializedSignal.emit()
+
+
+class ShutdownThread(QThread):
+    failedSignal = Signal(str)
+
+    def __init__(self, app_service: IrisApplication) -> None:
+        super().__init__()
+        self.app_service = app_service
+
+    def run(self) -> None:
+        try:
+            self.app_service.shutdown()
+        except (RuntimeError, OSError, ValueError, AssertionError) as error:
+            self.failedSignal.emit(str(error))
 
 
 class FileOperationsPanel(QWidget):
@@ -300,6 +323,7 @@ class IrisWindow(QMainWindow):
         self.app_service = IrisApplication(config_path, prompt_provider=None)
         self.config_path = config_path
         self.init_worker: InitializeThread | None = None
+        self.shutdown_worker: ShutdownThread | None = None
         self.worker: ProcessThread | None = None
         self.pending_text: str | None = None
         self.engine_available = False
@@ -327,9 +351,18 @@ class IrisWindow(QMainWindow):
         self.details_view.setOpenExternalLinks(False)
         self.details_view.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
         self.details_actions_row = QWidget()
-        self.details_actions_layout = QVBoxLayout()
+        self.details_actions_row.setFixedHeight(BOTTOM_ROW_HEIGHT)
+        actions_row_layout = QVBoxLayout()
+        actions_row_layout.setContentsMargins(0, 0, 0, 0)
+        self.details_actions_row.setLayout(actions_row_layout)
+        self.details_actions_content = QWidget()
+        self.details_actions_layout = QGridLayout()
         self.details_actions_layout.setContentsMargins(0, 0, 0, 0)
-        self.details_actions_row.setLayout(self.details_actions_layout)
+        self.details_actions_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.details_actions_content.setLayout(self.details_actions_layout)
+        self.details_actions_content.setVisible(False)
+        actions_row_layout.addWidget(self.details_actions_content)
+        actions_row_layout.addStretch()
         self.approve_button = QPushButton("Approve")
         self.approve_button.clicked.connect(self._approve_pending_action)
         self.cancel_confirmation_button = QPushButton("Cancel")
@@ -351,8 +384,10 @@ class IrisWindow(QMainWindow):
         self.stop_button.clicked.connect(self.stop_request)
         self.stop_button.setEnabled(False)
 
+        self.conversation_title = QLabel("Iris")
+        self.conversation_title.setStyleSheet("font-weight: bold;")
+        self.details_title.setStyleSheet("font-weight: bold;")
         header = QHBoxLayout()
-        header.addWidget(QLabel("Iris"))
         header.addStretch()
         header.addWidget(self.details_toggle)
         header.addWidget(self.status_label)
@@ -363,9 +398,23 @@ class IrisWindow(QMainWindow):
         self.activity_label.setStyleSheet("color: palette(mid); font-size: 11px;")
         self.activity_label.setVisible(False)
 
+        composer_row = QWidget()
+        composer_row.setFixedHeight(BOTTOM_ROW_HEIGHT)
+        composer = QHBoxLayout()
+        composer.setContentsMargins(0, 0, 0, 0)
+        composer.addWidget(self.input_box, 1)
+        buttons = QVBoxLayout()
+        buttons.addWidget(self.send_button)
+        buttons.addWidget(self.stop_button)
+        buttons.addStretch()
+        composer.addLayout(buttons)
+        composer_row.setLayout(composer)
+
         left_panel = QWidget()
         left_layout = QVBoxLayout()
+        left_layout.addWidget(self.conversation_title)
         left_layout.addWidget(self.conversation_view, 1)
+        left_layout.addWidget(composer_row)
         left_panel.setLayout(left_layout)
 
         right_panel = QWidget()
@@ -380,9 +429,9 @@ class IrisWindow(QMainWindow):
         self.details_stack.addWidget(self.file_ops_panel)
         self.details_stack.addWidget(self.results_panel)
         right_layout.addWidget(self.details_stack, 1)
-        right_layout.addWidget(self.details_actions_row)
         right_layout.addWidget(self.approve_button)
         right_layout.addWidget(self.cancel_confirmation_button)
+        right_layout.addWidget(self.details_actions_row)
         right_panel.setLayout(right_layout)
 
         self.details_view.setMinimumWidth(280)
@@ -395,20 +444,10 @@ class IrisWindow(QMainWindow):
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 2)
 
-        composer = QHBoxLayout()
-        composer.addWidget(self.input_box, 1)
-
-        buttons = QVBoxLayout()
-        buttons.addWidget(self.send_button)
-        buttons.addWidget(self.stop_button)
-        buttons.addStretch()
-        composer.addLayout(buttons)
-
         body = QVBoxLayout()
         body.addLayout(header)
         body.addWidget(self.activity_label)
         body.addWidget(self.splitter, 1)
-        body.addLayout(composer)
 
         container = QWidget()
         container.setLayout(body)
@@ -490,6 +529,7 @@ class IrisWindow(QMainWindow):
 
         self.init_worker = InitializeThread(self.app_service)
         self.init_worker.initializedSignal.connect(self._on_initialize_finished)
+        self.init_worker.statusSignal.connect(self.set_status)
         self.init_worker.failedSignal.connect(self._on_initialize_failed)
         self.init_worker.finished.connect(self._on_initialize_thread_stopped)
         self.init_worker.start()
@@ -824,7 +864,9 @@ class IrisWindow(QMainWindow):
         if self._active_topic_id is None:
             self._active_topic_id = topic_id
 
-        section_html = self._build_details_section_html(details)
+        current_workspace = self._topic_workspaces.get(self._active_topic_id, {})
+        panel_title_hint = str(topic_title or current_workspace.get("title") or "").strip()
+        section_html = self._build_details_section_html(details, panel_title=panel_title_hint)
         detail_type, section_id, _title, _content, _summary, detail_items, _actions, metadata = self._unpack_detail(details)
         render_operation = "append"
         if isinstance(metadata, dict):
@@ -876,7 +918,7 @@ class IrisWindow(QMainWindow):
         self.details_title.setText(panel_title)
         self.results_panel.show_sections(
             [str(block.get("html", "")) for block in rendered_sections],
-            title=panel_title,
+            title=None,
             awaiting_approval=response.status == IrisStatus.AWAITING_CONFIRMATION,
         )
         self.details_stack.setCurrentWidget(self.results_panel)
@@ -894,13 +936,16 @@ class IrisWindow(QMainWindow):
             normalized.append({"id": f"section-{index + 1}", "html": str(entry)})
         return normalized
 
-    def _build_details_section_html(self, details) -> str:
+    def _build_details_section_html(self, details, *, panel_title: str = "") -> str:
         if details is None:
             return ""
 
         detail_type, _section_id, title, content, summary, items, _actions, metadata = self._unpack_detail(details)
         body = str(content or summary or "").strip()
         display_title = str(title or "Details").strip()
+        if panel_title and display_title.casefold() == panel_title.strip().casefold():
+            display_title = ""
+        heading = f"<h3>{self._escape_html(display_title)}</h3>" if display_title else ""
 
         if detail_type == "topic_state":
             return self._render_topic_state_section(display_title, items)
@@ -911,13 +956,14 @@ class IrisWindow(QMainWindow):
 
         typed_results = metadata.get("results") if isinstance(metadata, dict) else None
         if isinstance(typed_results, list) and typed_results:
-            return f"<section><h3>{self._escape_html(display_title)}</h3>{results_fragment(typed_results)}</section>"
+            return f"<section>{heading}{results_fragment(typed_results)}</section>"
 
         if detail_type == "markdown" and body:
-            return f"<section><h3>{self._escape_html(display_title)}</h3>{markdown_to_html(body)}</section>"
+            return f"<section>{heading}{markdown_to_html(body)}</section>"
 
         parts: list[str] = []
-        parts.append(f"<h3>{self._escape_html(display_title)}</h3>")
+        if heading:
+            parts.append(heading)
         if body:
             parts.append(f"<p>{self._escape_html(body)}</p>")
         if detail_type in {"text", "markdown"}:
@@ -944,7 +990,8 @@ class IrisWindow(QMainWindow):
             payload = {}
 
         lines: list[str] = []
-        lines.append(f"<h3>{self._escape_html(title)}</h3>")
+        if title:
+            lines.append(f"<h3>{self._escape_html(title)}</h3>")
 
         goal = str(payload.get("goal", "")).strip()
         if goal:
@@ -1061,29 +1108,30 @@ class IrisWindow(QMainWindow):
     def _render_explore_actions_for_topic(self, topic_id: str | None) -> None:
         self._details_actions_clear()
         if not topic_id:
-            self.details_actions_row.setVisible(False)
+            self.details_actions_content.setVisible(False)
             return
         workspace = self._topic_workspaces.get(topic_id)
         if not isinstance(workspace, dict):
-            self.details_actions_row.setVisible(False)
+            self.details_actions_content.setVisible(False)
             return
         actions_list = workspace.get("explore_actions", [])
         if not isinstance(actions_list, list) or not actions_list:
-            self.details_actions_row.setVisible(False)
+            self.details_actions_content.setVisible(False)
             return
 
         header = QLabel("Explore further")
-        self.details_actions_layout.addWidget(header)
+        self.details_actions_layout.addWidget(header, 0, 0, 1, EXPLORE_COLUMNS)
         for item in actions_list:
             if not isinstance(item, tuple) or len(item) != 2:
                 continue
             label, command = item
             button = QPushButton(str(label))
             button.clicked.connect(lambda _checked=False, command_text=str(command): self._submit_command(command_text))
-            self.details_actions_layout.addWidget(button)
+            position = len(self.details_action_buttons)
+            self.details_actions_layout.addWidget(button, 1 + position // EXPLORE_COLUMNS, position % EXPLORE_COLUMNS)
             self.details_action_buttons.append(button)
 
-        self.details_actions_row.setVisible(bool(self.details_action_buttons))
+        self.details_actions_content.setVisible(bool(self.details_action_buttons))
 
     def _response_topic(self, response) -> TopicContext | None:
         return getattr(response, "topic", None)
@@ -1126,14 +1174,14 @@ class IrisWindow(QMainWindow):
         self.details_title.setText(title)
         self.details_stack.setCurrentWidget(self.file_ops_panel)
         self._details_actions_clear()
-        self.details_actions_row.setVisible(False)
+        self.details_actions_content.setVisible(False)
 
     def _show_search_results(self, payload: dict[str, object]) -> None:
         self.details_title.setText("Search")
-        self.results_panel.show_sections([render_search_results(payload)], title="Search")
+        self.results_panel.show_sections([render_search_results(payload)], title=None)
         self.details_stack.setCurrentWidget(self.results_panel)
         self._details_actions_clear()
-        self.details_actions_row.setVisible(False)
+        self.details_actions_content.setVisible(False)
 
     def _sync_file_operations_panel(self, detail_type: str, items, metadata) -> None:
         payload = metadata.get("file_operations") if isinstance(metadata, dict) else None
@@ -1257,6 +1305,8 @@ class IrisWindow(QMainWindow):
 
     def _format_detail_item(self, item) -> str:
         if isinstance(item, dict):
+            if "text" in item and set(item.keys()) <= {"role", "text"}:
+                return str(item.get("text") or "")
             parts = []
             for key in ("name", "path", "directory", "match_reason", "summary", "message"):
                 value = item.get(key)
@@ -1322,8 +1372,12 @@ class IrisWindow(QMainWindow):
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/splitter", self.splitter.saveState())
         self.settings.setValue("window/details_visible", self.details_panel.isVisible())
+        if self.shutdown_worker is not None:
+            event.ignore()
+            return
         if self.init_worker is not None and self.init_worker.isRunning():
             self._close_requested = True
+            self.init_worker.cancel_wait()
             self.set_status("Stopping")
             event.ignore()
             return
@@ -1335,16 +1389,28 @@ class IrisWindow(QMainWindow):
             self.set_status("Stopping")
             event.ignore()
             return
-        try:
-            self.app_service.shutdown()
-        except (RuntimeError, OSError, ValueError, AssertionError) as error:
-            QMessageBox.warning(self, "Shutdown Warning", f"Shutdown encountered an error: {error}")
         hotkey = getattr(self, "hotkey", None)
         if hotkey is not None:
             hotkey.unregister()
         if tray is not None:
             tray.stop()
-        super().closeEvent(event)
+        event.ignore()
+        self.hide()
+        self.shutdown_worker = ShutdownThread(self.app_service)
+        self.shutdown_worker.failedSignal.connect(self._on_shutdown_failed)
+        self.shutdown_worker.finished.connect(self._on_shutdown_finished)
+        self.shutdown_worker.start()
+
+    def _on_shutdown_failed(self, error_text: str) -> None:
+        QMessageBox.warning(None, "Shutdown Warning", f"Shutdown encountered an error: {error_text}")
+
+    def _on_shutdown_finished(self) -> None:
+        worker = self.shutdown_worker
+        if worker is not None:
+            worker.deleteLater()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
 
 def _resolve_config_path(argv: list[str]) -> tuple[Path, list[str]]:

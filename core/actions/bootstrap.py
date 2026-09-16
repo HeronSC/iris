@@ -19,6 +19,7 @@ from core.actions.implementations.file_tools import FILE_ACTIONS
 from core.actions.implementations.git_tools import GIT_ACTIONS
 from core.actions.implementations.memory_tools import MEMORY_ACTIONS
 from core.actions.implementations.nas_tools import NAS_ACTIONS
+from core.actions.implementations.recall_tools import RECALL_ACTIONS
 from core.actions.implementations.network_tools import NETWORK_ACTIONS
 from core.actions.implementations.project_tools import PROJECT_ACTIONS
 from core.actions.implementations.fetch_web_page import FetchWebPageAction
@@ -137,6 +138,8 @@ def build_action_layer(
     nas: Any = None,
     model_router: Any = None,
     captures_dir: Any = None,
+    session_repository: Any = None,
+    creations: Any = None,
 ) -> ActionLayer:
     registry_of_tools = tool_registry or ToolRegistry()
     action_registry = ActionRegistry(registry_of_tools)
@@ -183,6 +186,8 @@ def build_action_layer(
         action_registry.register(camera_action())
     for nas_action in NAS_ACTIONS:
         action_registry.register(nas_action())
+    for recall_action in RECALL_ACTIONS:
+        action_registry.register(recall_action())
 
     documents = document_config or document_search_config(config)
     applications, alias_map = application_maps(config)
@@ -213,6 +218,8 @@ def build_action_layer(
             nas=nas,
             model_router=model_router,
             captures_dir=captures_dir,
+            session_repository=session_repository,
+            creations=creations,
         ),
     )
     return ActionLayer(

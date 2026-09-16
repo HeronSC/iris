@@ -21,7 +21,12 @@
     "planning_tasks": [
       "intent",
       "decision"
-    ]
+    ],
+    "think": {
+      "follow_up": false,
+      "summary": false,
+      "topic_name": false
+    }
   },
   "image_server": "http://127.0.0.1:8188",
   "llm_server": "http://127.0.0.1:11434",

@@ -313,8 +313,40 @@ def _looks_like_topic_enrichment(text: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+_TRANSIENT_PATTERNS = (
+    re.compile(r"^\s*(?:hi|hello|hey|yo|good\s+(?:morning|afternoon|evening|night)|morning|evening|thanks?|thank\s+you|cheers|bye|goodbye|see\s+you|how\s+are\s+you(?:\s+today|\s+doing)?|how'?s\s+it\s+going|what'?s\s+up|ok(?:ay)?|sure|yes|no|lol|haha)\b[\w\s,!.?]{0,20}$", re.IGNORECASE),
+    re.compile(r"\b(?:weather|forecast|temperature|humidity|rain(?:ing)?|snow(?:ing)?|sunny|cloudy|windy|outside\s+today|weather\s+alerts?)\b", re.IGNORECASE),
+    re.compile(r"\b(?:what(?:'s| is)\s+the\s+(?:time|date|day)|current\s+time|time\s+is\s+it|what\s+day\s+is|today'?s\s+date)\b", re.IGNORECASE),
+    re.compile(r"^\s*(?:help|\?|menu|commands?|list\s+(?:the\s+)?(?:saved\s+)?topics?|show\s+(?:the\s+)?topics?)\s*[.!?]*\s*$", re.IGNORECASE),
+    re.compile(r"^\s*my\s+(?:location|zip(?:\s*code)?|city)\b", re.IGNORECASE),
+)
+_TRANSIENT_NAMES = re.compile(
+    r"^(?:general|help|today|tomorrow|yesterday|next\s+week|rest\s+of\s+(?:day|week)|this\s+week|"
+    r"(?:goo+d\s+)?(?:morning|afternoon|evening|night)\w*|.*weather.*|.*forecast.*|.*current\s+time.*|.*time\s+is.*|"
+    r".*outside\s+today\w*|my\s+location.*|list\s+(?:saved\s+)?topics?|.*what\s+time.*|s\s+.*)$",
+    re.IGNORECASE,
+)
+
+
+def _is_transient_message(user_message: str) -> bool:
+    text = _collapse_repeats((user_message or "").strip())
+    if not text:
+        return True
+    if text.startswith("/"):
+        return True
+    return any(pattern.search(text) for pattern in _TRANSIENT_PATTERNS)
+
+
+def _is_transient_topic_name(name: str) -> bool:
+    return bool(_TRANSIENT_NAMES.match((name or "").strip()))
+
+
+def _collapse_repeats(text: str) -> str:
+    return re.sub(r"(.)\1{2,}", r"\1\1", text or "")
+
+
 def _generate_topic_name(user_message: str) -> str:
-    cleaned = re.sub(r"\s+", " ", (user_message or "").strip())
+    cleaned = _collapse_repeats(re.sub(r"\s+", " ", (user_message or "").strip()))
     if not cleaned:
         return "General"
     lowered = cleaned.lower()
