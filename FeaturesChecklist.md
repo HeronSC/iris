@@ -1192,8 +1192,9 @@ rules out every hosted speech API, which leaves a short, good list.
 	`camlist`, `alertlist`, `status`, alert thumbnails and camera snapshots -- with the session
 	reused and renewed when Blue Iris drops it. `blue_iris.url` and `blue_iris.user` in
 	`config.json`, the password in Credential Manager as `blue_iris:password`; until those are
-	set the tools say exactly that. Not yet configured on this machine, so verified against a
-	fake server only.
+	set the tools say exactly that. **Live 2026-09-16:** configured against the real server at
+	`192.168.1.5:81` with a non-admin `Iris` account (view clips only, LAN only); login, all
+	18 cameras, the alert list, an alert thumbnail and a snapshot all verified from this box.
 - [~] Integrate Iris above Blue Iris as intelligence. Tools `camera_status` (every camera:
 	online, recording, motion, alerting, fps, size, clips, triggers), `camera_alerts` (newest
 	first, with the zones or objects that triggered them and a thumbnail of each as an image
