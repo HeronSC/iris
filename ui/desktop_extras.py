@@ -21,6 +21,8 @@ MODIFIERS = {"alt": 0x0001, "ctrl": 0x0002, "control": 0x0002, "shift": 0x0004, 
 VIRTUAL_KEYS = {"space": 0x20, "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73, "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77, "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B}
 DEFAULT_HOTKEY = "ctrl+alt+i"
 HOTKEY_ID = 0x4952
+TALK_HOTKEY_ID = 0x4953
+KEY_DOWN_MASK = 0x8000
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "iris.ico"
 APP_MODEL_ID = "Iris.Assistant.Desktop"
 
@@ -75,13 +77,22 @@ def parse_hotkey(text: str) -> tuple[int, int]:
 
 
 class GlobalHotkey(QAbstractNativeEventFilter):
-    def __init__(self, on_press: Callable[[], None], *, register: Callable[[int, int, int], bool] | None = None, unregister: Callable[[int], None] | None = None) -> None:
+    def __init__(
+        self,
+        on_press: Callable[[], None],
+        *,
+        hotkey_id: int = HOTKEY_ID,
+        register: Callable[[int, int, int], bool] | None = None,
+        unregister: Callable[[int], None] | None = None,
+    ) -> None:
         super().__init__()
         self.on_press = on_press
+        self.hotkey_id = int(hotkey_id)
         self._register = register or self._register_windows
         self._unregister = unregister or self._unregister_windows
         self.registered = False
         self.combination = DEFAULT_HOTKEY
+        self.key = 0
 
     def register(self, combination: str = DEFAULT_HOTKEY) -> bool:
         try:
@@ -90,11 +101,12 @@ class GlobalHotkey(QAbstractNativeEventFilter):
             logger.warning("Hotkey not registered: %s", error)
             return False
         try:
-            self.registered = bool(self._register(HOTKEY_ID, modifiers, key))
+            self.registered = bool(self._register(self.hotkey_id, modifiers, key))
         except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Hotkey %s could not be registered: %s", combination, error)
             self.registered = False
         self.combination = combination
+        self.key = key
         if not self.registered:
             logger.warning("Hotkey %s is taken by another program", combination)
         return self.registered
@@ -102,10 +114,18 @@ class GlobalHotkey(QAbstractNativeEventFilter):
     def unregister(self) -> None:
         if self.registered:
             try:
-                self._unregister(HOTKEY_ID)
+                self._unregister(self.hotkey_id)
             except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.debug("Hotkey unregister failed: %s", error)
             self.registered = False
+
+    def key_is_down(self) -> bool:
+        if sys.platform != "win32" or not self.key:
+            return False
+        try:
+            return bool(ctypes.windll.user32.GetAsyncKeyState(self.key) & KEY_DOWN_MASK)
+        except (OSError, AttributeError):
+            return False
 
     def nativeEventFilter(self, event_type, message):
         if self.registered and self.is_hotkey_message(message):
@@ -116,8 +136,7 @@ class GlobalHotkey(QAbstractNativeEventFilter):
             return True, 0
         return False, 0
 
-    @staticmethod
-    def is_hotkey_message(message) -> bool:
+    def is_hotkey_message(self, message) -> bool:
         if sys.platform != "win32":
             return False
         try:
@@ -125,7 +144,7 @@ class GlobalHotkey(QAbstractNativeEventFilter):
             payload = ctypes.wintypes.MSG.from_address(address)
         except (TypeError, ValueError, AttributeError):
             return False
-        return int(payload.message) == WM_HOTKEY and int(payload.wParam) == HOTKEY_ID
+        return int(payload.message) == WM_HOTKEY and int(payload.wParam) == self.hotkey_id
 
     @staticmethod
     def _register_windows(hotkey_id: int, modifiers: int, key: int) -> bool:
@@ -146,8 +165,9 @@ class TrayController(QObject):
     showRequested = Signal()
     hideRequested = Signal()
     quitRequested = Signal()
+    muteToggled = Signal(bool)
 
-    def __init__(self, parent: QWidget, *, title: str = "Iris", close_to_tray: bool = False) -> None:
+    def __init__(self, parent: QWidget, *, title: str = "Iris", close_to_tray: bool = False, voice_muted: bool = False) -> None:
         super().__init__(parent)
         self.close_to_tray = close_to_tray
         self.icon = QSystemTrayIcon(make_icon(title[:1] or "I"), parent)
@@ -161,12 +181,17 @@ class TrayController(QObject):
         self.close_action.setCheckable(True)
         self.close_action.setChecked(close_to_tray)
         self.close_action.toggled.connect(self._set_close_to_tray)
+        self.mute_action = QAction("Mute voice", menu)
+        self.mute_action.setCheckable(True)
+        self.mute_action.setChecked(voice_muted)
+        self.mute_action.toggled.connect(self.muteToggled)
         self.quit_action = QAction("Quit Iris", menu)
         self.quit_action.triggered.connect(self.quitRequested)
         menu.addAction(self.show_action)
         menu.addAction(self.hide_action)
         menu.addSeparator()
         menu.addAction(self.close_action)
+        menu.addAction(self.mute_action)
         menu.addSeparator()
         menu.addAction(self.quit_action)
         self.icon.setContextMenu(menu)
@@ -195,7 +220,7 @@ class TrayController(QObject):
             self.showRequested.emit()
 
 
-__all__ = ["DEFAULT_HOTKEY", "GlobalHotkey", "HOTKEY_ID", "TrayController", "WM_HOTKEY", "apply_dark_palette", "apply_light_palette", "make_icon", "parse_hotkey"]
+__all__ = ["DEFAULT_HOTKEY", "GlobalHotkey", "HOTKEY_ID", "TALK_HOTKEY_ID", "TrayController", "WM_HOTKEY", "apply_dark_palette", "apply_light_palette", "make_icon", "parse_hotkey"]
 
 
 def apply_dark_palette(application: QApplication) -> QPalette:

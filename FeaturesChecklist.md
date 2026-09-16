@@ -951,17 +951,31 @@ Rendering only. *What* gets rendered is defined in 2.7.
 `core/voice/` exists as an empty package, so this was intended; it had no section. Local-only (1)
 rules out every hosted speech API, which leaves a short, good list.
 
-- [ ] Push-to-talk first; a wake word only if hands-free use is actually wanted.
-- [ ] Speech to text on this machine.
-- [ ] Text to speech on this machine, for replies and for notifications (8.2) read aloud.
-- [ ] Voice is another client of the same core — the result contract (2.7) decides what a spoken
-	answer contains; the voice layer only renders it.
-- [ ] Barge-in: speaking over Iris stops the reply.
-- [ ] Options — STT: `faster-whisper` (CTranslate2, runs on the 4060 Ti, best accuracy per second),
-	`whisper.cpp` (CPU-friendly), Windows Speech Recognition (built in, weakest). TTS: `Piper`
-	(fast, local, natural enough), Windows SAPI via `pywin32` (built in, robotic), `Kokoro`
-	(higher quality, heavier). Wake word: `openWakeWord`. Audio I/O: `sounddevice`.
-	Nothing here is decided; the VRAM budget in 2.4 has to include whichever STT model is chosen.
+- [x] Push-to-talk first; a wake word only if hands-free use is actually wanted. **Built
+	2026-09-16:** `core/voice/` (recorder, transcriber, speaker, service) and `ui/voice_controls.py`.
+	Hold Ctrl+Alt+Space to talk and release to send; a quick tap toggles listening on until the
+	next tap. The transcript goes through the same path as typed text, so every command and tool
+	works unchanged. Config section `voice` (hotkey, models, devices, `speak_replies`). No wake word.
+- [x] Speech to text on this machine. `faster-whisper` `small.en`, model in `Data\Models\whisper`.
+	Loads on the GPU when the CUDA runtime is present and falls back to CPU int8 by itself (the
+	probe transcribes a second of silence at load time, which is where a missing cuBLAS shows up).
+	On this box it runs on CPU today: about 1 s for a short sentence. Installing
+	`nvidia-cublas-cu12` and `nvidia-cudnn-cu12` would move it to the 4060 Ti.
+- [x] Text to speech on this machine, for replies and for notifications (8.2) read aloud. Piper
+	`en_US-lessac-medium` in `Data\Models\piper`, fetched once on first use. Replies are spoken when
+	the request came by voice (`speak_replies: voice`), always, or never. Watchers get a `voice`
+	channel: a watcher that lists it is read aloud as title then body. "Mute voice" in the tray
+	menu silences both and is remembered.
+- [x] Voice is another client of the same core — the result contract (2.7) decides what a spoken
+	answer contains; the voice layer only renders it. `speech_text` flattens the conversation
+	message for the ear: code blocks become "code omitted", tables are dropped, links and markdown
+	marks go, and long replies stop at a sentence boundary under `max_spoken_chars`.
+- [x] Barge-in: speaking over Iris stops the reply. Pressing the talk key or sending typed text
+	stops playback within one audio block; muting stops it too.
+- [x] **Decided 2026-09-16:** STT `faster-whisper`, TTS `Piper`, audio I/O `sounddevice`. Passed
+	over: `whisper.cpp`, Windows Speech Recognition, SAPI, `Kokoro`, `openWakeWord` (no wake word
+	until hands-free use is wanted). Next: a conversational mode where Iris keeps listening after
+	it answers.
 
 ---
 

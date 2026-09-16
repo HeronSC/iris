@@ -55,6 +55,7 @@ from core.knowledge.principles import PrincipleService
 from core.assistant.tool_progress import describe_tool_event
 from core.assistant.stop_command import StopCommandHandler
 from core.cameras import CameraService
+from core.voice import SpokenNotifier, VoiceService
 from core.nas import NasService
 from core.code import CodeService
 from core.knowledge.scopes import resolve_scope, visible_scopes
@@ -452,7 +453,9 @@ class IrisApplication:
         self.context_service = build_context_service(self.config)
         self.camera_service = CameraService.from_config(self.config, self.secrets)
         self.nas_service = NasService.from_config(self.config, self.secrets)
-        code_cfg = self.config.get("code", {}) if isinstance(self.config.get("code"), dict) else {}
+        self.voice = VoiceService.from_config(self.config)
+        self.voice.warm_up()
+        code_cfg =self.config.get("code", {}) if isinstance(self.config.get("code"), dict) else {}
         self.code_service = CodeService(
             document_config.root_paths(),
             cache_dir=Path(self.config["memory_path"]).parent / "Index" / "al_symbols",
@@ -870,6 +873,9 @@ class IrisApplication:
         notifiers: dict[str, Any] = {"log": LogNotifier()}
         if ToastNotifier.available():
             notifiers["toast"] = ToastNotifier(str(self.config.get("assistant_name", "Iris")))
+        voice = getattr(self, "voice", None)
+        if voice is not None and voice.available:
+            notifiers["voice"] = SpokenNotifier(voice)
         try:
             quiet = QuietHours.parse(str(notifications_cfg.get("quiet_hours") or ""))
         except ValueError as error:
@@ -1100,6 +1106,9 @@ class IrisApplication:
             lock.release()
 
     def _stop_background_services(self) -> None:
+        voice = getattr(self, "voice", None)
+        if voice is not None:
+            voice.shutdown()
         stop = getattr(self, "_embedding_stop", None)
         if stop is not None:
             stop.set()

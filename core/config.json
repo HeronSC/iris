@@ -283,5 +283,14 @@
     "user": "Iris",
     "verify_certificate": false,
     "timeout_seconds": 15.0
+  },
+  "voice": {
+    "enabled": true,
+    "hotkey": "ctrl+alt+space",
+    "whisper_model": "small.en",
+    "whisper_device": "auto",
+    "piper_voice": "en_US-lessac-medium",
+    "speak_replies": "voice",
+    "max_spoken_chars": 600
   }
 }

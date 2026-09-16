@@ -41,6 +41,7 @@ KNOWN_KEYS: dict[str, tuple[type, ...]] = {
     "context": (dict,),
     "retention": (dict,),
     "ui": (dict,),
+    "voice": (dict,),
     "resources": (dict,),
     "config_warnings": (list,),
 }

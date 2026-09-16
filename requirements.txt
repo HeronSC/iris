@@ -37,6 +37,7 @@ keyring>=25.0
 # Voice (6.1) - local speech to text and text to speech
 faster-whisper>=1.2
 piper-tts>=1.8
+sounddevice>=0.5
 
 # Windows integration (Excel COM, service host, foreground window) — pinned rather than left transitive
 pywin32>=306

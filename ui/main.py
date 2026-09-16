@@ -54,11 +54,15 @@ from core.results.html import render_confirmation, render_search_results
 #! @allow-local-import
 from ui.results_panel import ResultsPanel, markdown_to_html, results_fragment
 #! @allow-local-import
-from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, CommandPalette, GlobalHotkey, QuickInput, TrayController, apply_dark_palette, apply_light_palette, make_icon, set_app_model_id
+from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, TALK_HOTKEY_ID, CommandPalette, GlobalHotkey, QuickInput, TrayController, apply_dark_palette, apply_light_palette, make_icon, set_app_model_id
+#! @allow-local-import
+from ui.voice_controls import VoiceController
 #! @allow-local-import
 from core.assistant.why_command import describe_activity
 #! @allow-local-import
 from core.assistant.tool_progress import is_tool_progress
+
+LISTENING_HINT = "Listening… release the key to send, or press it again."
 
 
 LINE_BREAK = chr(0x2028)
@@ -458,7 +462,12 @@ class IrisWindow(QMainWindow):
         self._set_confirmation_controls_visible(False)
         self.setWindowIcon(make_icon())
         self._quit_requested = False
-        self.tray = TrayController(self, close_to_tray=str(self.settings.value("window/close_to_tray")).lower() in {"true", "1"})
+        self.tray = TrayController(
+            self,
+            close_to_tray=str(self.settings.value("window/close_to_tray")).lower() in {"true", "1"},
+            voice_muted=str(self.settings.value("voice/muted")).lower() in {"true", "1"},
+        )
+        self.tray.muteToggled.connect(self._set_voice_muted)
         self.tray.showRequested.connect(self.bring_to_front)
         self.tray.hideRequested.connect(self.hide)
         self.tray.quitRequested.connect(self._quit_from_tray)
@@ -473,7 +482,81 @@ class IrisWindow(QMainWindow):
         if application is not None:
             application.installNativeEventFilter(self.hotkey)
         self.hotkey.register(str(self.settings.value("window/hotkey") or DEFAULT_HOTKEY))
+        self.voice_controller: VoiceController | None = None
+        self._speak_next_response = False
+        self.talk_hotkey = GlobalHotkey(self.on_talk_hotkey, hotkey_id=TALK_HOTKEY_ID)
+        if application is not None:
+            application.installNativeEventFilter(self.talk_hotkey)
         self._start_engine_initialization()
+
+    def _voice_service(self):
+        return getattr(self.app_service, "voice", None)
+
+    def _attach_voice(self) -> None:
+        voice = self._voice_service()
+        if voice is None:
+            return
+        voice.muted = self.tray.mute_action.isChecked()
+        self.voice_controller = VoiceController(voice, self, key_is_down=self.talk_hotkey.key_is_down)
+        self.voice_controller.transcribed.connect(self._submit_from_voice)
+        self.voice_controller.stateChanged.connect(self._on_voice_state)
+        self.voice_controller.failed.connect(self._on_voice_failed)
+        if voice.available:
+            self.talk_hotkey.register(str(self.settings.value("window/talk_hotkey") or voice.config.hotkey))
+
+    def on_talk_hotkey(self) -> None:
+        if self.voice_controller is None:
+            return
+        self.voice_controller.on_hotkey()
+
+    def _submit_from_voice(self, text: str) -> None:
+        if not self.engine_available or (self.worker is not None and self.worker.isRunning()):
+            self._on_voice_failed("Iris is still working on the last request.")
+            return
+        self._speak_next_response = True
+        self.bring_to_front()
+        self._submit_command(text)
+
+    def _on_voice_state(self, state: str) -> None:
+        if state == "listening":
+            self.set_status("Listening")
+            self.activity_label.setText(LISTENING_HINT)
+            self.activity_label.setVisible(True)
+            return
+        if state == "transcribing":
+            self.set_status("Transcribing")
+            self.activity_label.setText("Transcribing…")
+            return
+        if self.activity_label.text() in {LISTENING_HINT, "Transcribing…"}:
+            self.activity_label.setVisible(False)
+        self._set_ready_if_idle()
+
+    def _on_voice_failed(self, text: str) -> None:
+        self.activity_label.setText(text)
+        self.activity_label.setVisible(True)
+        self._set_ready_if_idle()
+        QTimer.singleShot(5000, lambda: self.activity_label.setVisible(False) if self.activity_label.text() == text else None)
+
+    def _set_voice_muted(self, checked: bool) -> None:
+        self.settings.setValue("voice/muted", bool(checked))
+        voice = self._voice_service()
+        if voice is None:
+            return
+        voice.muted = bool(checked)
+        if checked:
+            voice.stop_speaking()
+
+    def _speak_response(self, response) -> None:
+        from_voice, self._speak_next_response = self._speak_next_response, False
+        voice = self._voice_service()
+        if voice is None or not voice.should_speak_reply(from_voice=from_voice):
+            return
+        conversation = self._response_conversation(response)
+        if conversation is not None and conversation.message.strip():
+            text = conversation.message
+        else:
+            text = " ".join(message.text for message in response.messages if message.role == MessageRole.ASSISTANT and message.text.strip())
+        voice.speak(text)
 
     def on_hotkey(self) -> None:
         if self.isActiveWindow() and self.isVisible() and not self.isMinimized():
@@ -540,6 +623,7 @@ class IrisWindow(QMainWindow):
         self.engine_available = True
         self.set_status("Ready")
         self._set_controls_enabled(True)
+        self._attach_voice()
         QTimer.singleShot(0, self._focus_input_box)
 
     def _focus_input_box(self) -> None:
@@ -597,6 +681,9 @@ class IrisWindow(QMainWindow):
         if not text:
             return
 
+        voice = self._voice_service()
+        if voice is not None:
+            voice.stop_speaking()
         self._append_message(MessageRole.USER, text)
         assistant_name = self.app_service.config.get("assistant_name", "Iris") if isinstance(self.app_service.config, dict) else "Iris"
         self._placeholder_block = self.history.document().blockCount()
@@ -643,6 +730,7 @@ class IrisWindow(QMainWindow):
         self._current_response = response
         self._render_response(response)
         self._show_activity(response)
+        self._speak_response(response)
         status_text = response.status.value.replace("_", " ").title()
         self.set_status(status_text)
         self.pending_text = None
@@ -654,6 +742,7 @@ class IrisWindow(QMainWindow):
     def _on_worker_failed(self, error_text: str) -> None:
         self._live_details_active = False
         self._active_input_text = ""
+        self._speak_next_response = False
         self._append_message(MessageRole.ERROR, error_text)
         self.set_status("Error")
         if self.pending_text is not None and not self.input_box.toPlainText().strip():
@@ -1392,6 +1481,12 @@ class IrisWindow(QMainWindow):
         hotkey = getattr(self, "hotkey", None)
         if hotkey is not None:
             hotkey.unregister()
+        talk_hotkey = getattr(self, "talk_hotkey", None)
+        if talk_hotkey is not None:
+            talk_hotkey.unregister()
+        controller = getattr(self, "voice_controller", None)
+        if controller is not None:
+            controller.cancel()
         if tray is not None:
             tray.stop()
         event.ignore()
