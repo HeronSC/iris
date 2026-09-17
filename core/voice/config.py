@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_TALK_HOTKEY = "ctrl+alt+t"
+DEFAULT_WAKE_HOTKEY = "ctrl+alt+w"
 DEFAULT_WHISPER_MODEL = "small.en"
 DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
 SPEAK_MODES = ("voice", "always", "never")
@@ -35,6 +36,10 @@ class VoiceConfig:
     max_utterance_seconds: float = 30.0
     answer_timeout_seconds: float = 10.0
     end_phrases: tuple[str, ...] = ()
+    wake_hotkey: str = DEFAULT_WAKE_HOTKEY
+    wake_names: tuple[str, ...] = ()
+    wake_at_start: bool = False
+    wake_reply: str = "Yes?"
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "VoiceConfig":
@@ -66,6 +71,10 @@ class VoiceConfig:
             max_utterance_seconds=float(section.get("max_utterance_seconds", 30.0)),
             answer_timeout_seconds=float(section.get("answer_timeout_seconds", 10.0)),
             end_phrases=tuple(str(item) for item in section.get("end_phrases") or ()),
+            wake_hotkey=str(section.get("wake_hotkey") or DEFAULT_WAKE_HOTKEY),
+            wake_names=tuple(str(item) for item in section.get("wake_names") or ()),
+            wake_at_start=bool(section.get("wake_at_start", False)),
+            wake_reply=str(section.get("wake_reply", "Yes?")),
         )
 
 

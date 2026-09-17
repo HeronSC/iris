@@ -7,7 +7,7 @@ from typing import Any
 from core.assistant.output import OutputSink, emit_output
 from core.voice.errors import VoiceError
 
-USAGE = "Usage: /voice | /voice start | /voice stop | /voice mute | /voice unmute | /voice say <text>"
+USAGE = "Usage: /voice | /voice start | /voice stop | /voice wake [on|off] | /voice mute | /voice unmute | /voice say <text>"
 
 
 class VoiceCommandHandler:
@@ -41,6 +41,21 @@ class VoiceCommandHandler:
             ended = self.voice.end_conversation("stopped")
             self.voice.stop_speaking()
             emit_output(self.output, "Conversation ended." if ended else "No conversation was running.")
+            return True
+        if action == "wake":
+            wanted = parts[2].strip().lower() if len(parts) > 2 else ("off" if self.voice.wake_mode else "on")
+            if wanted in {"on", "start"}:
+                try:
+                    self.voice.start_wake()
+                except VoiceError as error:
+                    emit_output(self.output, str(error))
+                    return True
+                emit_output(self.output, "Wake word on. Say \"Iris\" to start; /voice wake off to stop listening for it.")
+                return True
+            if wanted in {"off", "stop"}:
+                emit_output(self.output, "Wake word off." if self.voice.stop_wake() else "The wake word was not on.")
+                return True
+            emit_output(self.output, "Usage: /voice wake [on|off]")
             return True
         if action in {"mute", "unmute"}:
             self.voice.muted = action == "mute"

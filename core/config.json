@@ -295,6 +295,10 @@
     "conversation": true,
     "stream_speech": true,
     "end_silence_ms": 700,
-    "idle_seconds": 20
+    "idle_seconds": 20,
+    "wake_hotkey": "ctrl+alt+w",
+    "wake_names": ["iris", "hey iris", "hi iris", "okay iris", "irish"],
+    "wake_at_start": false,
+    "wake_reply": "Yes?"
   }
 }

@@ -22,6 +22,7 @@ VIRTUAL_KEYS = {"space": 0x20, "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73, "
 DEFAULT_HOTKEY = "ctrl+alt+i"
 HOTKEY_ID = 0x4952
 TALK_HOTKEY_ID = 0x4953
+WAKE_HOTKEY_ID = 0x4954
 KEY_DOWN_MASK = 0x8000
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "iris.ico"
 APP_MODEL_ID = "Iris.Assistant.Desktop"
@@ -220,7 +221,7 @@ class TrayController(QObject):
             self.showRequested.emit()
 
 
-__all__ = ["DEFAULT_HOTKEY", "GlobalHotkey", "HOTKEY_ID", "TALK_HOTKEY_ID", "TrayController", "WM_HOTKEY", "apply_dark_palette", "apply_light_palette", "make_icon", "parse_hotkey"]
+__all__ = ["DEFAULT_HOTKEY", "GlobalHotkey", "HOTKEY_ID", "TALK_HOTKEY_ID", "WAKE_HOTKEY_ID", "TrayController", "WM_HOTKEY", "apply_dark_palette", "apply_light_palette", "make_icon", "parse_hotkey"]
 
 
 def apply_dark_palette(application: QApplication) -> QPalette:

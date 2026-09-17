@@ -964,8 +964,18 @@ rules out every hosted speech API, which leaves a short, good list.
 	it; so does another tap. A voice turn tells the model it is being heard (`VOICE_TURN_BLOCK`), so
 	answers come back as one to three plain sentences. Yes/no, text and choice prompts raised by a
 	tool during a voice turn are spoken and answered by voice, with the dialog as the fallback.
-	`/voice` reports status; `start`, `stop`, `mute`, `unmute`, `say`. Headset only: no echo
-	cancellation, so speakers would make Iris hear herself. Wake word still not built.
+	`/voice` reports status; `start`, `stop`, `wake [on|off]`, `mute`, `unmute`, `say`. Headset only:
+	no echo cancellation, so speakers would make Iris hear herself.
+- [x] Wake word, switchable. **Built 2026-09-17:** Ctrl+Alt+W (or `/voice wake`) arms it and
+	disarms it, so it can be off at times when a false wake would matter. Armed, the session sits
+	asleep: every utterance is transcribed locally and thrown away unless it starts with one of
+	`voice.wake_names` ("Iris", "hey Iris", and "Irish" because Whisper hears it that way). The name
+	alone gets "Yes?" and an open conversation; name plus command runs the command. An end phrase or
+	twenty quiet seconds puts it back to sleep rather than ending the session. Ctrl+Alt+T while armed
+	wakes or sleeps it by hand. `wake_at_start` arms it at launch. This is Whisper as the gate, not a
+	trained wake model: cheap to build, but it transcribes everything said near the headset and shares
+	the GPU with the language model. `openWakeWord` with a Piper-trained "Hey Iris" model is the
+	upgrade if false wakes or that cost become a problem.
 - [x] Speech to text on this machine. `faster-whisper` `small.en`, model in `Data\Models\whisper`.
 	Loads on the GPU when the CUDA runtime is present and falls back to CPU int8 by itself (the
 	probe transcribes a second of silence at load time, which is where a missing cuBLAS shows up).
@@ -984,8 +994,8 @@ rules out every hosted speech API, which leaves a short, good list.
 	stops playback within one audio block; muting stops it too.
 - [x] **Decided 2026-09-16:** STT `faster-whisper`, TTS `Piper`, audio I/O `sounddevice`. Passed
 	over: `whisper.cpp`, Windows Speech Recognition, SAPI, `Kokoro`, `openWakeWord` (no wake word
-	until hands-free use is wanted). Next, if wanted: a wake word (`openWakeWord`, with a "Hey
-	Iris" model trained from Piper samples locally) and echo cancellation for speakers.
+	until hands-free use is wanted; Whisper gates the name instead). Next, if wanted: `openWakeWord`
+	as a proper always-on model, and echo cancellation for speakers.
 
 ---
 

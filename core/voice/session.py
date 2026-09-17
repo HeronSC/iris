@@ -17,9 +17,11 @@ from core.voice.vad import FRAME_SAMPLES, StreamingVad
 logger = logging.getLogger(__name__)
 
 DEFAULT_END_PHRASES = ("that's all", "that is all", "that's it", "thanks iris", "thank you iris", "goodbye", "good bye", "stop listening", "end conversation")
+DEFAULT_WAKE_NAMES = ("iris", "hey iris", "hi iris", "okay iris", "ok iris", "irish", "hey irish")
 START_FRAMES = 3
 BARGE_IN_FRAMES = 8
 PRE_ROLL_FRAMES = 10
+LEADING_PUNCTUATION = ",.;:!?- "
 
 
 def default_input_factory(sample_rate: int, device: int | str | None, callback: Callable[..., None]) -> Any:
@@ -44,6 +46,25 @@ def is_end_phrase(text: str, phrases: tuple[str, ...] = DEFAULT_END_PHRASES) -> 
     return False
 
 
+def match_wake(text: str, names: tuple[str, ...] = DEFAULT_WAKE_NAMES) -> str | None:
+    spoken = normalize_phrase(text)
+    if not spoken:
+        return None
+    best: str | None = None
+    for name in names:
+        wanted = normalize_phrase(name)
+        if not wanted:
+            continue
+        if spoken == wanted or spoken.startswith(wanted + " "):
+            if best is None or len(wanted) > len(best):
+                best = wanted
+    if best is None:
+        return None
+    words = (text or "").strip().split()
+    remainder = " ".join(words[len(best.split()) :]).lstrip(LEADING_PUNCTUATION).strip()
+    return remainder
+
+
 class ConversationSession:
     def __init__(
         self,
@@ -52,6 +73,7 @@ class ConversationSession:
         on_utterance: Callable[[str], None],
         on_state: Callable[[str], None] | None = None,
         on_end: Callable[[str], None] | None = None,
+        on_wake: Callable[[str], None] | None = None,
         vad: StreamingVad | None = None,
         input_factory: Callable[[int, int | str | None, Callable[..., None]], Any] | None = None,
         clock: Callable[[], float] | None = None,
@@ -62,11 +84,13 @@ class ConversationSession:
         max_utterance_seconds: float = 30.0,
         threshold: float = 0.5,
         end_phrases: tuple[str, ...] = DEFAULT_END_PHRASES,
+        wake_names: tuple[str, ...] = (),
     ) -> None:
         self.service = service
         self.on_utterance = on_utterance
         self.on_state = on_state or (lambda state: None)
         self.on_end = on_end or (lambda reason: None)
+        self.on_wake = on_wake or (lambda command: None)
         self.vad = vad or StreamingVad()
         self._input_factory = input_factory or default_input_factory
         self.clock = clock or time.monotonic
@@ -77,6 +101,8 @@ class ConversationSession:
         self.max_utterance_frames = max(1, int(max_utterance_seconds * sample_rate / FRAME_SAMPLES))
         self.threshold = float(threshold)
         self.end_phrases = tuple(end_phrases)
+        self.wake_names = tuple(wake_names)
+        self.asleep = bool(self.wake_names)
         self._frames: queue.Queue[np.ndarray | None] = queue.Queue()
         self._stream: Any = None
         self._thread: threading.Thread | None = None
@@ -93,12 +119,21 @@ class ConversationSession:
         thread = self._thread
         return thread is not None and thread.is_alive() and not self._stop.is_set()
 
+    @property
+    def wake_mode(self) -> bool:
+        return bool(self.wake_names)
+
+    @property
+    def resting_state(self) -> str:
+        return "asleep" if self.asleep else "waiting"
+
     def start(self) -> None:
         if self.active:
             return
         self._stop.clear()
         self._held.clear()
         self.end_reason = None
+        self.asleep = self.wake_mode
         self.vad.reset()
         try:
             self._stream = self._input_factory(self.sample_rate, self.device, self._on_audio)
@@ -109,7 +144,7 @@ class ConversationSession:
         self._last_activity = self.clock()
         self._thread = threading.Thread(target=self._run, name="iris-conversation", daemon=True)
         self._thread.start()
-        self._set_state("waiting")
+        self._set_state(self.resting_state)
 
     def stop(self, reason: str = "stopped") -> None:
         if self._thread is None:
@@ -124,6 +159,26 @@ class ConversationSession:
         self._close_stream()
         self._thread = None
         self._set_state("idle")
+
+    def wake(self, command: str = "") -> None:
+        if not self.wake_mode:
+            return
+        self.asleep = False
+        self._last_activity = self.clock()
+        if self.state == "asleep":
+            self._set_state("waiting")
+        try:
+            self.on_wake(command)
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
+            logger.debug("Wake handler failed: %s", error)
+
+    def sleep(self) -> None:
+        if not self.wake_mode:
+            return
+        self.asleep = True
+        self._held.clear()
+        if self.state == "waiting":
+            self._set_state("asleep")
 
     def hold(self) -> None:
         self._held.set()
@@ -169,11 +224,11 @@ class ConversationSession:
                 if frame is None:
                     break
                 voiced = self.vad.probability(frame) >= self.threshold
-                if self.state == "waiting":
+                if self.state in {"waiting", "asleep"}:
                     pre_roll.append(frame)
                     del pre_roll[:-PRE_ROLL_FRAMES]
                     speech_run = speech_run + 1 if voiced else 0
-                    if self.service.speaking:
+                    if self.service.speaking and not self.asleep:
                         self._last_activity = self.clock()
                         if speech_run >= BARGE_IN_FRAMES:
                             self.service.stop_speaking()
@@ -198,7 +253,7 @@ class ConversationSession:
                         self._finish_utterance(audio)
                         if self._stop.is_set():
                             break
-                        self._set_state("waiting")
+                        self._set_state(self.resting_state)
         except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Conversation session stopped: %s", error)
             self.end_reason = self.end_reason or f"error: {error}"
@@ -222,12 +277,20 @@ class ConversationSession:
         cleaned = (text or "").strip()
         if not cleaned:
             return
+        if self.asleep:
+            command = match_wake(cleaned, self.wake_names)
+            if command is None:
+                logger.debug("Asleep; ignoring: %s", cleaned)
+                return
+            self.wake(command)
+            if not command:
+                return
+            cleaned = command
         if self._answer_wanted.is_set():
             self._answer.put(cleaned)
             return
         if is_end_phrase(cleaned, self.end_phrases):
-            self.end_reason = "phrase"
-            self._stop.set()
+            self._rest("phrase")
             return
         if self._held.is_set():
             logger.debug("Dropping utterance while a reply is in progress: %s", cleaned)
@@ -237,13 +300,22 @@ class ConversationSession:
         except (OSError, ValueError, RuntimeError, TypeError) as error:
             logger.warning("Utterance handler failed: %s", error)
 
+    def _rest(self, reason: str) -> None:
+        if self.wake_mode:
+            self.asleep = True
+            self._held.clear()
+            return
+        self.end_reason = reason
+        self._stop.set()
+
     def _check_idle(self) -> None:
-        if self._held.is_set() or self.service.speaking or self._answer_wanted.is_set():
+        if self.asleep or self._held.is_set() or self.service.speaking or self._answer_wanted.is_set():
             self._last_activity = self.clock()
             return
         if self.clock() - self._last_activity >= self.idle_seconds:
-            self.end_reason = "idle"
-            self._stop.set()
+            self._rest("idle")
+            if self.asleep:
+                self._set_state("asleep")
 
     def _close_stream(self) -> None:
         stream, self._stream = self._stream, None

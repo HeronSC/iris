@@ -10,7 +10,7 @@ from typing import Any, Callable
 from core.voice.config import VoiceConfig
 from core.voice.errors import VoiceError
 from core.voice.recorder import Recorder
-from core.voice.session import DEFAULT_END_PHRASES, ConversationSession
+from core.voice.session import DEFAULT_END_PHRASES, DEFAULT_WAKE_NAMES, ConversationSession
 from core.voice.speaker import Speaker
 from core.voice.stream import SentenceStreamer
 from core.voice.text import speech_text
@@ -47,6 +47,7 @@ class VoiceService:
         self.on_utterance: Callable[[str], None] | None = None
         self.on_conversation_state: Callable[[str], None] | None = None
         self.on_conversation_end: Callable[[str], None] | None = None
+        self.on_wake: Callable[[str], None] | None = None
         self.session_factory: Callable[..., ConversationSession] = ConversationSession
         self.vad_factory: Callable[[], StreamingVad] = StreamingVad
         self.conversation: ConversationSession | None = None
@@ -158,12 +159,25 @@ class VoiceService:
         session = self.conversation
         return session is not None and session.active
 
-    def start_conversation(self) -> ConversationSession:
+    @property
+    def wake_mode(self) -> bool:
+        session = self.conversation
+        return session is not None and session.active and session.wake_mode
+
+    @property
+    def asleep(self) -> bool:
+        session = self.conversation
+        return session is not None and session.active and session.asleep
+
+    def start_conversation(self, *, wake: bool = False) -> ConversationSession:
         self._require()
         if self.on_utterance is None:
             raise VoiceError("No voice client is attached to receive what is said.")
-        if self.in_conversation:
-            return self.conversation
+        current = self.conversation
+        if current is not None and current.active:
+            if current.wake_mode == wake:
+                return current
+            current.stop("stopped")
         self.cancel_listening()
         settings = self.config
         session = self.session_factory(
@@ -171,6 +185,7 @@ class VoiceService:
             on_utterance=self.on_utterance,
             on_state=self.on_conversation_state,
             on_end=self._conversation_ended,
+            on_wake=self._woke,
             vad=self.vad_factory(),
             sample_rate=settings.sample_rate,
             device=settings.input_device,
@@ -178,10 +193,34 @@ class VoiceService:
             idle_seconds=settings.idle_seconds,
             max_utterance_seconds=settings.max_utterance_seconds,
             end_phrases=settings.end_phrases or DEFAULT_END_PHRASES,
+            wake_names=(settings.wake_names or DEFAULT_WAKE_NAMES) if wake else (),
         )
         self.conversation = session
         session.start()
         return session
+
+    def start_wake(self) -> ConversationSession:
+        return self.start_conversation(wake=True)
+
+    def stop_wake(self) -> bool:
+        if not self.wake_mode:
+            return False
+        return self.end_conversation("wake-off")
+
+    def wake_now(self) -> bool:
+        session = self.conversation
+        if session is None or not session.active or not session.wake_mode:
+            return False
+        if session.asleep:
+            session.wake("")
+        else:
+            session.sleep()
+        return True
+
+    def _woke(self, command: str) -> None:
+        handler = self.on_wake
+        if handler is not None:
+            handler(command)
 
     def end_conversation(self, reason: str = "stopped") -> bool:
         session = self.conversation
@@ -220,8 +259,14 @@ class VoiceService:
             return self.problem or "Voice is not available."
         device = self.transcriber.device_used or self.config.whisper_device
         state = "muted" if self.muted else "on"
-        mode = "in a conversation" if self.in_conversation else ("tap to start a conversation, hold to talk once" if self.config.conversation else "hold to talk")
-        return f"Voice {state}, {mode}: {self.config.hotkey}; Whisper {self.config.whisper_model} on {device}, Piper {self.config.piper_voice}."
+        if self.wake_mode:
+            names = ", ".join(self.config.wake_names or DEFAULT_WAKE_NAMES[:2])
+            mode = f"{'listening for your name' if self.asleep else 'awake'} ({names}); {self.config.wake_hotkey} turns the wake word off"
+        elif self.in_conversation:
+            mode = f"in a conversation: {self.config.hotkey}"
+        else:
+            mode = f"{'tap to start a conversation, hold to talk once' if self.config.conversation else 'hold to talk'}: {self.config.hotkey}; {self.config.wake_hotkey} turns the wake word on"
+        return f"Voice {state}, {mode}; Whisper {self.config.whisper_model} on {device}, Piper {self.config.piper_voice}."
 
     def shutdown(self) -> None:
         self.end_conversation("shutdown")

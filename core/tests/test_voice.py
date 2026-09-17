@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from core.voice import ConversationSession, Recorder, SentenceStreamer, Speaker, SpokenNotifier, StreamingVad, Transcriber, VoiceConfig, VoiceError, VoiceService, is_end_phrase, speech_text
+from core.voice import ConversationSession, Recorder, SentenceStreamer, Speaker, SpokenNotifier, StreamingVad, Transcriber, VoiceConfig, VoiceError, VoiceService, is_end_phrase, match_wake, speech_text
 from core.voice.text import interpret_yes_no
 
 
@@ -362,6 +362,16 @@ class PhraseTests(unittest.TestCase):
         self.assertIsNone(interpret_yes_no("maybe tomorrow"))
         self.assertIsNone(interpret_yes_no(""))
 
+    def test_wake_names_are_stripped_from_the_command(self) -> None:
+        self.assertEqual(match_wake("Iris, what time is it?"), "what time is it?")
+        self.assertEqual(match_wake("Hey Iris turn on the lights"), "turn on the lights")
+        self.assertEqual(match_wake("IRIS?"), "")
+        self.assertEqual(match_wake("Irish, hello"), "hello")
+        self.assertIsNone(match_wake("the iris in my eye"))
+        self.assertIsNone(match_wake("what time is it"))
+        self.assertIsNone(match_wake(""))
+        self.assertEqual(match_wake("computer do this", ("computer",)), "do this")
+
 
 class SentenceStreamerTests(unittest.TestCase):
     def test_speaks_sentence_by_sentence_and_flushes_the_rest(self) -> None:
@@ -555,6 +565,76 @@ class ConversationSessionTests(unittest.TestCase):
         session.stop()
 
 
+class WakeSessionTests(unittest.TestCase):
+    def _session(self, service, *, clock=None, idle_seconds: float = 20.0):
+        heard: list[str] = []
+        states: list[str] = []
+        ended: list[str] = []
+        woke: list[str] = []
+        session = ConversationSession(
+            service,
+            on_utterance=heard.append,
+            on_state=states.append,
+            on_end=ended.append,
+            on_wake=woke.append,
+            vad=_SessionVad(),
+            input_factory=lambda rate, device, callback: _FakeInput(),
+            clock=clock,
+            end_silence_ms=64,
+            idle_seconds=idle_seconds,
+            wake_names=("iris", "hey iris"),
+        )
+        return session, heard, states, ended, woke
+
+    def test_only_the_name_wakes_it_and_the_command_follows(self) -> None:
+        service = _SessionService(["what time is it", "Iris, what time is it", "and tomorrow", "that's all", "ignored again"])
+        session, heard, states, ended, woke = self._session(service)
+        session.start()
+        self.assertTrue(session.asleep)
+        self.assertEqual(states, ["asleep"])
+        _drive(session, None, voiced_frames=5, silent_frames=5)
+        _settle(session, want_state="asleep")
+        self.assertEqual(heard, [])
+        _drive(session, None, voiced_frames=5, silent_frames=5)
+        _settle(session, want_state="waiting")
+        self.assertEqual(heard, ["what time is it"])
+        self.assertEqual(woke, ["what time is it"])
+        self.assertFalse(session.asleep)
+        _drive(session, None, voiced_frames=5, silent_frames=5)
+        _settle(session, want_state="waiting")
+        self.assertEqual(heard, ["what time is it", "and tomorrow"])
+        _drive(session, None, voiced_frames=5, silent_frames=5)
+        _settle(session, want_state="asleep")
+        self.assertTrue(session.asleep)
+        self.assertTrue(session.active)
+        self.assertEqual(ended, [])
+        _drive(session, None, voiced_frames=5, silent_frames=5)
+        _settle(session, want_state="asleep")
+        self.assertEqual(len(heard), 2)
+        session.stop("wake-off")
+        self.assertEqual(ended, ["wake-off"])
+
+    def test_name_alone_wakes_it_and_idle_puts_it_back_to_sleep(self) -> None:
+        now = [10.0]
+        service = _SessionService(["Iris?"])
+        session, heard, states, ended, woke = self._session(service, clock=lambda: now[0], idle_seconds=5.0)
+        session.start()
+        _drive(session, None, voiced_frames=5, silent_frames=5)
+        _settle(session, want_state="waiting")
+        self.assertEqual(woke, [""])
+        self.assertEqual(heard, [])
+        now[0] = 100.0
+        session.feed(np.zeros(512, dtype=np.float32))
+        _settle(session, want_state="asleep")
+        self.assertTrue(session.asleep)
+        self.assertTrue(session.active)
+        session.wake()
+        self.assertEqual(session.state, "waiting")
+        session.sleep()
+        self.assertEqual(session.state, "asleep")
+        session.stop()
+
+
 def _conversation_ready(service: VoiceService) -> _FakeInput:
     stream = _FakeInput()
     original = service.session_factory
@@ -583,6 +663,40 @@ class ConversationServiceTests(unittest.TestCase):
         self.assertFalse(service.end_conversation())
         self.assertIsNone(service.ask("Proceed?"))
 
+    def test_wake_mode_starts_asleep_and_the_talk_key_toggles_it(self) -> None:
+        service = _service()
+        service.on_utterance = lambda text: None
+        woke: list[str] = []
+        ended: list[str] = []
+        service.on_wake = woke.append
+        service.on_conversation_end = ended.append
+        _conversation_ready(service)
+        self.assertFalse(service.wake_now())
+        session = service.start_wake()
+        self.assertTrue(service.wake_mode)
+        self.assertTrue(service.asleep)
+        self.assertEqual(session.wake_names, ("iris", "hey iris", "hi iris", "okay iris", "ok iris", "irish", "hey irish"))
+        self.assertIn("listening for your name", service.describe())
+        self.assertTrue(service.wake_now())
+        self.assertFalse(service.asleep)
+        self.assertEqual(woke, [""])
+        self.assertIn("awake", service.describe())
+        self.assertTrue(service.wake_now())
+        self.assertTrue(service.asleep)
+        plain = service.start_conversation()
+        self.assertIsNot(plain, session)
+        self.assertFalse(service.wake_mode)
+        self.assertEqual(ended, ["stopped"])
+        self.assertFalse(service.stop_wake())
+        service.start_wake()
+        self.assertTrue(service.stop_wake())
+        self.assertEqual(ended[-1], "wake-off")
+        named = VoiceService.from_config({"memory_path": "C:\\x\\Memory", "voice": {"wake_names": ["computer"]}}, recorder=service.recorder, transcriber=service.transcriber, speaker=service.speaker)
+        named.on_utterance = lambda text: None
+        _conversation_ready(named)
+        self.assertEqual(named.start_wake().wake_names, ("computer",))
+        named.stop_wake()
+
     def test_voice_command(self) -> None:
         from core.assistant.voice_command import VoiceCommandHandler
 
@@ -605,6 +719,19 @@ class ConversationServiceTests(unittest.TestCase):
         self.assertTrue(handler.handle("/voice unmute", {}))
         self.assertTrue(handler.handle("/voice say hello there", {}))
         self.assertEqual(service.speaker.spoken[-1], "hello there")
+        self.assertTrue(handler.handle("/voice wake", {}))
+        self.assertTrue(service.wake_mode)
+        self.assertIn("Wake word on", lines[-1])
+        self.assertTrue(handler.handle("/voice wake", {}))
+        self.assertFalse(service.wake_mode)
+        self.assertEqual(lines[-1], "Wake word off.")
+        self.assertTrue(handler.handle("/voice wake off", {}))
+        self.assertEqual(lines[-1], "The wake word was not on.")
+        self.assertTrue(handler.handle("/voice wake on", {}))
+        self.assertTrue(service.wake_mode)
+        self.assertTrue(handler.handle("/voice wake sideways", {}))
+        self.assertIn("Usage", lines[-1])
+        service.stop_wake()
         self.assertTrue(handler.handle("/voice dance", {}))
         self.assertIn("Usage", lines[-1])
 

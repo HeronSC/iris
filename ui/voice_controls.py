@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 HOLD_THRESHOLD_SECONDS = 0.4
 POLL_MS = 40
-SESSION_STATES = {"waiting": "conversation", "speaking": "conversation-hearing", "transcribing": "conversation-transcribing"}
+SESSION_STATES = {"waiting": "conversation", "speaking": "conversation-hearing", "transcribing": "conversation-transcribing", "asleep": "wake-asleep"}
 
 
 class TranscribeThread(QThread):
@@ -55,9 +55,12 @@ class VoiceController(QObject):
     stateChanged = Signal(str)
     failed = Signal(str)
     conversationEnded = Signal(str)
+    woke = Signal(str)
+    wakeChanged = Signal(bool)
     _utteranceSignal = Signal(str)
     _sessionStateSignal = Signal(str)
     _sessionEndSignal = Signal(str)
+    _wakeSignal = Signal(str)
 
     def __init__(self, service: Any, parent: QObject | None = None, *, key_is_down: Callable[[], bool] | None = None, clock: Callable[[], float] | None = None) -> None:
         super().__init__(parent)
@@ -74,9 +77,11 @@ class VoiceController(QObject):
         self._utteranceSignal.connect(self._on_utterance)
         self._sessionStateSignal.connect(self._on_session_state)
         self._sessionEndSignal.connect(self._on_session_end)
+        self._wakeSignal.connect(self._on_wake)
         service.on_utterance = self._utteranceSignal.emit
         service.on_conversation_state = self._sessionStateSignal.emit
         service.on_conversation_end = self._sessionEndSignal.emit
+        service.on_wake = self._wakeSignal.emit
 
     @property
     def listening(self) -> bool:
@@ -85,6 +90,10 @@ class VoiceController(QObject):
     @property
     def in_conversation(self) -> bool:
         return bool(getattr(self.service, "in_conversation", False))
+
+    @property
+    def wake_mode(self) -> bool:
+        return bool(getattr(self.service, "wake_mode", False))
 
     @property
     def busy(self) -> bool:
@@ -99,6 +108,10 @@ class VoiceController(QObject):
         if not self.service.available:
             self.failed.emit(self.service.problem or "Voice is not available.")
             return
+        if self.wake_mode:
+            self.service.stop_speaking()
+            self.service.wake_now()
+            return
         if self.in_conversation:
             self.end_conversation()
             return
@@ -108,6 +121,29 @@ class VoiceController(QObject):
             self.finish()
             return
         self.begin()
+
+    def on_wake_hotkey(self) -> None:
+        if not self.service.available:
+            self.failed.emit(self.service.problem or "Voice is not available.")
+            return
+        if self.wake_mode:
+            self.service.stop_wake()
+            self.service.stop_speaking()
+            return
+        self.start_wake()
+
+    def start_wake(self) -> bool:
+        if self.state == "listening":
+            self.service.cancel_listening()
+            self.timer.stop()
+        try:
+            self.service.start_wake()
+        except VoiceError as error:
+            self.failed.emit(str(error))
+            return False
+        self._set_state("wake-asleep")
+        self.wakeChanged.emit(True)
+        return True
 
     def begin(self) -> None:
         try:
@@ -191,7 +227,13 @@ class VoiceController(QObject):
 
     def _on_session_end(self, reason: str) -> None:
         self._set_state("idle")
+        if reason == "wake-off":
+            self.wakeChanged.emit(False)
+            return
         self.conversationEnded.emit(reason)
+
+    def _on_wake(self, command: str) -> None:
+        self.woke.emit(command)
 
     def _on_result(self, text: str) -> None:
         self._set_state("idle")

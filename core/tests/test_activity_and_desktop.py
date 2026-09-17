@@ -157,15 +157,42 @@ class _FakeVoiceService:
         self.stopped = 0
         self.cancelled = 0
         self.in_conversation = False
+        self.wake_mode = False
+        self.asleep = False
         self.ended: list[str] = []
         self.on_utterance = None
         self.on_conversation_state = None
         self.on_conversation_end = None
+        self.on_wake = None
 
     def start_conversation(self) -> None:
         self.in_conversation = True
         if self.on_conversation_state is not None:
             self.on_conversation_state("waiting")
+
+    def start_wake(self) -> None:
+        self.in_conversation = True
+        self.wake_mode = True
+        self.asleep = True
+        if self.on_conversation_state is not None:
+            self.on_conversation_state("asleep")
+
+    def stop_wake(self) -> bool:
+        if not self.wake_mode:
+            return False
+        self.wake_mode = False
+        return self.end_conversation("wake-off")
+
+    def wake_now(self) -> bool:
+        if not self.wake_mode:
+            return False
+        self.asleep = not self.asleep
+        if not self.asleep:
+            self.on_conversation_state("waiting")
+            self.on_wake("")
+        else:
+            self.on_conversation_state("asleep")
+        return True
 
     def end_conversation(self, reason: str = "stopped") -> bool:
         if not self.in_conversation:
@@ -293,6 +320,44 @@ class VoiceControllerTests(unittest.TestCase):
         self.assertEqual(ended, ["stopped"])
         self.assertEqual(controller.state, "idle")
         self.assertEqual(service.stopped, 1)
+
+    def test_the_wake_key_arms_the_name_and_the_talk_key_wakes_it_by_hand(self) -> None:
+        service = _FakeVoiceService(conversation=True)
+        controller = self._controller(service, key_down=lambda: False, clock=lambda: 0.0)
+        wake_changes: list[bool] = []
+        woke: list[str] = []
+        controller.wakeChanged.connect(wake_changes.append)
+        controller.woke.connect(woke.append)
+        controller.on_wake_hotkey()
+        for _ in range(10):
+            self.app.processEvents()
+        self.assertTrue(service.wake_mode)
+        self.assertEqual(controller.state, "wake-asleep")
+        self.assertEqual(wake_changes, [True])
+        controller.on_hotkey()
+        for _ in range(10):
+            self.app.processEvents()
+        self.assertFalse(service.asleep)
+        self.assertEqual(controller.state, "conversation")
+        self.assertEqual(woke, [""])
+        service.on_utterance("what time is it")
+        for _ in range(10):
+            self.app.processEvents()
+        self.assertEqual(self.heard, ["what time is it"])
+        controller.on_hotkey()
+        for _ in range(10):
+            self.app.processEvents()
+        self.assertTrue(service.asleep)
+        self.assertEqual(controller.state, "wake-asleep")
+        ended: list[str] = []
+        controller.conversationEnded.connect(ended.append)
+        controller.on_wake_hotkey()
+        for _ in range(10):
+            self.app.processEvents()
+        self.assertFalse(service.wake_mode)
+        self.assertEqual(wake_changes, [True, False])
+        self.assertEqual(ended, [])
+        self.assertEqual(controller.state, "idle")
 
     def test_the_hotkey_interrupts_speech_and_cancel_drops_the_recording(self) -> None:
         service = _FakeVoiceService()
