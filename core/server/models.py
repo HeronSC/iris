@@ -142,9 +142,91 @@ class AssessOut(BaseModel):
     appraisals: list[AppraisalOut]
 
 
+class DecideIn(BaseModel):
+    symbol: Text
+    content: Text
+    cohort: Text
+    topic: Text = "trading/candidates"
+    source: Text = "bot:scanner"
+    occurred_at: str | None = None
+    features: dict[str, Any] = Field(default_factory=dict)
+    bot: DecisionIn | None = None
+    record: bool = True
+
+
+class DecideOut(BaseModel):
+    observation_id: str
+    bot_decision_id: str | None
+    iris_decision_id: str | None
+    verdict: str
+    score: float | None
+    sample: int
+    favourable: int
+    unfavourable: int
+    basis: str
+    method: str
+    rationale: str
+    approve_at: float
+    veto_at: float
+    base_rate: float | None = None
+    binding: bool = False
+    contract: str
+
+
+class RankItem(BaseModel):
+    symbol: Text
+    content: str | None = None
+    features: dict[str, Any] = Field(default_factory=dict)
+    bot: DecisionIn | None = None
+
+
+class RankIn(BaseModel):
+    topic: Text
+    cohort: Text
+    source: Text = "bot:universe"
+    occurred_at: str | None = None
+    items: list[RankItem] = Field(min_length=1, max_length=5000)
+    record: bool = True
+    shrink: int = Field(default=10, ge=0, le=1000)
+
+
+class RankedOut(BaseModel):
+    symbol: str
+    observation_id: str
+    rank: int
+    score: float | None
+    sample: int
+    symbol_days: int
+    symbol_rate: float | None
+    bot_decision_id: str | None = None
+    iris_decision_id: str | None = None
+
+
+class RankOut(BaseModel):
+    topic: str
+    cohort: str
+    size: int
+    scored: int
+    base_rate: float | None
+    elapsed_ms: float
+    binding: bool = False
+    contract: str
+    ranked: list[RankedOut]
+
+
 class CompareIn(BaseModel):
     cohort: Text
     top_n: int = Field(default=50, ge=1, le=5000)
+    label: Text = "favourable"
+
+
+class OverlapOut(BaseModel):
+    first: str
+    second: str
+    both: int
+    first_only: int
+    second_only: int
+    neither: int
 
 
 class RankerOut(BaseModel):
@@ -168,6 +250,8 @@ class CompareOut(BaseModel):
     notes: list[str]
     leader: str | None
     summary: str
+    label: str = "favourable"
+    overlap: OverlapOut | None = None
 
 
 class Health(BaseModel):

@@ -9,6 +9,8 @@ from core.knowledge.appraisal import FAVOURABLE_KEY
 from core.knowledge.graph import KnowledgeGraph
 from core.knowledge.models import KnowledgeError, MemoryKind, MemoryRecord
 
+PROFITABLE_KEY = "profitable"
+
 
 @dataclass(frozen=True)
 class RankerScore:
@@ -20,12 +22,34 @@ class RankerScore:
     lift: float
     tied_at_the_cut: int
     distinct_scores: int
+    label: str = FAVOURABLE_KEY
 
     def summary(self) -> str:
         direction = "above" if self.lift > 0 else "below" if self.lift < 0 else "level with"
         return (
-            f"{self.source}: {self.hits} of {self.top_n} favourable "
+            f"{self.source}: {self.hits} of {self.top_n} {self.label} "
             f"({self.hit_rate:.1%}), {abs(self.lift):.1%} {direction} the base rate"
+        )
+
+
+@dataclass(frozen=True)
+class LabelOverlap:
+    first: str
+    second: str
+    both: int
+    first_only: int
+    second_only: int
+    neither: int
+
+    @property
+    def size(self) -> int:
+        return self.both + self.first_only + self.second_only + self.neither
+
+    def summary(self) -> str:
+        return (
+            f"Of {self.size} candidates carrying both labels, {self.both} were {self.first} "
+            f"and {self.second}, {self.first_only} {self.first} only, {self.second_only} "
+            f"{self.second} only, {self.neither} neither."
         )
 
 
@@ -38,6 +62,8 @@ class Comparison:
     top_n: int
     rankers: list[RankerScore] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    label: str = FAVOURABLE_KEY
+    overlap: LabelOverlap | None = None
 
     @property
     def leader(self) -> RankerScore | None:
@@ -82,12 +108,38 @@ def _separated(best: RankerScore, next_best: RankerScore) -> bool:
     return gap > noise
 
 
+def _overlap(outcomes: dict[str, MemoryRecord]) -> LabelOverlap | None:
+    both = first_only = second_only = neither = 0
+    for outcome in outcomes.values():
+        first = outcome.data.get(FAVOURABLE_KEY)
+        second = outcome.data.get(PROFITABLE_KEY)
+        if not isinstance(first, bool) or not isinstance(second, bool):
+            continue
+        if first and second:
+            both += 1
+        elif first:
+            first_only += 1
+        elif second:
+            second_only += 1
+        else:
+            neither += 1
+    if not (both or first_only or second_only or neither):
+        return None
+    return LabelOverlap(FAVOURABLE_KEY, PROFITABLE_KEY, both, first_only, second_only, neither)
+
+
 def compare_rankers(
-    graph: KnowledgeGraph, cohort: str, *, top_n: int = 50, minimum_resolved: int = 20
+    graph: KnowledgeGraph,
+    cohort: str,
+    *,
+    top_n: int = 50,
+    minimum_resolved: int = 20,
+    label: str = FAVOURABLE_KEY,
 ) -> Comparison:
     key = str(cohort or "").strip()
     if not key:
         raise KnowledgeError("A comparison needs a cohort to compare")
+    label = str(label or "").strip() or FAVOURABLE_KEY
 
     observations = graph.records.list_by_source_ref(key, kind=MemoryKind.OBSERVATION)
     if not observations:
@@ -95,21 +147,33 @@ def compare_rankers(
 
     ids = [item.id for item in observations]
     outcomes = graph.outcomes_for(ids)
+    overlap = _overlap(outcomes)
     resolved: dict[str, bool] = {}
     for observation_id, outcome in outcomes.items():
-        verdict = outcome.data.get(FAVOURABLE_KEY)
+        verdict = outcome.data.get(label)
         if isinstance(verdict, bool):
             resolved[observation_id] = verdict
 
     notes: list[str] = []
+    if outcomes and not resolved:
+        notes.append(
+            f"{len(outcomes)} outcomes are recorded but none carries the label {label!r}."
+        )
     if len(resolved) < len(observations):
         notes.append(
             f"{len(observations) - len(resolved)} of {len(observations)} candidates carry no "
-            "favourable outcome yet and take no part in this."
+            f"{label} outcome yet and take no part in this."
         )
     if not resolved:
         return Comparison(
-            cohort=key, size=len(observations), resolved=0, base_rate=None, top_n=top_n, notes=notes
+            cohort=key,
+            size=len(observations),
+            resolved=0,
+            base_rate=None,
+            top_n=top_n,
+            notes=notes,
+            label=label,
+            overlap=overlap,
         )
 
     base_rate = sum(1 for good in resolved.values() if good) / len(resolved)
@@ -158,6 +222,7 @@ def compare_rankers(
                 lift=round(hit_rate - base_rate, 4),
                 tied_at_the_cut=tied if tied > 1 else 0,
                 distinct_scores=len(set(scores.values())),
+                label=label,
             )
         )
 
@@ -211,14 +276,19 @@ def compare_rankers(
         top_n=cut,
         rankers=rankers,
         notes=notes,
+        label=label,
+        overlap=overlap,
     )
 
 
 def render_comparison(comparison: Comparison) -> str:
+    ranked_on = "" if comparison.label == FAVOURABLE_KEY else f", ranked on {comparison.label}"
     lines = [
         f"Cohort {comparison.cohort}: {comparison.size} candidates, "
-        f"{comparison.resolved} with a known outcome."
+        f"{comparison.resolved} with a known outcome{ranked_on}."
     ]
+    if comparison.overlap is not None:
+        lines.append(comparison.overlap.summary())
     if comparison.base_rate is None:
         lines.append("Nothing is resolved yet, so there is no base rate and nothing to compare.")
     else:
@@ -235,4 +305,11 @@ def render_comparison(comparison: Comparison) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["Comparison", "RankerScore", "compare_rankers", "render_comparison"]
+__all__ = [
+    "Comparison",
+    "LabelOverlap",
+    "PROFITABLE_KEY",
+    "RankerScore",
+    "compare_rankers",
+    "render_comparison",
+]

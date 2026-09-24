@@ -1517,9 +1517,70 @@ side: batch observations, outcomes, recall, assess, compare.
 - [x] Inbound path: the bot sends candidates as observations and closes them with outcomes.
 - [x] Iris scores a cohort (`/assess`, recorded at the time so it cannot grade itself later).
 - [x] Comparison: hit rate at top N, Iris against the bot, lift over base rate (`/compare`).
+- [x] A second outcome label. **Built 2026-09-19:** the bot replays its own exit rules over the
+	same forward bars (`bot/core/services/iris/exit_replay.py`, reusing `calculate_downside_target`)
+	and stamps each outcome with `profitable` beside `favourable`, plus the replayed P&L, exit
+	reason and hold time. `/compare` takes `label` (default `favourable`) and reports how the two
+	labels overlap, so a morning can show how many +2% movers the exits would actually have kept.
+	The appraiser still scores on `favourable`; picking +2% movers stays the goal.
 - [ ] Iris as the decision layer — the bot *acts* on Iris's assessment rather than logging it
 	beside its own. Gated on the comparison showing sustained lift on real mornings, not seeded
-	data; PhaseStatus is explicit that nothing has met real data yet.
+	data. **Backfilled 2026-09-19:** ten real mornings (09-02..09-17) are in; at top 10 Iris took
+	43 of 90 against the bot's 20 of 90 on the +2% label and was named leader on five of nine.
+	Design agreed the same day: a bot-side switch `IRIS_DECISIONS` (off / advise / veto, `decide`
+	to follow), a near-miss band so the bot loosens only where Iris gets a say, sells only inside
+	the bot's protection floors, universe reinstatement tagged `iris:reinstated`, Iris as an
+	always-on service. **Step 1 built 2026-09-19:** `POST /decide` (one candidate in, verdict
+	approve/veto/abstain out from `trading.decide.approve_at` / `veto_at`, observation and both
+	decisions recorded under the `<date>/decide` cohort, same-morning evidence withheld); bot side
+	`bot/core/services/iris/decisions.py` consults on every BUY signal and every near miss (one
+	numeric gate short by at most `IRIS_NEAR_MISS_MARGIN_PCT`), fail-open with a 1 s timeout,
+	remembers the observation so the end-of-day sweep closes it, and in `veto` mode turns a vetoed
+	buy into a hold. Default is `off`. Still to come: `decide` (promoting a near miss to a buy),
+	the pre-market dossier job, sell-side advice, universe reinstatement.
+	**Reviewed after three live sessions and tuned 2026-09-24:** the score ranks well (AUC 0.69
+	against 0.53 for bot confidence) but never reaches 0.5, so the thresholds moved to 0.35 / 0.15
+	and can now be set as multiples of the pool's base rate (`approve_lift` / `veto_lift`, reported
+	as `base_rate`); the eleven price-level features are kept out of the neighbour distance
+	(`trading.appraisal.ignore_features`, +0.02 AUC leave-one-day-out); the iris decision record
+	carries verdict and thresholds; `/decide` logs its elapsed time. Bot side: the near-miss band
+	had never fired, so it now ignores the always-failing confidence gate and also admits any
+	reject whose Pattern B confidence is at least `IRIS_NEAR_MISS_PATTERN_B_CONFIDENCE`; a BUY the
+	funnel held is recorded as the bot's HOLD, not its BUY; held signals and near misses reuse a
+	verdict for `IRIS_DECIDE_COOLDOWN_MINUTES`; the Iris verdict is written into the evaluation
+	journal; outcomes replay on 1-minute bars (the 5-minute replay disagreed with all three real
+	trades that week); ripe outcomes close at session start as well as at close.
+	**Universe feed built 2026-09-24 (step 2, advise-first):** the bot no longer needs to spend the
+	first four minutes of the session screening. An hour before the open (`IRIS_UNIVERSE_LEAD_MINUTES`)
+	it takes every tradable symbol, keeps only the absolute price and volume filters, computes
+	daily-bar markers (`bot/core/services/iris/universe_markers.py`: ATR, momentum, range, gap,
+	volume ratios, days in list, one pure function shared with the backfill) and sends the whole
+	list to `POST /rank` under `trading/universe` with cohort `<date>/universe` and the bot's own
+	ATR/momentum cut as the comparison ranker. Iris stores the rows, scores them by feature
+	neighbours only (never text), returns every symbol ranked with a shrunk per-symbol history rate,
+	and the bot takes the whole list in that order as its first pass (the intraday filter and
+	`PRIORITY_WORKING_SIZE` cut it from there, as before): logged and compared in `advise`, used
+	in `decide`. The label is "offered a +2% move from the open" from the day's bar,
+	closed at session end and session start for every symbol sent, so recall is measured over the
+	whole list. The appraiser gained a numpy path and a 250k-row pool so a 1,500-row cohort ranks
+	in seconds; universe and candidate pools never mix. `scripts/backfill_universe_to_iris.py`
+	rebuilds up to 90 cohorts from daily history and prints per-day recall for the bot's cut and
+	Iris's pick (`--dry-run` for the recall report alone). **Backfilled and switched to `decide`
+	the same day** at Henry's request: 90 cohorts (05-15..09-23, 13,451 labelled rows) showed
+	Iris keeping 96.6% of +2% movers at the bot's own list size against the bot's 90.3%, AUC 0.77;
+	the absolute IEX-volume filter leaves only 106-182 symbols a day, so the bot takes the whole
+	ranked list and `PRIORITY_WORKING_SIZE` stays the only cut.
+	**Buy-side `decide` built 2026-09-24 (the fourth switch position):** on a close call the bot
+	said no to (a near miss, or a signal the funnel held whose own confidence is at least the
+	Pattern B floor), an Iris `approve` promotes it to a buy through the Pattern B execution path
+	with Iris's score as confidence and the reason tagged `iris:promoted`; the funnel's hard gates
+	(tradable, spread) must have passed, the funnel record keeps the overridden gates, at most
+	`IRIS_PROMOTIONS_PER_DAY` (5) promotions a day, never from a cached verdict, and `decide` still
+	vetoes bot buys like `veto`. `IRIS_DECISIONS=decide` and `IRIS_UNIVERSE=decide` in `.env`.
+	**The bar for all of this (Henry, 2026-09-24):** the bot goes live with real money only once
+	its running average daily P/L holds at or above 0.30% of capital (the dashboard's
+	`TARGET_AVG_PNL`). On 09-24 it stood at 0.0006% with $250 positions and one or two trades a
+	day, so every Iris change is judged by what it does to that number.
 - [x] Re-evaluate hypotheses on a schedule (APScheduler, 8.2) instead of only when a person files
 	evidence. **Built 2026-09-12:** `core/scheduler/` holds jobs the same way 8.2 holds watchers --
 	as data in `Data\Configuration\schedules.json`, rescheduled at startup -- and ships one:

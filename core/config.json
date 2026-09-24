@@ -300,5 +300,28 @@
     "wake_names": ["iris", "hey iris", "hi iris", "okay iris", "irish"],
     "wake_at_start": false,
     "wake_reply": "Yes?"
+  },
+  "trading": {
+    "decide": {
+      "approve_at": 0.35,
+      "veto_at": 0.15,
+      "approve_lift": 1.75,
+      "veto_lift": 0.75
+    },
+    "appraisal": {
+      "ignore_features": [
+        "price",
+        "current_volume",
+        "avg_volume",
+        "close_now",
+        "high_now",
+        "low_now",
+        "bb_lower",
+        "ema_50",
+        "ema_200",
+        "prev_close",
+        "prev_prev_close"
+      ]
+    }
   }
 }

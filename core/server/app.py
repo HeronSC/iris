@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
@@ -9,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core.knowledge import KnowledgeError, KnowledgeQuery, MemoryKind, MemoryRecord
-from core.knowledge.appraisal import CONTRACT, FAVOURABLE_KEY, Appraisal, Appraiser
+from core.knowledge.appraisal import CONTRACT, FAVOURABLE_KEY, Appraisal, Appraiser, verdict_for
 from core.knowledge.comparison import compare_rankers, render_comparison
 from core.knowledge.links import MemoryLink, MemoryRelation
 from core.server.auth import ApiAuthenticator, AuthSettings, token_from_headers
@@ -21,13 +23,20 @@ from core.server.models import (
     BatchAccepted,
     CompareIn,
     CompareOut,
+    DecideIn,
+    DecideOut,
     Health,
     ObservationBatch,
+    ObservationIn,
     OutcomeBatch,
     OutcomeIn,
+    OverlapOut,
+    RankedOut,
+    RankerOut,
+    RankIn,
+    RankOut,
     RecallIn,
     RecallOut,
-    RankerOut,
     RecordOut,
     RuleOut,
     ScoredOut,
@@ -92,6 +101,71 @@ def _edge(decision_id: str, observation_id: str) -> MemoryLink:
     )
 
 
+@dataclass(frozen=True)
+class DecideSettings:
+    approve_at: float = 0.35
+    veto_at: float = 0.15
+    approve_lift: float | None = None
+    veto_lift: float | None = None
+
+    def thresholds(self, base_rate: float | None) -> tuple[float, float]:
+        if (
+            self.approve_lift is None
+            or self.veto_lift is None
+            or not isinstance(base_rate, (int, float))
+            or base_rate <= 0
+        ):
+            return self.approve_at, self.veto_at
+        approve_at = round(min(1.0, base_rate * self.approve_lift), 4)
+        veto_at = round(base_rate * self.veto_lift, 4)
+        if not 0.0 <= veto_at < approve_at <= 1.0:
+            return self.approve_at, self.veto_at
+        return approve_at, veto_at
+
+
+def _trading_section(app_service: Any, name: str) -> dict[str, Any] | None:
+    config = getattr(app_service, "config", None)
+    trading = config.get("trading") if isinstance(config, dict) else None
+    section = trading.get(name) if isinstance(trading, dict) else None
+    return section if isinstance(section, dict) else None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def decide_settings(app_service: Any) -> DecideSettings:
+    section = _trading_section(app_service, "decide")
+    if section is None:
+        return DecideSettings()
+    try:
+        approve_at = float(section.get("approve_at", DecideSettings.approve_at))
+        veto_at = float(section.get("veto_at", DecideSettings.veto_at))
+        approve_lift = _optional_float(section.get("approve_lift"))
+        veto_lift = _optional_float(section.get("veto_lift"))
+    except (TypeError, ValueError):
+        return DecideSettings()
+    if not 0.0 <= veto_at < approve_at <= 1.0:
+        return DecideSettings()
+    if (approve_lift is None) != (veto_lift is None) or (
+        approve_lift is not None and not 0.0 < veto_lift < approve_lift
+    ):
+        approve_lift = veto_lift = None
+    return DecideSettings(
+        approve_at=approve_at, veto_at=veto_at, approve_lift=approve_lift, veto_lift=veto_lift
+    )
+
+
+def ignored_features_for(app_service: Any) -> tuple[str, ...]:
+    section = _trading_section(app_service, "appraisal")
+    names = section.get("ignore_features") if section else None
+    if not isinstance(names, list):
+        return ()
+    return tuple(str(name) for name in names if isinstance(name, str) and name.strip())
+
+
 def _outcome_data(data: dict[str, Any], favourable: bool | None) -> dict[str, Any]:
     payload = dict(data)
     if favourable is not None:
@@ -111,7 +185,11 @@ def authenticator_for(app_service: Any) -> ApiAuthenticator:
 
 def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) -> FastAPI:
     api = FastAPI(title="Iris", version="1")
-    appraiser = Appraiser(app_service.knowledge, app_service.knowledge_retriever)
+    appraiser = Appraiser(
+        app_service.knowledge,
+        app_service.knowledge_retriever,
+        ignored_features=ignored_features_for(app_service),
+    )
     auth = authenticator or authenticator_for(app_service)
     api.state.authenticator = auth
     notice = auth.startup_notice()
@@ -159,9 +237,9 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
             release()
         return health()
 
-    @api.post("/observations", response_model=BatchAccepted, status_code=201)
-    def observations(batch: ObservationBatch) -> BatchAccepted:
-        topic = batch.topic.strip().lower()
+    def _store_observations(
+        topic: str, source: str, source_ref: str | None, items: list[ObservationIn]
+    ) -> tuple[list[MemoryRecord], dict[str, str]]:
         wanted = [
             (
                 item,
@@ -169,13 +247,13 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
                     kind=MemoryKind.OBSERVATION,
                     topic=(item.topic or topic).strip().lower(),
                     content=item.content,
-                    source=item.source or batch.source,
+                    source=item.source or source,
                     data=item.data,
                     occurred_at=item.occurred_at,
-                    source_ref=item.source_ref or batch.source_ref,
+                    source_ref=item.source_ref or source_ref,
                 ),
             )
-            for item in batch.observations
+            for item in items
         ]
         stored = app_service.knowledge.records.add_many([record for _, record in wanted])
 
@@ -188,11 +266,11 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
                 kind=MemoryKind.DECISION,
                 topic=observation.topic,
                 content=item.decision.content,
-                source=item.decision.source or item.source or batch.source,
+                source=item.decision.source or item.source or source,
                 data=item.decision.data,
                 confidence=item.decision.score,
                 occurred_at=item.occurred_at,
-                source_ref=item.source_ref or batch.source_ref,
+                source_ref=item.source_ref or source_ref,
             )
             decisions.append(decision)
             edges.append((decision, observation.id))
@@ -207,7 +285,14 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
                 ]
             )
             written_decisions = {observation_id: decision.id for decision, observation_id in edges}
+        return stored, written_decisions
 
+    @api.post("/observations", response_model=BatchAccepted, status_code=201)
+    def observations(batch: ObservationBatch) -> BatchAccepted:
+        topic = batch.topic.strip().lower()
+        stored, written_decisions = _store_observations(
+            topic, batch.source, batch.source_ref, batch.observations
+        )
         return BatchAccepted(
             written=len(stored),
             topic=topic,
@@ -215,6 +300,158 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
             records=[
                 Written(id=item.id, decision_id=written_decisions.get(item.id)) for item in stored
             ],
+        )
+
+    @api.post("/decide", response_model=DecideOut, status_code=201)
+    def decide(request: DecideIn) -> DecideOut:
+        started = time.perf_counter()
+        settings = decide_settings(app_service)
+        topic = request.topic.strip().lower()
+        item = ObservationIn(
+            content=request.content,
+            topic=topic,
+            source=request.source,
+            data=dict(request.features, symbol=request.symbol),
+            occurred_at=request.occurred_at,
+            source_ref=request.cohort,
+            decision=request.bot,
+        )
+        stored, written_decisions = _store_observations(
+            topic, request.source, request.cohort, [item]
+        )
+        observation = stored[0]
+        appraisal = appraiser.appraise_many([observation.id])[0]
+        approve_at, veto_at = settings.thresholds(appraisal.base_rate)
+        verdict = verdict_for(appraisal, approve_at=approve_at, veto_at=veto_at)
+        recorded = (
+            appraiser.record(
+                [appraisal],
+                extra={
+                    appraisal.record_id: {
+                        "verdict": verdict,
+                        "approve_at": approve_at,
+                        "veto_at": veto_at,
+                    }
+                },
+            )
+            if request.record
+            else []
+        )
+        logger.info(
+            "decide",
+            symbol=request.symbol,
+            cohort=request.cohort,
+            verdict=verdict,
+            score=appraisal.score,
+            sample=appraisal.sample,
+            base_rate=appraisal.base_rate,
+            elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
+        return DecideOut(
+            observation_id=observation.id,
+            bot_decision_id=written_decisions.get(observation.id),
+            iris_decision_id=recorded[0].id if recorded else None,
+            verdict=verdict,
+            score=appraisal.score,
+            sample=appraisal.sample,
+            favourable=appraisal.favourable,
+            unfavourable=appraisal.unfavourable,
+            basis=appraisal.basis.value,
+            method=appraisal.method,
+            rationale=appraisal.rationale,
+            approve_at=approve_at,
+            veto_at=veto_at,
+            base_rate=appraisal.base_rate,
+            binding=False,
+            contract=CONTRACT,
+        )
+
+    @api.post("/rank", response_model=RankOut, status_code=201)
+    def rank(request: RankIn) -> RankOut:
+        started = time.perf_counter()
+        topic = request.topic.strip().lower()
+        items = [
+            ObservationIn(
+                content=item.content or f"{item.symbol} in cohort {request.cohort}",
+                topic=topic,
+                source=request.source,
+                data=dict(item.features, symbol=item.symbol),
+                occurred_at=request.occurred_at,
+                source_ref=request.cohort,
+                decision=item.bot,
+            )
+            for item in request.items
+        ]
+        stored, bot_ids = _store_observations(topic, request.source, request.cohort, items)
+        cohort = appraiser.appraise_cohort(
+            [observation.id for observation in stored], features_only=True
+        )
+        by_id = {appraisal.record_id: appraisal for appraisal in cohort.appraisals}
+        symbols = {observation.id: item.symbol for item, observation in zip(request.items, stored)}
+        rates = {
+            observation_id: (
+                cohort.symbol_rate(symbol, request.shrink),
+                cohort.symbol_days(symbol),
+            )
+            for observation_id, symbol in symbols.items()
+        }
+        iris_ids: dict[str, str] = {}
+        if request.record:
+            recorded = appraiser.record(
+                cohort.appraisals,
+                extra={
+                    observation_id: {"symbol_rate": rate, "symbol_days": days}
+                    for observation_id, (rate, days) in rates.items()
+                },
+            )
+            wanted = [appraisal for appraisal in cohort.appraisals if appraisal.topic]
+            iris_ids = {
+                appraisal.record_id: decision.id for decision, appraisal in zip(recorded, wanted)
+            }
+        ordered = sorted(
+            stored,
+            key=lambda observation: (
+                by_id[observation.id].score is None,
+                -(by_id[observation.id].score or 0.0),
+                -(rates[observation.id][0] or 0.0),
+                symbols[observation.id],
+            ),
+        )
+        ranked = [
+            RankedOut(
+                symbol=symbols[observation.id],
+                observation_id=observation.id,
+                rank=position,
+                score=by_id[observation.id].score,
+                sample=by_id[observation.id].sample,
+                symbol_days=rates[observation.id][1],
+                symbol_rate=rates[observation.id][0],
+                bot_decision_id=bot_ids.get(observation.id),
+                iris_decision_id=iris_ids.get(observation.id),
+            )
+            for position, observation in enumerate(ordered, start=1)
+        ]
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        scored = sum(1 for item in ranked if item.score is not None)
+        logger.info(
+            "rank",
+            topic=topic,
+            cohort=request.cohort,
+            size=len(ranked),
+            scored=scored,
+            base_rate=cohort.base_rate,
+            elapsed_ms=elapsed_ms,
+        )
+        return RankOut(
+            topic=topic,
+            cohort=request.cohort,
+            size=len(ranked),
+            scored=scored,
+            base_rate=cohort.base_rate,
+            elapsed_ms=elapsed_ms,
+            binding=False,
+            contract=CONTRACT,
+            ranked=ranked,
         )
 
     @api.get("/observations/open", response_model=list[RecordOut])
@@ -302,14 +539,28 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
 
     @api.post("/compare", response_model=CompareOut)
     def compare(request: CompareIn) -> CompareOut:
-        result = compare_rankers(app_service.knowledge, request.cohort, top_n=request.top_n)
+        result = compare_rankers(
+            app_service.knowledge, request.cohort, top_n=request.top_n, label=request.label
+        )
         leader = result.leader
+        overlap = result.overlap
         return CompareOut(
             cohort=result.cohort,
             size=result.size,
             resolved=result.resolved,
             base_rate=result.base_rate,
             top_n=result.top_n,
+            label=result.label,
+            overlap=None
+            if overlap is None
+            else OverlapOut(
+                first=overlap.first,
+                second=overlap.second,
+                both=overlap.both,
+                first_only=overlap.first_only,
+                second_only=overlap.second_only,
+                neither=overlap.neither,
+            ),
             rankers=[
                 RankerOut(
                     source=item.source,

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
+
+import numpy
 
 from core.knowledge.graph import KnowledgeGraph
 from core.knowledge.links import MemoryLink, MemoryRelation
@@ -21,7 +24,7 @@ METHOD_FEATURES = "feature-knn"
 
 METHOD_TEXT = "text-similarity"
 
-POOL_LIMIT = 5000
+POOL_LIMIT = 250000
 
 
 class Basis(str, Enum):
@@ -71,19 +74,67 @@ class Appraisal:
     source_ref: str | None = None
     method: str = METHOD_FEATURES
     rules: tuple[AppliedRule, ...] = ()
+    base_rate: float | None = None
 
     @property
     def binding(self) -> bool:
         return False
 
 
-@dataclass(frozen=True)
+@dataclass
 class _Pool:
     rows: list[tuple[str, dict[str, float], bool]] = field(default_factory=list)
     scales: dict[str, float] = field(default_factory=dict)
+    base_rate: float | None = None
+    symbols: list[str | None] = field(default_factory=list)
+    columns: dict[str, int] = field(default_factory=dict, repr=False)
+    positions: dict[str, int] = field(default_factory=dict, repr=False)
+    matrix: Any = field(default=None, repr=False)
+    verdicts: Any = field(default=None, repr=False)
 
     def __bool__(self) -> bool:
         return bool(self.rows)
+
+    def prepare(self) -> None:
+        if self.matrix is not None:
+            return
+        names = sorted(self.scales)
+        self.columns = {name: index for index, name in enumerate(names)}
+        table = numpy.full((len(self.rows), len(names)), numpy.nan)
+        for row_index, (record_id, features, _) in enumerate(self.rows):
+            self.positions[record_id] = row_index
+            for name, value in features.items():
+                column = self.columns.get(name)
+                if column is not None:
+                    table[row_index, column] = value
+        self.matrix = table
+        self.verdicts = numpy.array([verdict for _, _, verdict in self.rows], dtype=bool)
+
+    def symbol_history(self) -> dict[str, tuple[int, int]]:
+        found: dict[str, list[int]] = {}
+        for symbol, (_, _, verdict) in zip(self.symbols, self.rows):
+            if not symbol:
+                continue
+            counts = found.setdefault(symbol, [0, 0])
+            counts[0] += 1
+            counts[1] += int(verdict)
+        return {symbol: (counts[0], counts[1]) for symbol, counts in found.items()}
+
+
+@dataclass(frozen=True)
+class CohortAppraisal:
+    appraisals: list[Appraisal]
+    symbol_history: dict[str, tuple[int, int]]
+    base_rate: float | None
+
+    def symbol_days(self, symbol: str) -> int:
+        return self.symbol_history.get(symbol, (0, 0))[0]
+
+    def symbol_rate(self, symbol: str, shrink: int = 10) -> float | None:
+        if self.base_rate is None:
+            return None
+        seen, favourable = self.symbol_history.get(symbol, (0, 0))
+        return round((favourable + shrink * self.base_rate) / (seen + shrink), 4)
 
 
 def numeric_features(data: dict) -> dict[str, float]:
@@ -103,15 +154,31 @@ class Appraiser:
         *,
         minimum_evidence: int = 5,
         neighbours: int = 50,
+        ignored_features: Sequence[str] = (),
     ) -> None:
         self.graph = graph
         self.retriever = retriever
         self.minimum_evidence = max(1, int(minimum_evidence))
         self.neighbours = max(1, int(neighbours))
+        self.ignored_features = frozenset(str(name) for name in ignored_features)
+
+    def _distance_features(self, data: dict) -> dict[str, float]:
+        return {
+            name: value
+            for name, value in numeric_features(data).items()
+            if name not in self.ignored_features
+        }
 
     def appraise_many(
-        self, record_ids: Sequence[str], *, record: bool = False
+        self, record_ids: Sequence[str], *, record: bool = False, features_only: bool = False
     ) -> list[Appraisal]:
+        return self.appraise_cohort(
+            record_ids, record=record, features_only=features_only
+        ).appraisals
+
+    def appraise_cohort(
+        self, record_ids: Sequence[str], *, record: bool = False, features_only: bool = False
+    ) -> CohortAppraisal:
         records = []
         for record_id in record_ids:
             found = self.graph.records.get(record_id)
@@ -144,15 +211,30 @@ class Appraiser:
                     pools[(item.topic, item.source_ref)],
                     rules[item.topic],
                     boundaries[(item.topic, item.source_ref)],
+                    features_only=features_only,
                 )
                 for item in records
             ]
         )
         if record:
             self.record(appraisals)
-        return appraisals
 
-    def record(self, appraisals: Sequence[Appraisal]) -> list[MemoryRecord]:
+        history: dict[str, tuple[int, int]] = {}
+        base_rates: list[float] = []
+        for pool in pools.values():
+            for symbol, (seen, favourable) in pool.symbol_history().items():
+                previous = history.get(symbol, (0, 0))
+                history[symbol] = (previous[0] + seen, previous[1] + favourable)
+            if pool.base_rate is not None:
+                base_rates.append(pool.base_rate)
+        base_rate = round(sum(base_rates) / len(base_rates), 4) if base_rates else None
+        return CohortAppraisal(appraisals=appraisals, symbol_history=history, base_rate=base_rate)
+
+    def record(
+        self,
+        appraisals: Sequence[Appraisal],
+        extra: Mapping[str, Mapping[str, object]] | None = None,
+    ) -> list[MemoryRecord]:
         wanted = [item for item in appraisals if item.topic]
         if not wanted:
             return []
@@ -173,6 +255,8 @@ class Appraiser:
                     "sample": item.sample,
                     "favourable": item.favourable,
                     "unfavourable": item.unfavourable,
+                    "base_rate": item.base_rate,
+                    **dict((extra or {}).get(item.record_id, {})),
                 },
             )
             for item in wanted
@@ -215,15 +299,22 @@ class Appraiser:
                 tuple(parameters),
             ).fetchall()
 
+        symbols: list[str | None] = []
         for row in found:
             verdict = _json(row["outcome_json"]).get(FAVOURABLE_KEY)
             if not isinstance(verdict, bool):
                 continue
             if not _precedes(row["occurred_at"], before):
                 continue
-            rows.append((str(row["id"]), numeric_features(_json(row["data_json"])), verdict))
+            data = _json(row["data_json"])
+            rows.append((str(row["id"]), self._distance_features(data), verdict))
+            symbol = data.get("symbol")
+            symbols.append(str(symbol) if isinstance(symbol, str) and symbol else None)
 
-        return _Pool(rows=rows, scales=_scales(rows))
+        base_rate = (
+            round(sum(1 for _, _, verdict in rows if verdict) / len(rows), 4) if rows else None
+        )
+        return _Pool(rows=rows, scales=_scales(rows), base_rate=base_rate, symbols=symbols)
 
     def _rules(self, topic: str) -> list[_Rule]:
         found: list[_Rule] = []
@@ -281,74 +372,101 @@ class Appraiser:
         pool: _Pool,
         rules: Sequence[_Rule],
         before: datetime | None = None,
+        features_only: bool = False,
     ) -> Appraisal:
         features = numeric_features(record.data)
         applied = self._applied(rules, features) if features else ()
-        shared = [name for name in features if name in pool.scales]
-        if pool and shared:
-            base = self._by_features(record, pool, features, shared)
-        else:
-            base = self._by_text(record, before)
+        measured = self._distance_features(record.data)
+        shared = [name for name in measured if name in pool.scales]
+        base = self._by_features(record, pool, measured, shared) if pool and shared else None
+        if base is None:
+            base = (
+                self._nothing_numeric(record, pool)
+                if features_only
+                else self._by_text(record, before)
+            )
         return _with_rules(base, applied)
+
+    def _nothing_numeric(self, record: MemoryRecord, pool: _Pool) -> Appraisal:
+        return Appraisal(
+            record_id=record.id,
+            basis=Basis.NONE,
+            sample=0,
+            favourable=0,
+            unfavourable=0,
+            score=None,
+            rationale=(
+                "No closed observations share this candidate's features yet, so there is "
+                "nothing to count. Text similarity was not consulted."
+            ),
+            topic=record.topic,
+            source_ref=record.source_ref,
+            base_rate=pool.base_rate,
+        )
 
     def _by_features(
         self, record: MemoryRecord, pool: _Pool, features: dict[str, float], shared: list[str]
-    ) -> Appraisal:
-        distances: list[tuple[float, bool]] = []
-        for other_id, other, verdict in pool.rows:
-            if other_id == record.id:
-                continue
-            overlap = [name for name in shared if name in other]
-            if not overlap:
-                continue
-            distance = sum(
-                abs(features[name] - other[name]) / pool.scales[name] for name in overlap
-            ) / len(overlap)
-            distances.append((distance, verdict))
+    ) -> Appraisal | None:
+        pool.prepare()
+        columns = [pool.columns[name] for name in shared]
+        query = numpy.array([features[name] for name in shared], dtype=float)
+        scale = numpy.array([pool.scales[name] for name in shared], dtype=float)
+        diffs = numpy.abs(pool.matrix[:, columns] - query) / scale
+        overlap = numpy.sum(~numpy.isnan(diffs), axis=1)
+        distance = numpy.nansum(diffs, axis=1) / numpy.maximum(overlap, 1)
+        usable = overlap > 0
+        own = pool.positions.get(record.id)
+        if own is not None:
+            usable[own] = False
+        candidates = numpy.flatnonzero(usable)
+        if candidates.size == 0:
+            return None
 
-        if not distances:
-            return self._by_text(record)
+        count = min(self.neighbours, int(candidates.size))
+        if count < candidates.size:
+            chosen = candidates[numpy.argpartition(distance[candidates], count - 1)[:count]]
+        else:
+            chosen = candidates
+        chosen = chosen[numpy.argsort(distance[chosen], kind="stable")]
+        nearest = distance[chosen]
+        verdicts = pool.verdicts[chosen]
+        favourable = int(verdicts.sum())
+        unfavourable = int(count - favourable)
 
-        distances.sort(key=lambda pair: pair[0])
-        nearest = distances[: self.neighbours]
-        favourable = sum(1 for _, verdict in nearest if verdict)
-        unfavourable = len(nearest) - favourable
-
-        if len(nearest) < self.minimum_evidence:
+        if count < self.minimum_evidence:
             return Appraisal(
                 record_id=record.id,
                 basis=Basis.OBSERVATIONS,
-                sample=len(nearest),
+                sample=count,
                 favourable=favourable,
                 unfavourable=unfavourable,
                 score=None,
                 rationale=(
-                    f"{len(nearest)} of {self.minimum_evidence} resolved neighbours needed before "
+                    f"{count} of {self.minimum_evidence} resolved neighbours needed before "
                     f"a rate means anything ({favourable} favourable, {unfavourable} not)."
                 ),
                 topic=record.topic,
                 source_ref=record.source_ref,
+                base_rate=pool.base_rate,
             )
 
-        weights = [1.0 / (1.0 + distance) for distance, _ in nearest]
-        total = sum(weights)
-        score = sum(
-            weight for weight, (_, verdict) in zip(weights, nearest) if verdict
-        ) / total
+        weights = 1.0 / (1.0 + nearest)
+        score = float(weights[verdicts].sum() / weights.sum())
         span = ", ".join(sorted(shared))
         return Appraisal(
             record_id=record.id,
             basis=Basis.OBSERVATIONS,
-            sample=len(nearest),
+            sample=count,
             favourable=favourable,
             unfavourable=unfavourable,
             score=round(score, 4),
             rationale=(
-                f"{favourable} of {len(nearest)} nearest observations by {span} were favourable. "
+                f"{favourable} of {count} nearest observations by {span} were favourable. "
                 "The rate leans on the closest of them. An observed rate, not a prediction."
             ),
             topic=record.topic,
             source_ref=record.source_ref,
+            base_rate=pool.base_rate,
         )
 
     def _by_text(self, record: MemoryRecord, before: datetime | None = None) -> Appraisal:
@@ -449,6 +567,21 @@ class Appraiser:
         ]
 
 
+VERDICT_APPROVE = "approve"
+VERDICT_VETO = "veto"
+VERDICT_ABSTAIN = "abstain"
+
+
+def verdict_for(appraisal: Appraisal, *, approve_at: float, veto_at: float) -> str:
+    if appraisal.score is None:
+        return VERDICT_ABSTAIN
+    if appraisal.score >= approve_at:
+        return VERDICT_APPROVE
+    if appraisal.score <= veto_at:
+        return VERDICT_VETO
+    return VERDICT_ABSTAIN
+
+
 def _json(raw: object) -> dict:
     try:
         loaded = json.loads(str(raw))
@@ -509,6 +642,7 @@ def _with_rules(appraisal: Appraisal, applied: tuple[AppliedRule, ...]) -> Appra
         source_ref=appraisal.source_ref,
         method=appraisal.method,
         rules=applied,
+        base_rate=appraisal.base_rate,
     )
 
 
@@ -579,6 +713,7 @@ def _ranked(appraisals: list[Appraisal]) -> list[Appraisal]:
             source_ref=item.source_ref,
             method=item.method,
             rules=item.rules,
+            base_rate=item.base_rate,
         )
         for item in appraisals
     ]
@@ -589,9 +724,14 @@ __all__ = [
     "Appraisal",
     "Appraiser",
     "Basis",
+    "CohortAppraisal",
     "CONTRACT",
     "FAVOURABLE_KEY",
     "METHOD_FEATURES",
     "METHOD_TEXT",
+    "VERDICT_ABSTAIN",
+    "VERDICT_APPROVE",
+    "VERDICT_VETO",
     "numeric_features",
+    "verdict_for",
 ]

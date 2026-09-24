@@ -776,6 +776,98 @@ class HitRateComparisonTests(unittest.TestCase):
         )
         return ids
 
+    def _two_label_morning(self, cohort: str, rows: list[tuple[float, bool, bool]]) -> list[str]:
+        ids = self.client.post(
+            "/observations",
+            json={
+                "topic": TOPIC,
+                "source": "bot:scanner",
+                "source_ref": cohort,
+                "observations": [
+                    {
+                        "content": f"SYM{index} entered the candidate list",
+                        "decision": {
+                            "content": f"bot confidence {own}",
+                            "source": "bot:evaluator",
+                            "score": own,
+                        },
+                    }
+                    for index, (own, _, _) in enumerate(rows)
+                ],
+            },
+        ).json()["ids"]
+        self.client.post(
+            "/outcomes",
+            json={
+                "source": "bot:broker",
+                "outcomes": [
+                    {
+                        "observation_id": item,
+                        "content": "closed",
+                        "favourable": reached,
+                        "data": {"profitable": kept},
+                    }
+                    for item, (_, reached, kept) in zip(ids, rows)
+                ],
+            },
+        )
+        return ids
+
+    def test_a_second_label_ranks_on_its_own_verdicts(self) -> None:
+        """Reaching +2% and being profitable under the exits are different questions."""
+        rows = [(0.9, True, False)] * 10 + [(0.1, False, True)] * 10
+        self._two_label_morning("2026-09-09", rows)
+
+        reached = self.client.post("/compare", json={"cohort": "2026-09-09", "top_n": 10}).json()
+        kept = self.client.post(
+            "/compare", json={"cohort": "2026-09-09", "top_n": 10, "label": "profitable"}
+        ).json()
+
+        self.assertEqual(reached["label"], "favourable")
+        self.assertEqual(reached["rankers"][0]["hits"], 10)
+        self.assertEqual(kept["label"], "profitable")
+        self.assertEqual(kept["rankers"][0]["hits"], 0)
+        self.assertIn("ranked on profitable", kept["summary"])
+        self.assertIn("0 of 10 profitable", kept["summary"])
+
+    def test_the_two_labels_report_their_overlap(self) -> None:
+        rows = [(0.9, True, True)] * 4 + [(0.5, True, False)] * 3 + [(0.1, False, True)] * 2
+        rows += [(0.2, False, False)] * 1
+        self._two_label_morning("2026-09-09", rows)
+
+        body = self.client.post("/compare", json={"cohort": "2026-09-09", "top_n": 5}).json()
+
+        self.assertEqual(
+            body["overlap"],
+            {
+                "first": "favourable",
+                "second": "profitable",
+                "both": 4,
+                "first_only": 3,
+                "second_only": 2,
+                "neither": 1,
+            },
+        )
+        self.assertIn("Of 10 candidates carrying both labels, 4 were favourable", body["summary"])
+
+    def test_a_morning_with_one_label_reports_no_overlap(self) -> None:
+        self._perfect_and_useless()
+
+        body = self.client.post("/compare", json={"cohort": "2026-09-07", "top_n": 10}).json()
+
+        self.assertIsNone(body["overlap"])
+
+    def test_a_label_nothing_carries_resolves_nothing(self) -> None:
+        self._perfect_and_useless()
+
+        body = self.client.post(
+            "/compare", json={"cohort": "2026-09-07", "top_n": 10, "label": "nonsense"}
+        ).json()
+
+        self.assertEqual(body["resolved"], 0)
+        self.assertIsNone(body["base_rate"])
+        self.assertTrue(any("none carries the label 'nonsense'" in note for note in body["notes"]))
+
     def test_a_lead_inside_the_noise_names_no_leader(self) -> None:
         """The first real morning put the two a few hits apart on fifty. That is not a win."""
         self._featured_morning(
@@ -1006,3 +1098,342 @@ class ApprovedRuleTests(unittest.TestCase):
         assessment = self._assess(2.0)["assessment"]
 
         self.assertIn(assessment["method"], {"feature-knn", "text-similarity"})
+
+
+class DecideTests(unittest.TestCase):
+    """One candidate in, a verdict out, everything recorded so the morning can be compared."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.service = _Service(Path(self._tmp.name))
+        self.client = TestClient(create_app(self.service))
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _history(self, cohort: str, rows: list[tuple[float, bool]]) -> None:
+        ids = self.client.post(
+            "/observations",
+            json={
+                "topic": TOPIC,
+                "source": "bot:scanner",
+                "source_ref": cohort,
+                "observations": [
+                    {
+                        "content": f"candidate at level {level}",
+                        "data": {"level": level},
+                        "occurred_at": f"{cohort}T14:00:00+00:00",
+                    }
+                    for level, _ in rows
+                ],
+            },
+        ).json()["ids"]
+        self.client.post(
+            "/outcomes",
+            json={
+                "source": "bot:broker",
+                "outcomes": [
+                    {"observation_id": item, "content": "closed", "favourable": good}
+                    for item, (_, good) in zip(ids, rows)
+                ],
+            },
+        )
+
+    def _decide(self, level: float, **extra: object) -> dict:
+        payload = {
+            "symbol": "ABC",
+            "content": "ABC signalled a buy",
+            "cohort": "2026-09-22/decide",
+            "occurred_at": "2026-09-22T14:05:00+00:00",
+            "features": {"level": level},
+            "bot": {"content": "BUY: pattern B", "source": "bot:evaluator", "score": 0.8},
+        }
+        payload.update(extra)
+        response = self.client.post("/decide", json=payload)
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()
+
+    def test_a_candidate_with_no_history_gets_an_abstention(self) -> None:
+        body = self._decide(3.0)
+
+        self.assertEqual(body["verdict"], "abstain")
+        self.assertIsNone(body["score"])
+        self.assertFalse(body["binding"])
+        self.assertTrue(body["observation_id"])
+        self.assertTrue(body["bot_decision_id"])
+        self.assertTrue(body["iris_decision_id"])
+
+    def test_favourable_neighbours_approve(self) -> None:
+        self._history("2026-09-21", [(float(index), True) for index in range(10)])
+
+        body = self._decide(3.0)
+
+        self.assertEqual(body["verdict"], "approve")
+        self.assertEqual(body["score"], 1.0)
+        self.assertEqual(body["sample"], 10)
+
+    def test_unfavourable_neighbours_veto(self) -> None:
+        self._history("2026-09-21", [(float(index), False) for index in range(10)])
+
+        body = self._decide(3.0)
+
+        self.assertEqual(body["verdict"], "veto")
+        self.assertEqual(body["score"], 0.0)
+
+    def test_the_thresholds_come_from_config(self) -> None:
+        self._history("2026-09-21", [(float(index), index % 2 == 0) for index in range(10)])
+        self.service.config["trading"] = {"decide": {"approve_at": 0.9, "veto_at": 0.1}}
+
+        body = self._decide(3.0)
+
+        self.assertEqual(body["approve_at"], 0.9)
+        self.assertEqual(body["verdict"], "abstain")
+
+    def test_a_bad_threshold_pair_falls_back_to_defaults(self) -> None:
+        self.service.config["trading"] = {"decide": {"approve_at": 0.2, "veto_at": 0.6}}
+
+        body = self._decide(3.0)
+
+        self.assertEqual(body["approve_at"], 0.35)
+        self.assertEqual(body["veto_at"], 0.15)
+
+    def test_lifts_scale_the_thresholds_by_the_pool_base_rate(self) -> None:
+        self._history("2026-09-21", [(float(index), index < 3) for index in range(10)])
+        self.service.config["trading"] = {
+            "decide": {
+                "approve_at": 0.35,
+                "veto_at": 0.15,
+                "approve_lift": 1.5,
+                "veto_lift": 0.5,
+            }
+        }
+
+        body = self._decide(8.0)
+
+        self.assertEqual(body["base_rate"], 0.3)
+        self.assertEqual(body["approve_at"], 0.45)
+        self.assertEqual(body["veto_at"], 0.15)
+
+    def test_lifts_without_a_base_rate_fall_back_to_the_fixed_thresholds(self) -> None:
+        self.service.config["trading"] = {
+            "decide": {"approve_at": 0.4, "veto_at": 0.1, "approve_lift": 1.5, "veto_lift": 0.5}
+        }
+
+        body = self._decide(3.0)
+
+        self.assertIsNone(body["base_rate"])
+        self.assertEqual(body["approve_at"], 0.4)
+        self.assertEqual(body["veto_at"], 0.1)
+
+    def test_the_verdict_and_thresholds_are_written_on_the_iris_decision(self) -> None:
+        self._history("2026-09-21", [(float(index), True) for index in range(10)])
+
+        body = self._decide(3.0)
+
+        decisions = self.service.knowledge.decisions_for([body["observation_id"]])
+        iris = next(
+            item for item in decisions[body["observation_id"]] if item.source.startswith("iris:")
+        )
+        self.assertEqual(iris.data["verdict"], "approve")
+        self.assertEqual(iris.data["approve_at"], 0.35)
+        self.assertEqual(iris.data["veto_at"], 0.15)
+        self.assertEqual(iris.data["base_rate"], 1.0)
+
+    def test_ignored_features_stay_out_of_the_distance(self) -> None:
+        rows = [(float(index), index < 5) for index in range(10)]
+        ids = self.client.post(
+            "/observations",
+            json={
+                "topic": TOPIC,
+                "source": "bot:scanner",
+                "source_ref": "2026-09-21",
+                "observations": [
+                    {
+                        "content": f"candidate at level {level}",
+                        "data": {"level": level, "price": 1000.0 if good else 10.0},
+                        "occurred_at": "2026-09-21T14:00:00+00:00",
+                    }
+                    for level, good in rows
+                ],
+            },
+        ).json()["ids"]
+        self.client.post(
+            "/outcomes",
+            json={
+                "source": "bot:broker",
+                "outcomes": [
+                    {"observation_id": item, "content": "closed", "favourable": good}
+                    for item, (_, good) in zip(ids, rows)
+                ],
+            },
+        )
+        payload = {
+            "symbol": "ABC",
+            "content": "ABC signalled a buy",
+            "cohort": "2026-09-22/decide",
+            "occurred_at": "2026-09-22T14:05:00+00:00",
+            "features": {"level": 2.0, "price": 10.0},
+            "bot": {"content": "BUY: pattern B", "source": "bot:evaluator", "score": 0.8},
+        }
+
+        plain = self.client.post("/decide", json=payload).json()
+        self.service.config["trading"] = {"appraisal": {"ignore_features": ["price"]}}
+        focused = TestClient(create_app(self.service)).post("/decide", json=payload).json()
+
+        self.assertGreater(focused["score"], plain["score"])
+        self.assertEqual(focused["verdict"], "approve")
+
+    def test_both_decisions_hang_off_the_observation(self) -> None:
+        self._history("2026-09-21", [(float(index), True) for index in range(10)])
+
+        body = self._decide(3.0)
+
+        decisions = self.service.knowledge.decisions_for([body["observation_id"]])
+        sources = sorted(item.source for item in decisions[body["observation_id"]])
+        self.assertEqual(sources, ["bot:evaluator", "iris:shadow-2"])
+        observation = self.service.knowledge.records.get(body["observation_id"])
+        self.assertEqual(observation.source_ref, "2026-09-22/decide")
+        self.assertEqual(observation.data["symbol"], "ABC")
+
+    def test_record_false_scores_without_leaving_an_iris_decision(self) -> None:
+        self._history("2026-09-21", [(float(index), True) for index in range(10)])
+
+        body = self._decide(3.0, record=False)
+
+        self.assertEqual(body["verdict"], "approve")
+        self.assertIsNone(body["iris_decision_id"])
+
+    def test_the_same_morning_is_withheld_from_the_evidence(self) -> None:
+        self._history("2026-09-22/decide", [(float(index), True) for index in range(10)])
+
+        body = self._decide(3.0)
+
+        self.assertEqual(body["verdict"], "abstain")
+        self.assertEqual(body["sample"], 0)
+
+
+UNIVERSE = "trading/universe"
+
+
+class RankTests(unittest.TestCase):
+    """A whole pre-market list in, every symbol back in order, nothing consulted but features."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.service = _Service(Path(self._tmp.name))
+        self.client = TestClient(create_app(self.service))
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _rank(self, cohort: str, rows: list[tuple[str, float]], **extra: object) -> dict:
+        payload = {
+            "topic": UNIVERSE,
+            "cohort": cohort,
+            "occurred_at": f"{cohort[:10]}T12:30:00+00:00",
+            "items": [
+                {
+                    "symbol": symbol,
+                    "features": {"atr": level},
+                    "bot": {"content": "keep", "source": "bot:universe", "score": 1.0},
+                }
+                for symbol, level in rows
+            ],
+        }
+        payload.update(extra)
+        response = self.client.post("/rank", json=payload)
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()
+
+    def _close(self, cohort: str, rows: list[tuple[str, float, bool]]) -> dict[str, str]:
+        body = self._rank(cohort, [(symbol, level) for symbol, level, _ in rows])
+        ids = {item["symbol"]: item["observation_id"] for item in body["ranked"]}
+        self.client.post(
+            "/outcomes",
+            json={
+                "source": "bot:market",
+                "outcomes": [
+                    {"observation_id": ids[symbol], "content": "closed", "favourable": good}
+                    for symbol, _, good in rows
+                ],
+            },
+        )
+        return ids
+
+    def test_an_empty_pool_ranks_everything_without_a_score(self) -> None:
+        body = self._rank("2026-09-22/universe", [("AAA", 1.0), ("BBB", 2.0), ("CCC", 3.0)])
+
+        self.assertEqual(body["size"], 3)
+        self.assertEqual(body["scored"], 0)
+        self.assertIsNone(body["base_rate"])
+        self.assertEqual([item["rank"] for item in body["ranked"]], [1, 2, 3])
+        self.assertTrue(all(item["score"] is None for item in body["ranked"]))
+        self.assertTrue(all(item["bot_decision_id"] for item in body["ranked"]))
+        self.assertTrue(all(item["iris_decision_id"] for item in body["ranked"]))
+
+    def test_lookalikes_of_yesterdays_movers_rank_first(self) -> None:
+        self._close(
+            "2026-09-21/universe",
+            [("AAA", 1.0, True), ("BBB", 1.2, True), ("CCC", 5.0, False), ("DDD", 5.5, False), ("EEE", 6.0, False)],
+        )
+
+        body = self._rank("2026-09-22/universe", [("YYY", 5.2), ("XXX", 1.1)])
+
+        self.assertEqual(body["scored"], 2)
+        self.assertEqual(body["base_rate"], 0.4)
+        self.assertEqual(body["ranked"][0]["symbol"], "XXX")
+        self.assertGreater(body["ranked"][0]["score"], body["ranked"][1]["score"])
+        self.assertEqual(body["ranked"][0]["sample"], 5)
+
+    def test_symbol_history_is_shrunk_toward_the_base_rate(self) -> None:
+        self._close(
+            "2026-09-21/universe",
+            [("AAA", 1.0, True), ("BBB", 1.2, False), ("CCC", 5.0, False), ("DDD", 5.5, False), ("EEE", 6.0, False)],
+        )
+
+        body = self._rank("2026-09-22/universe", [("AAA", 1.0), ("NEW", 1.0)], shrink=10)
+        by_symbol = {item["symbol"]: item for item in body["ranked"]}
+
+        self.assertEqual(by_symbol["AAA"]["symbol_days"], 1)
+        self.assertAlmostEqual(by_symbol["AAA"]["symbol_rate"], (1 + 10 * 0.2) / 11, places=4)
+        self.assertEqual(by_symbol["NEW"]["symbol_days"], 0)
+        self.assertAlmostEqual(by_symbol["NEW"]["symbol_rate"], 0.2, places=4)
+
+    def test_the_iris_decision_carries_the_symbol_history(self) -> None:
+        self._close(
+            "2026-09-21/universe",
+            [("AAA", 1.0, True), ("BBB", 1.2, False), ("CCC", 5.0, False), ("DDD", 5.5, False), ("EEE", 6.0, False)],
+        )
+
+        body = self._rank("2026-09-22/universe", [("AAA", 1.0)])
+
+        observation_id = body["ranked"][0]["observation_id"]
+        decisions = self.service.knowledge.decisions_for([observation_id])[observation_id]
+        iris = next(item for item in decisions if item.source.startswith("iris:"))
+        self.assertEqual(iris.data["symbol_days"], 1)
+        self.assertEqual(iris.data["base_rate"], 0.2)
+        observation = self.service.knowledge.records.get(observation_id)
+        self.assertEqual(observation.topic, UNIVERSE)
+        self.assertEqual(observation.source_ref, "2026-09-22/universe")
+
+    def test_the_universe_pool_never_leaks_into_the_candidate_pool(self) -> None:
+        self._close(
+            "2026-09-21/universe",
+            [("AAA", 1.0, True), ("BBB", 1.2, True), ("CCC", 5.0, True), ("DDD", 5.5, True), ("EEE", 6.0, True)],
+        )
+
+        body = self.client.post(
+            "/decide",
+            json={
+                "symbol": "AAA",
+                "content": "AAA signalled a buy",
+                "cohort": "2026-09-22/decide",
+                "occurred_at": "2026-09-22T14:05:00+00:00",
+                "features": {"atr": 1.0},
+                "bot": {"content": "BUY", "source": "bot:evaluator", "score": 0.8},
+            },
+        ).json()
+
+        self.assertEqual(body["verdict"], "abstain")
+        self.assertEqual(body["sample"], 0)
+

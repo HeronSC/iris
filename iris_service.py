@@ -15,7 +15,7 @@ from core.observability import configure_logging, log_dir_for
 from core.server.app import DEFAULT_HOST, DEFAULT_PORT
 
 USAGE = (
-    "iris_service.py install|remove|start|stop|restart|debug   (Windows service, needs pywin32)\n"
+    "iris_service.py install|update|remove|start|stop|restart|debug   (Windows service, needs pywin32; run from the venv)\n"
     "iris_service.py --console [--config PATH] [--host H] [--port N]   (run the host in this window)"
 )
 

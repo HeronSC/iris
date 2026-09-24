@@ -83,6 +83,28 @@
       "source": "successful:agent",
       "corrected_from": null,
       "updated_at": "2026-09-16T12:08:15+00:00"
+    },
+    {
+      "utterance": "docker is running now",
+      "intent": "windows_services",
+      "arguments": {
+        "name_filter": "Docker",
+        "running_only": true
+      },
+      "source": "successful:agent",
+      "corrected_from": null,
+      "updated_at": "2026-09-19T21:55:44+00:00"
+    },
+    {
+      "utterance": "in charactor creator, how do I get started with creating some animatinos?",
+      "intent": "web_research",
+      "arguments": {
+        "pages": 3,
+        "query": "how to create animations in character creator"
+      },
+      "source": "successful:agent",
+      "corrected_from": null,
+      "updated_at": "2026-09-19T21:56:23+00:00"
     }
   ]
 }
