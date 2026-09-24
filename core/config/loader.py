@@ -309,6 +309,7 @@ class ConfigLoader:
             "context": config.get("context", {}),
             "retention": config.get("retention", {}),
             "ui": config.get("ui", {}),
+            "trading": config.get("trading", {}),
             "assistant_user": str(config.get("assistant_user", "")) or "user",
             "config_warnings": list(self.warnings),
         }
