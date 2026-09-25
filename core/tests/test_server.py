@@ -1283,6 +1283,73 @@ class DecideTests(unittest.TestCase):
         self.assertGreater(focused["score"], plain["score"])
         self.assertEqual(focused["verdict"], "approve")
 
+    def test_the_appraiser_scores_the_configured_label(self) -> None:
+        rows = [(float(index), index < 10) for index in range(20)]
+        ids = self.client.post(
+            "/observations",
+            json={
+                "topic": TOPIC,
+                "source": "bot:scanner",
+                "source_ref": "2026-09-21",
+                "observations": [
+                    {
+                        "content": f"candidate at level {level}",
+                        "data": {"level": level},
+                        "occurred_at": "2026-09-21T14:00:00+00:00",
+                    }
+                    for level, _ in rows
+                ],
+            },
+        ).json()["ids"]
+        self.client.post(
+            "/outcomes",
+            json={
+                "source": "bot:broker",
+                "outcomes": [
+                    {
+                        "observation_id": item,
+                        "content": "closed",
+                        "favourable": good,
+                        "data": {"profitable": not good},
+                    }
+                    for item, (_, good) in zip(ids, rows)
+                ],
+            },
+        )
+        payload = {
+            "symbol": "ABC",
+            "content": "ABC signalled a buy",
+            "cohort": "2026-09-22/decide",
+            "occurred_at": "2026-09-22T14:05:00+00:00",
+            "features": {"level": 0.0},
+            "bot": {"content": "BUY: pattern B", "source": "bot:evaluator", "score": 0.8},
+        }
+
+        on_favourable = self.client.post("/decide", json=payload).json()
+        self.service.config["trading"] = {"appraisal": {"label": "profitable"}}
+        on_profitable = TestClient(create_app(self.service)).post("/decide", json=payload).json()
+
+        self.assertGreater(on_favourable["score"], 0.5)
+        self.assertLess(on_profitable["score"], 0.5)
+
+    def test_a_blank_label_falls_back_to_favourable(self) -> None:
+        self._history("2026-09-21", [(float(index), True) for index in range(10)])
+        self.service.config["trading"] = {"appraisal": {"label": "   "}}
+
+        body = TestClient(create_app(self.service)).post(
+            "/decide",
+            json={
+                "symbol": "ABC",
+                "content": "ABC signalled a buy",
+                "cohort": "2026-09-22/decide",
+                "occurred_at": "2026-09-22T14:05:00+00:00",
+                "features": {"level": 3.0},
+                "bot": {"content": "BUY", "source": "bot:evaluator", "score": 0.8},
+            },
+        ).json()
+
+        self.assertEqual(body["verdict"], "approve")
+
     def test_both_decisions_hang_off_the_observation(self) -> None:
         self._history("2026-09-21", [(float(index), True) for index in range(10)])
 

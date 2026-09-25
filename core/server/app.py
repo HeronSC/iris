@@ -166,6 +166,14 @@ def ignored_features_for(app_service: Any) -> tuple[str, ...]:
     return tuple(str(name) for name in names if isinstance(name, str) and name.strip())
 
 
+def appraisal_label_for(app_service: Any) -> str:
+    section = _trading_section(app_service, "appraisal")
+    label = section.get("label") if section else None
+    if not isinstance(label, str) or not label.strip():
+        return FAVOURABLE_KEY
+    return label.strip()
+
+
 def _outcome_data(data: dict[str, Any], favourable: bool | None) -> dict[str, Any]:
     payload = dict(data)
     if favourable is not None:
@@ -189,6 +197,7 @@ def create_app(app_service: Any, authenticator: ApiAuthenticator | None = None) 
         app_service.knowledge,
         app_service.knowledge_retriever,
         ignored_features=ignored_features_for(app_service),
+        label=appraisal_label_for(app_service),
     )
     auth = authenticator or authenticator_for(app_service)
     api.state.authenticator = auth

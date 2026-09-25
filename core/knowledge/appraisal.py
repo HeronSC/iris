@@ -155,12 +155,14 @@ class Appraiser:
         minimum_evidence: int = 5,
         neighbours: int = 50,
         ignored_features: Sequence[str] = (),
+        label: str = FAVOURABLE_KEY,
     ) -> None:
         self.graph = graph
         self.retriever = retriever
         self.minimum_evidence = max(1, int(minimum_evidence))
         self.neighbours = max(1, int(neighbours))
         self.ignored_features = frozenset(str(name) for name in ignored_features)
+        self.label = str(label or "").strip() or FAVOURABLE_KEY
 
     def _distance_features(self, data: dict) -> dict[str, float]:
         return {
@@ -301,7 +303,7 @@ class Appraiser:
 
         symbols: list[str | None] = []
         for row in found:
-            verdict = _json(row["outcome_json"]).get(FAVOURABLE_KEY)
+            verdict = _json(row["outcome_json"]).get(self.label)
             if not isinstance(verdict, bool):
                 continue
             if not _precedes(row["occurred_at"], before):
@@ -443,7 +445,7 @@ class Appraiser:
                 score=None,
                 rationale=(
                     f"{count} of {self.minimum_evidence} resolved neighbours needed before "
-                    f"a rate means anything ({favourable} favourable, {unfavourable} not)."
+                    f"a rate means anything ({favourable} {self.label}, {unfavourable} not)."
                 ),
                 topic=record.topic,
                 source_ref=record.source_ref,
@@ -461,7 +463,7 @@ class Appraiser:
             unfavourable=unfavourable,
             score=round(score, 4),
             rationale=(
-                f"{favourable} of {count} nearest observations by {span} were favourable. "
+                f"{favourable} of {count} nearest observations by {span} were {self.label}. "
                 "The rate leans on the closest of them. An observed rate, not a prediction."
             ),
             topic=record.topic,
@@ -490,7 +492,7 @@ class Appraiser:
         unfavourable = 0
         unlabelled = 0
         for outcome in outcomes.values():
-            verdict = outcome.data.get(FAVOURABLE_KEY)
+            verdict = outcome.data.get(self.label)
             if verdict is True:
                 favourable += 1
             elif verdict is False:
@@ -539,7 +541,7 @@ class Appraiser:
             score=round(favourable / sample, 4),
             rationale=(
                 f"{favourable} of {sample} resolved outcomes on textually comparable observations "
-                "were favourable. An observed rate, not a prediction."
+                f"were {self.label}. An observed rate, not a prediction."
             ),
             topic=record.topic,
             source_ref=record.source_ref,

@@ -321,7 +321,8 @@
         "ema_200",
         "prev_close",
         "prev_prev_close"
-      ]
+      ],
+      "label": "favourable"
     }
   }
 }
