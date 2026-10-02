@@ -1596,6 +1596,18 @@ side: batch observations, outcomes, recall, assess, compare.
 	-> `core/watchers/knowledge_checks.py`.
 - [x] Authenticate the bot's calls (10). Set `api_token:bot` on this machine and give the bot the
 	same value; until one is set the surface stays open exactly as it was.
+- [ ] The LLM proposes buy/no-buy rules; the evidence decides. **Decided 2026-10-01, deferred:**
+	wait until Iris-led buying (switched on 2026-10-01, Pattern B off) has one to two weeks of
+	live trades, so the rules are learned from real picks and not only the replay. Shape agreed:
+	overnight, code builds winner-versus-loser tables for Iris's picks (time of day, gap, VWAP
+	distance, price, market heat and the like); the local LLM reads the tables and proposes a
+	handful of concrete rules ("skip picks in the first 15 minutes when the gap is above 3%");
+	code tests each one walk-forward over the last 90 days and keeps only rules that help in both
+	halves; survivors are filed as proposed hypotheses through the existing hypothesis system,
+	must keep holding on new live days, and only then go to Henry to approve as a veto on
+	Iris-led buys. The LLM never scores or places a trade itself and never computes the numbers.
+	Guard against luck: rules must hold on days the LLM did not see. Henry declined the nightly
+	plain-English review for now; only this rule loop is wanted.
 
 ### 13.2 Later Applications
 
