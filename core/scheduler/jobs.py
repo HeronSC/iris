@@ -19,6 +19,8 @@ WORKFLOW_RUN = "workflow_run"
 
 AUDIT_RETENTION = "audit_retention"
 
+MARKET_RESEARCH = "market_research"
+
 
 def hypothesis_review(review: Any) -> Callable[[dict[str, Any]], JobResult]:
     def run(params: dict[str, Any]) -> JobResult:
@@ -100,6 +102,19 @@ def workflow_run(workflows: Any) -> Callable[[dict[str, Any]], JobResult]:
             data={"run_id": run_record.id, "status": run_record.status},
             notify=run_record.status in {"failed", "partial", "blocked"},
         )
+
+    return run
+
+
+def market_morning(research: Any) -> Callable[[dict[str, Any]], JobResult]:
+    def run(_params: dict[str, Any]) -> JobResult:
+        report = research.refresh()
+        counts = []
+        for profile in ("compounder", "dividend", "short_term"):
+            saved = research.store.latest(profile) or {}
+            advanced = sum(1 for row in saved.get("ranked") or [] if isinstance(row, dict) and row.get("advanced"))
+            counts.append(f"{profile} {advanced}")
+        return JobResult(ok=bool(report.ok), summary="Morning market save: " + ", ".join(counts), notify=False)
 
     return run
 

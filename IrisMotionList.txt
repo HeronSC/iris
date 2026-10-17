@@ -1,0 +1,87 @@
+Grouped by status. Family in brackets: F1 locomotion, F2 stationary, F3 upper body, F4 head and face.
+
+
+RECORDED (in iClone)
+
+Walk loop, Relaxed  [F1]
+Walk loop, Normal  [F1]
+Walk turn 90° left / 90° right  [F1] Run90Left / Run90Right
+Walk turn 180° left  [F1] Turn180Walk (right side made in code)
+Home pose (save as a pose, not a clip)  [F2]
+Idle A (long, calm)  [F2]
+Idle C (short)  [F2]
+
+
+DONE IN CODE (nothing to record)
+
+Walk turn 180° right  [F1] mirrored from the left 180
+Idle B (long, slightly different weight)  [F2] mirrored Idle A, weight on the other leg; alternates with Idle A automatically
+Fidget: glance away and back  [F2] idle life glances
+Turn in place 45° left / right  [F2] 90° turn clip scaled to the angle
+Turn in place 90° left / right  [F2] uses Run90Left / Run90Right
+Turn in place 180°  [F2] 90° turn clip stretched to 180°
+Listening idle (attentive, still)  [F2] Listening toggle
+Exit turn-and-go (home into walk start)  [F2] turn step, then walk
+Nod yes (single, double)  [F4]
+Shake no  [F4]
+Head tilt curious  [F4]
+Smile small / big  [F4] smile, soft, half, coy, teeth, beaming
+Surprised  [F4] expression and a quick reaction gesture
+Concerned / frown  [F4] both
+Wink  [F4]
+Eyebrow raise  [F4] plus a one-brow skeptical
+Laugh (face + slight shoulders)  [F4]
+Blink and breathing  [F4] both procedural
+Look-at  [F4] follow mouse, idle glances
+
+
+CAN DO IN CODE (not built yet)
+
+Upper-body layer system  [F3] plays recorded gestures on the arms while the legs walk or idle
+Lean in toward camera and back  [F2]
+Bow, small  [F2] (curtsy needs a recording, see below)
+Visemes for lip-sync  [F4] all 15 verified in the export; needs driving from speech
+Talking idle (gentle sway, no hands)  [F2] on hold
+
+
+PARTIAL IN CODE (a recording would look better)
+
+Walk loop, brisk  [F1] normal walk sped up 15-20%; real brisk walk changes posture and arm swing
+Shrug  [F3] shoulders up/down in code; palms turning out needs a recording
+
+
+TO RECORD, ONE SIDE ONLY (the page mirrors the other side)
+
+Sidestep left / right (short)  [F1]
+Peek out left / right  [F2]
+Wave over shoulder  [F3]
+Point left / right  [F3]
+Hand on hip  [F3]
+
+
+TO RECORD
+
+Step back (one or two steps)  [F1]
+Fidget: weight shift  [F2] (Idle A/B alternation covers some of this)
+Fidget: hair/face touch  [F2]
+Thinking pose in / hold / out  [F2] hand to chin; the upward glance can be code
+Crouch/hide in and out  [F2]
+Curtsy  [F2] needs the legs
+Wave, small  [F3]
+Wave, big overhead  [F3]
+Point forward  [F3]
+Beckon "come here"  [F3]
+Thumbs up  [F3]
+Arms crossed in / out  [F3]
+Hand to chin  [F3]
+Hand talk A / B / C (looping, for speech)  [F3]
+Clap  [F3]
+
+
+RECORDING NOTES
+
+Locomotion (F1): cut on left heel strike; root motion.
+Walk loops: one full stride, ending one frame before the starting pose repeats, no ease-out.
+Upper body (F3): arm/shoulder mask, short intro.
+Home pose: save as a pose, not a clip.
+Keep only the one motion in each export file, so the page can pick it as the longest clip.

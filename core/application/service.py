@@ -39,7 +39,9 @@ from core.assistant.intent_router import IntentRouter
 from core.assistant.memory_commands import MemoryCommandHandler
 from core.assistant.models_command import ModelsCommandHandler
 from core.assistant.permissions_command import PermissionsCommandHandler
-from core.actions.bootstrap import build_action_layer
+from core.actions.bootstrap import build_action_layer, search_client_from
+from core.actions.implementations.market_run import MarketRunAction
+from core.market.factory import build_market_research
 from core.actions.changes import ChangeLedger
 from core.assistant.backup_command import BackupCommandHandler
 from core.assistant.changes_command import ChangesCommandHandler
@@ -65,6 +67,7 @@ from core.context import build_context_service
 from core.assistant.corrections_command import CorrectionsCommandHandler
 from core.assistant.workflow_command import WorkflowCommandHandler
 from core.llm.budget import LatencyBudget
+from core.assistant.market_command import MarketCommandHandler
 from core.assistant.schedule_command import ScheduleCommandHandler
 from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
@@ -136,7 +139,7 @@ from core.server.auth import SECRET_PREFIX, TOKEN_HEADER
 from core.results.models import from_json_list
 from core.results.render import to_detail
 from core.scheduler.defaults import ensure_default_jobs
-from core.scheduler.jobs import build_jobs
+from core.scheduler.jobs import MARKET_RESEARCH, build_jobs, market_morning
 from core.scheduler.service import ScheduleService
 from core.watchers import InboxNotifier, LogNotifier, QuietHours, ToastNotifier, WatcherService
 from core.watchers.checks import register_kinds
@@ -582,12 +585,17 @@ class IrisApplication:
             audit=self.audit_stream,
             notify=self._notify_workflow,
         )
+        market_root = Path(self.config["memory_path"]).parent / "Market"
+        holdings_file = Path(self.config["memory_path"]).parent / "Configuration" / "holdings.json"
+        self.market_research = build_market_research(market_root, self.secrets, search_client_from(self.config), holdings_file)
+        self.market_handler = MarketCommandHandler(self.market_research, output=self._sink)
         self.watchers = self._build_watchers()
         self.watchers.listeners.append(self.workflows.watcher_listener())
         self.workflows.sync_schedules(self.schedules)
         self.watch_handler = WatchCommandHandler(self.watchers, output=self._sink)
         self.workflow_handler = WorkflowCommandHandler(self.workflows, output=self._sink)
         self.schedule_handler = ScheduleCommandHandler(self.schedules, output=self._sink)
+        self.action_executor.registry.register(MarketRunAction(self.market_research))
         self.backup_handler = BackupCommandHandler(self.backups, output=self._sink)
         self.changes_handler = ChangesCommandHandler(self.changes, output=self._sink, on_undo=self.learning.note_undo)
         self.stop_handler = StopCommandHandler(self.halt, self.release, output=self._sink)
@@ -768,6 +776,8 @@ class IrisApplication:
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.schedule_handler, stripped, status, command_prefixes=("/schedule",)):
                 return self._build_response(status, cancel_event)
+            if self._handle_slash_command(self.market_handler, stripped, status, command_prefixes=("/market",)):
+                return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.backup_handler, stripped, status, command_prefixes=("/backup",)):
                 return self._build_response(status, cancel_event)
             if self._handle_slash_command(self.changes_handler, stripped, status, command_prefixes=("/changes", "/undo")):
@@ -909,6 +919,8 @@ class IrisApplication:
             quiet_hours=quiet,
             audit=self.audit_stream,
         )
+        if getattr(self, "market_research", None) is not None:
+            self.schedules.jobs[MARKET_RESEARCH] = market_morning(self.market_research)
         ensure_default_jobs(self.schedules)
         self.attached_host = probe_host()
         if self.attached_host is not None and self.attached_host.get("host") == HOST_SERVICE:
@@ -1188,11 +1200,17 @@ class IrisApplication:
         self._turn_route = f"command:{command_name}"
         role_counts_after = self._message_role_counts()
         error_delta = role_counts_after.get(MessageRole.ERROR, 0) - role_counts_before.get(MessageRole.ERROR, 0)
-        completion_text = f"{command_name} completed with errors." if error_delta > 0 else f"{command_name} complete."
+        failed = bool(self.state.pop("command_failed", False))
+        if failed:
+            completion_text = f"{command_name} failed."
+        elif error_delta > 0:
+            completion_text = f"{command_name} completed with errors."
+        else:
+            completion_text = f"{command_name} complete."
         self._emit_message(MessageRole.SYSTEM, completion_text, status=IrisStatus.COMPLETE)
 
         self._active_slash_command = user_input
-        self._conversation_override_message = completion_text
+        self._conversation_override_message = str(self.state.pop("command_conversation", "") or completion_text)
         self._detail_type_override = "command_output"
         self._detail_title_override = f"{command_name} details"
         self._detail_metadata_override["command"] = user_input
