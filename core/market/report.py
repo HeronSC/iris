@@ -40,7 +40,8 @@ def render(names: list[RankedName], history: list[dict] | None = None, day: str 
         note = news_note(saved, name.symbol, name.headlines, day)
         others = shared.get(name.symbol) or []
         shared_line = f" Also on {', '.join(others)}." if others else ""
-        chat.append(f"{index}. {name.symbol} {name.company_name}. On the list {days} {day_word(days)}.{shared_line}")
+        unchecked_line = " Headlines not checked." if name.news_status == "unchecked" else ""
+        chat.append(f"{index}. {name.symbol} {name.company_name.rstrip('.')}. On the list {days} {day_word(days)}.{shared_line}{unchecked_line}")
         lines = [
             f"{index}. {name.symbol} {name.company_name}",
             f"On the list {days} {day_word(days)}.",
@@ -55,8 +56,10 @@ def render(names: list[RankedName], history: list[dict] | None = None, day: str 
             lines.append(note)
         if name.headlines:
             lines.extend(f"- {headline.title} ({headline.url})" for headline in name.headlines[:5])
+        elif name.news_status == "unchecked":
+            lines.append("Headlines: not checked, search was unavailable")
         else:
-            lines.append("Headlines: missing")
+            lines.append("Headlines: none found this week")
         details.append("\n".join(lines))
     return "\n".join(chat), "\n\n".join(details)
 

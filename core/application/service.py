@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +68,7 @@ from core.context import build_context_service
 from core.assistant.corrections_command import CorrectionsCommandHandler
 from core.assistant.workflow_command import WorkflowCommandHandler
 from core.llm.budget import LatencyBudget
-from core.assistant.market_command import MarketCommandHandler
+from core.assistant.market_command import PROFILE_BUTTONS, MarketCommandHandler
 from core.assistant.schedule_command import ScheduleCommandHandler
 from core.assistant.pending_action_manager import PendingActionManager
 from core.assistant.project_command import ProjectCommandHandler
@@ -169,6 +170,14 @@ class _NoopNaturalLanguageHandler(_NoopCommandHandler):
         return False
 
 
+def command_suggestions(pairs: Any) -> list[ActionSuggestion]:
+    suggestions = []
+    for index, pair in enumerate(pairs):
+        if isinstance(pair, (list, tuple)) and len(pair) == 2 and str(pair[0]).strip() and str(pair[1]).strip():
+            suggestions.append(ActionSuggestion(id=f"command-{index}", label=str(pair[0]), payload={"command": str(pair[1])}))
+    return suggestions
+
+
 class IrisApplication:
     def __init__(self, config_path: Path | None = None, prompt_provider: Callable[[PromptRequest | str], str] | None = None) -> None:
         self.config_path = config_path or (Path(__file__).resolve().parents[1] / "config.json")
@@ -195,6 +204,7 @@ class IrisApplication:
         self.startup_cancel = threading.Event()
         self.startup_status_handler: Callable[[str], None] | None = None
         self.startup_messages: list[IrisMessage] = []
+        self.startup_actions: list[ActionSuggestion] = []
         self.topic_memory_service: TopicMemoryService | None = None
         self._last_coordinator_turn: CoordinatorTurn | None = None
 
@@ -643,6 +653,8 @@ class IrisApplication:
                     f"The Iris service is running ({watching} watchers, {scheduled} scheduled jobs); this window is a client of it.",
                 )
             )
+        self.startup_messages.extend(self._market_failure_notices())
+        self.startup_actions = command_suggestions(PROFILE_BUTTONS) if getattr(self, "market_research", None) is not None else []
         self.startup_messages.append(IrisMessage(MessageRole.SYSTEM, "Iris is ready."))
         self.initialized = True
         if self.event_handler is not None:
@@ -911,16 +923,17 @@ class IrisApplication:
             inbox=inbox,
             context=WatcherContext(knowledge=self.knowledge, cameras=getattr(self, "camera_service", None)),
         )
+        jobs = build_jobs(review=self.knowledge_review, backups=self.backups, workflows=self.workflows, retention=self._retention_job())
+        if getattr(self, "market_research", None) is not None:
+            jobs[MARKET_RESEARCH] = market_morning(self.market_research)
         self.schedules = ScheduleService(
             configuration / "schedules.json",
             configuration / "schedules_state.json",
-            build_jobs(review=self.knowledge_review, backups=self.backups, workflows=self.workflows, retention=self._retention_job()),
+            jobs,
             notifiers={**notifiers, "inbox": inbox},
             quiet_hours=quiet,
             audit=self.audit_stream,
         )
-        if getattr(self, "market_research", None) is not None:
-            self.schedules.jobs[MARKET_RESEARCH] = market_morning(self.market_research)
         ensure_default_jobs(self.schedules)
         self.attached_host = probe_host()
         if self.attached_host is not None and self.attached_host.get("host") == HOST_SERVICE:
@@ -936,6 +949,27 @@ class IrisApplication:
             except (OSError, ValueError, RuntimeError, TypeError) as error:
                 logger.warning("Scheduled jobs could not start", error=str(error))
         return service
+
+    def _market_failure_notices(self) -> list[IrisMessage]:
+        schedules = getattr(self, "schedules", None)
+        research = getattr(self, "market_research", None)
+        if schedules is None or research is None:
+            return []
+        notices = []
+        for definition in schedules.definitions():
+            if definition.job != MARKET_RESEARCH:
+                continue
+            state = schedules.state(definition.id)
+            if state is None or not state.last_error or not state.last_run:
+                continue
+            if not research.store.claim_notice(state.last_run):
+                continue
+            try:
+                when = datetime.fromisoformat(state.last_run).astimezone().strftime("%a %b %d at %I:%M %p")
+            except ValueError:
+                when = state.last_run
+            notices.append(IrisMessage(MessageRole.ERROR, f"The scheduled market refresh on {when} failed: {state.last_error}"))
+        return notices
 
     def _screen_prompt(self) -> str:
         parts = [self.context_service.prompt_line()]
@@ -1219,6 +1253,9 @@ class IrisApplication:
             self._detail_type_override = str(command_detail.get("type") or "markdown")
             self._detail_title_override = str(command_detail.get("title") or self._detail_title_override)
             self._detail_content_override = str(command_detail["content"])
+        command_actions = self.state.pop("command_actions", None)
+        if isinstance(command_actions, list):
+            self._detail_actions_override = command_suggestions(command_actions)
         return True
 
     def _message_role_counts(self) -> dict[MessageRole, int]:
@@ -1655,6 +1692,8 @@ class IrisApplication:
     def _normalize_role(self, role: str | None, text: str) -> MessageRole:
         if role == "progress":
             return MessageRole.PROGRESS
+        if role == "error":
+            return MessageRole.ERROR
         lowered = text.lower()
         if "requires confirmation" in lowered or "awaiting confirmation" in lowered:
             return MessageRole.CONFIRMATION

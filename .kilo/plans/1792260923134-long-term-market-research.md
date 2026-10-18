@@ -87,6 +87,7 @@ Saved, not shown on the report.
 Wire `/market` like `core/assistant/schedule_command.py`. Register actions from `core/actions/bootstrap.py`.
 
 - `/market run` — render the saved top 10. Refetch only if that profile's save is stale.
+- `/market refresh` — always fetch all three profiles. `/market run force` does the same.
 - `/market profile` — show or switch the active profile.
 - `/market criteria` — show the active profile's gates and the shared price and volume limits.
 - `/market criteria set <gate> <value>` — write a new version and repeat the new set. `requires_confirmation=True`, same as `update_config`. Chat may set only a key the user named in that turn. A rejected confirmation does not bump the version.

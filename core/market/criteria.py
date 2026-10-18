@@ -34,14 +34,6 @@ def facts_from(bars: list[Bar], quote: Quote | None) -> Facts:
     return Facts(last, avg_volume, sma_50, sma_200, return_20, quote)
 
 
-def _ratio(value: float | None) -> float | None:
-    if value is None:
-        return None
-    if value > 1:
-        return value / 100
-    return value
-
-
 def clearance(value: float | None, gate: float, better: float, *, higher_is_better: bool) -> float | None:
     if value is None:
         return None
@@ -204,7 +196,3 @@ def security_class(quote_type: str | None, broker_class: str | None) -> str | No
     if broker == "cash":
         return "cash"
     return None
-
-
-def as_fraction(value: float | None) -> float | None:
-    return _ratio(value)

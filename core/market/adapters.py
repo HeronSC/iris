@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
 
-from core.market.criteria import as_fraction
 from core.market.models import AccountRead, Bar, Headline, Holding, Quote
 from core.market.symbols import normalize_symbol
 
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "ARCA", "NYSEARCA", "BATS"}
+ALPACA_TRADING_HOSTS = ("api.alpaca.markets", "paper-api.alpaca.markets")
+YAHOO_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+
+Reporter = Callable[[str, str], None]
+
+
+def _say(on_progress: Reporter | None, text: str, role: str = "progress") -> None:
+    if on_progress is not None:
+        on_progress(text, role)
 
 
 def _alpaca_credentials(secrets: object | None) -> tuple[str, str]:
@@ -26,8 +36,8 @@ def _first_secret(secrets: object | None, names: tuple[str, ...]) -> str:
         return ""
     for name in names:
         value = getter(name)
-        if value:
-            return str(value)
+        if value and str(value).strip():
+            return str(value).strip()
     return ""
 
 
@@ -44,10 +54,24 @@ class AlpacaListings:
             return []
         self.problem = ""
         headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
-        with httpx.Client(timeout=30.0, headers=headers, transport=self.transport) as client:
-            response = client.get("https://api.alpaca.markets/v2/assets", params={"status": "active", "asset_class": "us_equity"})
-            response.raise_for_status()
-            payload = response.json()
+        try:
+            with httpx.Client(timeout=30.0, headers=headers, transport=self.transport) as client:
+                for host in ALPACA_TRADING_HOSTS:
+                    response = client.get(f"https://{host}/v2/assets", params={"status": "active", "asset_class": "us_equity"})
+                    if response.status_code not in {401, 403}:
+                        break
+                response.raise_for_status()
+                payload = response.json()
+        except httpx.HTTPStatusError as error:
+            code = error.response.status_code
+            if code in {401, 403}:
+                self.problem = f"Alpaca rejected the keys (HTTP {code}) on both the live and paper endpoints. Check alpaca:key and alpaca:secret with /secrets."
+            else:
+                self.problem = f"Alpaca listings returned HTTP {code}."
+            return []
+        except (httpx.HTTPError, ValueError) as error:
+            self.problem = f"Alpaca listings could not be read: {error.__class__.__name__}."
+            return []
         found = []
         for item in payload if isinstance(payload, list) else []:
             if not isinstance(item, dict) or item.get("tradable") is False:
@@ -66,68 +90,137 @@ class AlpacaBars:
         self.transport = transport
         self.requested_days = 0
 
-    def daily(self, symbols: list[str], trading_days: int) -> dict[str, list[Bar]]:
+    def daily(self, symbols: list[str], trading_days: int, on_progress: Reporter | None = None) -> dict[str, list[Bar]]:
         self.requested_days = trading_days
         key, secret = _alpaca_credentials(self.secrets)
-        if not key or not secret or not symbols:
+        if not symbols:
+            return {}
+        if not key or not secret:
+            _say(on_progress, "Alpaca keys are not set, so daily bars cannot be read.", "error")
             return {}
         headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
         found: dict[str, list[Bar]] = {}
+        start = (datetime.now(timezone.utc) - timedelta(days=max(trading_days * 2, 400))).date().isoformat()
         with httpx.Client(timeout=30.0, headers=headers, transport=self.transport) as client:
             for index in range(0, len(symbols), 100):
                 chunk = symbols[index : index + 100]
-                response = client.get(
-                    "https://data.alpaca.markets/v2/stocks/bars",
-                    params={"symbols": ",".join(chunk), "timeframe": "1Day", "limit": trading_days},
-                )
-                if response.status_code >= 400:
-                    continue
-                bars = (response.json() or {}).get("bars") or {}
-                for symbol, rows in bars.items():
-                    parsed = []
-                    for row in rows or []:
-                        if not isinstance(row, dict):
-                            continue
-                        try:
-                            parsed.append(Bar(float(row["c"]), float(row["v"])))
-                        except (KeyError, TypeError, ValueError):
-                            continue
-                    if parsed:
-                        normalized = normalize_symbol(symbol)
-                        if normalized:
-                            found[normalized] = parsed
+                rows_by_symbol, problem = self._chunk(client, chunk, start)
+                if problem:
+                    _say(on_progress, f"Daily bars for {chunk[0]} to {chunk[-1]} ({len(chunk)} symbols) failed: {problem}. Those symbols are skipped.", "error")
+                for symbol, rows in rows_by_symbol.items():
+                    found[symbol] = rows[-trading_days:]
+                _say(on_progress, f"Daily bars {min(index + len(chunk), len(symbols))} of {len(symbols)}.")
         return found
+
+    def _chunk(self, client: httpx.Client, chunk: list[str], start: str) -> tuple[dict[str, list[Bar]], str]:
+        found: dict[str, list[Bar]] = {}
+        page = None
+        while True:
+            params = {"symbols": ",".join(symbol.replace("-", ".") for symbol in chunk), "timeframe": "1Day", "start": start, "limit": 10000}
+            if page:
+                params["page_token"] = page
+            try:
+                response = client.get("https://data.alpaca.markets/v2/stocks/bars", params=params)
+                if response.status_code >= 400:
+                    return {}, f"HTTP {response.status_code}"
+                payload = response.json() or {}
+            except httpx.HTTPError as error:
+                return {}, error.__class__.__name__
+            except ValueError:
+                return {}, "unreadable reply"
+            for symbol, rows in (payload.get("bars") or {}).items():
+                parsed = []
+                for row in rows or []:
+                    if not isinstance(row, dict):
+                        continue
+                    try:
+                        parsed.append(Bar(float(row["c"]), float(row["v"])))
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                normalized = normalize_symbol(symbol)
+                if normalized and parsed:
+                    found.setdefault(normalized, []).extend(parsed)
+            page = payload.get("next_page_token")
+            if not page:
+                return found, ""
 
 
 class YahooQuotes:
-    def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(self, transport: httpx.BaseTransport | None = None, *, give_up_after: int = 25) -> None:
         self.transport = transport
+        self.give_up_after = give_up_after
 
-    def fetch(self, symbols: list[str], *, limit: int) -> dict[str, Quote]:
+    def fetch(self, symbols: list[str], *, limit: int, on_progress: Reporter | None = None) -> dict[str, Quote]:
         found: dict[str, Quote] = {}
-        with httpx.Client(timeout=20.0, transport=self.transport, headers={"User-Agent": "Iris/1.0"}) as client:
-            for symbol in symbols[:limit]:
-                quote = self._one(client, symbol)
+        chosen = symbols[:limit]
+        if not chosen:
+            return found
+        failures: dict[str, int] = {}
+        in_a_row = 0
+        with httpx.Client(timeout=20.0, transport=self.transport, headers={"User-Agent": YAHOO_AGENT}, follow_redirects=True) as client:
+            crumb = self._crumb(client)
+            if not crumb:
+                _say(on_progress, "Yahoo did not hand out a session crumb, so fundamentals cannot be read.", "error")
+                return found
+            for index, symbol in enumerate(chosen, start=1):
+                quote, problem = self._one(client, symbol, crumb)
+                if problem == "HTTP 401":
+                    crumb = self._crumb(client) or crumb
+                    quote, problem = self._one(client, symbol, crumb)
                 if quote is not None:
                     found[symbol] = quote
+                    in_a_row = 0
+                elif problem:
+                    if problem not in failures and problem != "HTTP 404":
+                        _say(on_progress, f"Yahoo fundamentals failed for {symbol}: {problem}.", "error")
+                    failures[problem] = failures.get(problem, 0) + 1
+                    in_a_row = 0 if problem == "HTTP 404" else in_a_row + 1
+                if in_a_row >= self.give_up_after:
+                    _say(on_progress, f"Yahoo failed {in_a_row} times in a row, so fundamentals stopped at {index} of {len(chosen)}.", "error")
+                    break
+                if index % 25 == 0 or index == len(chosen):
+                    _say(on_progress, f"Fundamentals {index} of {len(chosen)}.")
+        if failures:
+            counts = ", ".join(f"{problem}: {count}" for problem, count in sorted(failures.items()))
+            serious = any(problem != "HTTP 404" for problem in failures)
+            _say(on_progress, f"Yahoo had no fundamentals for {sum(failures.values())} of {len(chosen)} names ({counts}).", "error" if serious else "progress")
         return found
 
-    def _one(self, client: httpx.Client, symbol: str) -> Quote | None:
-        response = client.get(
-            f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}",
-            params={"modules": "price,summaryProfile,defaultKeyStatistics,financialData"},
-        )
-        if response.status_code >= 400:
-            return None
-        result = (((response.json() or {}).get("quoteSummary") or {}).get("result") or [None])[0]
+    def _crumb(self, client: httpx.Client) -> str:
+        try:
+            client.get("https://fc.yahoo.com")
+        except httpx.HTTPError:
+            pass
+        try:
+            response = client.get("https://query1.finance.yahoo.com/v1/test/getcrumb")
+        except httpx.HTTPError:
+            return ""
+        text = response.text.strip() if response.status_code == 200 else ""
+        return "" if not text or "<" in text or " " in text else text
+
+    def _one(self, client: httpx.Client, symbol: str, crumb: str) -> tuple[Quote | None, str]:
+        try:
+            response = client.get(
+                f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}",
+                params={"modules": "price,summaryProfile,summaryDetail,defaultKeyStatistics,financialData", "crumb": crumb},
+            )
+            if response.status_code >= 400:
+                return None, f"HTTP {response.status_code}"
+            payload = response.json() or {}
+        except httpx.HTTPError as error:
+            return None, error.__class__.__name__
+        except ValueError:
+            return None, "unreadable reply"
+        result = ((payload.get("quoteSummary") or {}).get("result") or [None])[0]
         if not isinstance(result, dict):
-            return None
-        return quote_from_summary(symbol, result)
+            return None, "no result"
+        return quote_from_summary(symbol, result), ""
 
 
 def quote_from_summary(symbol: str, result: dict) -> Quote:
     price = result.get("price") or {}
     profile = result.get("summaryProfile") or {}
+    detail = result.get("summaryDetail") or {}
     stats = result.get("defaultKeyStatistics") or {}
     financial = result.get("financialData") or {}
     debt = _raw(financial.get("debtToEquity"))
@@ -141,20 +234,20 @@ def quote_from_summary(symbol: str, result: dict) -> Quote:
         industry=_text(profile.get("industry")),
         quote_type=_text(price.get("quoteType")),
         trailing_eps=_raw(stats.get("trailingEps")),
-        revenue_growth=as_fraction(_raw(financial.get("revenueGrowth"))),
-        return_on_equity=as_fraction(_raw(financial.get("returnOnEquity"))),
-        profit_margin=as_fraction(_raw(financial.get("profitMargins"))),
+        revenue_growth=_raw(financial.get("revenueGrowth")),
+        return_on_equity=_raw(financial.get("returnOnEquity")),
+        profit_margin=_raw(financial.get("profitMargins")),
         debt_to_equity=debt,
         free_cash_flow=_raw(financial.get("freeCashflow")),
-        trailing_pe=_raw(stats.get("trailingPE")),
-        dividend_yield=as_fraction(_raw(stats.get("dividendYield") or summary_yield(result))),
-        payout_ratio=as_fraction(_raw(stats.get("payoutRatio"))),
+        trailing_pe=_first_raw(detail, stats, "trailingPE"),
+        dividend_yield=_first_raw(detail, stats, "dividendYield"),
+        payout_ratio=_first_raw(detail, stats, "payoutRatio"),
     )
 
 
-def summary_yield(result: dict) -> float | None:
-    detail = result.get("summaryDetail") or {}
-    return _raw(detail.get("dividendYield"))
+def _first_raw(primary: dict, fallback: dict, key: str) -> float | None:
+    value = _raw(primary.get(key))
+    return value if value is not None else _raw(fallback.get(key))
 
 
 def _raw(node: object) -> float | None:

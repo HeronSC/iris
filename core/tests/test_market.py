@@ -62,7 +62,7 @@ class MemoryBars:
         self.rows = rows
         self.requested_days = 0
 
-    def daily(self, symbols: list[str], trading_days: int) -> dict[str, list[Bar]]:
+    def daily(self, symbols: list[str], trading_days: int, on_progress: object = None) -> dict[str, list[Bar]]:
         self.requested_days = trading_days
         return {symbol: self.rows[symbol] for symbol in symbols if symbol in self.rows}
 
@@ -73,7 +73,7 @@ class MemoryQuotes:
         self.limit = limit
         self.calls: list[str] = []
 
-    def fetch(self, symbols: list[str], *, limit: int) -> dict[str, Quote]:
+    def fetch(self, symbols: list[str], *, limit: int, on_progress: object = None) -> dict[str, Quote]:
         cap = self.limit if self.limit is not None else limit
         chosen = symbols[:cap]
         self.calls.extend(chosen)
@@ -101,7 +101,7 @@ class MemoryHoldings:
         return self.account
 
 
-def research(root: Path, symbols: list[str], quotes: dict[str, Quote], news: dict[str, list[Headline] | None] | None = None, account: AccountRead | None = None, bar_rows: dict[str, list[Bar]] | None = None, refresh_limit: int = 40) -> MarketResearch:
+def research(root: Path, symbols: list[str], quotes: dict[str, Quote], news: dict[str, list[Headline] | None] | None = None, account: AccountRead | None = None, bar_rows: dict[str, list[Bar]] | None = None) -> MarketResearch:
     rows = bar_rows or {symbol: bars(100) for symbol in symbols}
     sources = Sources(
         listings=MemoryListings(symbols),
@@ -109,7 +109,6 @@ def research(root: Path, symbols: list[str], quotes: dict[str, Quote], news: dic
         quotes=MemoryQuotes(quotes),
         news=MemoryNews(news or {symbol: [Headline(f"{symbol} quiet", "https://example.test/quiet")] for symbol in symbols}),
         holdings=MemoryHoldings(account or AccountRead(True, "fake", 1000.0)),
-        refresh_limit=refresh_limit,
     )
     return MarketResearch(MarketStore(root), sources)
 
@@ -170,7 +169,7 @@ class MarketResearchTests(unittest.TestCase):
     def test_pass_order_and_advance_cap(self) -> None:
         symbols = [sym(index) for index in range(60)]
         quotes = {symbol: quote(symbol, revenue_growth=0.10 + index / 1000) for index, symbol in enumerate(symbols)}
-        tool = research(self.root, symbols, quotes, refresh_limit=60)
+        tool = research(self.root, symbols, quotes)
         report = tool.run()
         latest = tool.store.latest()
         ranked = latest["ranked"]
@@ -292,7 +291,7 @@ class MarketResearchTests(unittest.TestCase):
 
     def test_daytime_run_reads_saved_profiles(self) -> None:
         names = [sym(index) for index in range(3)]
-        tool = research(self.root, names, {name: quote(name) for name in names}, refresh_limit=3)
+        tool = research(self.root, names, {name: quote(name) for name in names})
         tool.refresh()
         self.assertIsNotNone(tool.store.latest("compounder"))
         self.assertIsNotNone(tool.store.latest("dividend"))
@@ -339,6 +338,279 @@ class MarketResearchTests(unittest.TestCase):
         self.assertFalse(report.ok)
         self.assertIn("No listed symbols", report.message)
         self.assertIsNone(tool.store.latest("compounder"))
+
+    def test_summary_detail_fields_are_read_as_fractions(self) -> None:
+        from core.market.adapters import quote_from_summary
+
+        result = {
+            "price": {"quoteType": "EQUITY"},
+            "summaryDetail": {"trailingPE": {"raw": 28.5}, "dividendYield": {"raw": 0.031}, "payoutRatio": {"raw": 0.45}},
+            "financialData": {"revenueGrowth": {"raw": 1.5}, "returnOnEquity": {"raw": 1.6}, "debtToEquity": {"raw": 150.0}},
+        }
+        parsed = quote_from_summary("AAPL", result)
+        self.assertEqual((parsed.trailing_pe, parsed.dividend_yield, parsed.payout_ratio), (28.5, 0.031, 0.45))
+        self.assertEqual((parsed.revenue_growth, parsed.return_on_equity), (1.5, 1.6))
+        self.assertEqual(parsed.debt_to_equity, 1.5)
+
+    def test_newer_dismissal_counts_after_gate_change(self) -> None:
+        store = MarketStore(self.root)
+        store.dismiss("compounder", "buy", "AAPL")
+        settings = store.settings()
+        settings["versions"]["compounder"] = 2
+        store.save_settings(settings)
+        self.assertNotIn("AAPL", store.dismissed("compounder", "buy"))
+        store.dismiss("compounder", "buy", "AAPL")
+        self.assertIn("AAPL", store.dismissed("compounder", "buy"))
+
+    def test_named_profile_report_and_active_profile_kept(self) -> None:
+        tool = research(self.root, ["AAPL"], {"AAPL": quote("AAPL")})
+        report = tool.run(profile="dividend")
+        self.assertEqual(report.profile, "dividend")
+        self.assertTrue(report.ok)
+        self.assertEqual(tool.store.settings()["active_profile"], "compounder")
+        self.assertIsNone(tool.store.latest("compounder"))
+
+    def test_saved_run_from_another_day_is_refreshed(self) -> None:
+        tool = research(self.root, ["AAPL"], {"AAPL": quote("AAPL")})
+        tool.run()
+        saved = tool.store.latest("compounder")
+        saved["day"] = "2000-01-01"
+        tool.store.save_run(saved)
+        tool.sources.quotes.calls.clear()
+        tool.run()
+        self.assertEqual(tool.sources.quotes.calls, ["AAPL"])
+        status = (self.root / "status.txt").read_text(encoding="utf-8")
+        self.assertIn("Refresh finished", status)
+
+    def test_failed_bars_page_drops_the_whole_chunk(self) -> None:
+        import httpx
+
+        from core.market.adapters import AlpacaBars
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "page_token" in request.url.params:
+                return httpx.Response(429)
+            return httpx.Response(200, json={"bars": {"AAPL": [{"c": 1, "v": 1}]}, "next_page_token": "next"})
+
+        class Secrets:
+            def get(self, name: str) -> str:
+                return "value"
+
+        source = AlpacaBars(Secrets(), httpx.MockTransport(handler))
+        seen: list[tuple[str, str]] = []
+        self.assertEqual(source.daily(["AAPL"], 200, on_progress=lambda text, role: seen.append((text, role))), {})
+        self.assertEqual(seen[0][1], "error")
+        self.assertIn("HTTP 429", seen[0][0])
+        self.assertEqual(seen[1], ("Daily bars 1 of 1.", "progress"))
+
+    def test_bars_ask_alpaca_for_class_shares_with_a_dot(self) -> None:
+        import httpx
+
+        from core.market.adapters import AlpacaBars
+
+        asked: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            asked.append(request.url.params["symbols"])
+            return httpx.Response(200, json={"bars": {"BRK.B": [{"c": 1, "v": 1}]}})
+
+        class Secrets:
+            def get(self, name: str) -> str:
+                return "value"
+
+        found = AlpacaBars(Secrets(), httpx.MockTransport(handler)).daily(["AAPL", "BRK-B"], 200)
+        self.assertEqual(asked, ["AAPL,BRK.B"])
+        self.assertEqual(list(found), ["BRK-B"])
+
+    def test_listings_network_error_sets_problem(self) -> None:
+        import httpx
+
+        from core.market.adapters import AlpacaListings
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("down", request=request)
+
+        class Secrets:
+            def get(self, name: str) -> str:
+                return "value"
+
+        listings = AlpacaListings(Secrets(), httpx.MockTransport(handler))
+        self.assertEqual(listings.symbols(), [])
+        self.assertIn("ConnectError", listings.problem)
+
+    def test_listings_fall_back_to_paper_endpoint(self) -> None:
+        import httpx
+
+        from core.market.adapters import AlpacaListings
+
+        hosts: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            hosts.append(request.url.host)
+            if request.url.host == "api.alpaca.markets":
+                return httpx.Response(401)
+            return httpx.Response(200, json=[{"symbol": "AAPL", "exchange": "NASDAQ", "tradable": True}])
+
+        class Secrets:
+            def get(self, name: str) -> str:
+                return " value "
+
+        listings = AlpacaListings(Secrets(), httpx.MockTransport(handler))
+        self.assertEqual(listings.symbols(), ["AAPL"])
+        self.assertEqual(hosts, ["api.alpaca.markets", "paper-api.alpaca.markets"])
+
+    def test_refresh_error_is_reported(self) -> None:
+        from core.assistant.market_command import MarketCommandHandler
+
+        tool = research(self.root, ["AAPL"], {"AAPL": quote("AAPL")})
+
+        def broken(*args: object, **kwargs: object) -> dict:
+            raise RuntimeError("boom")
+
+        tool.sources.bars.daily = broken
+        state: dict = {}
+        MarketCommandHandler(tool).handle("/market refresh", state)
+        self.assertTrue(state["command_failed"])
+        self.assertIn("RuntimeError: boom", state["command_conversation"])
+
+    def test_refresh_problems_are_reported_as_they_happen(self) -> None:
+        from core.assistant.market_command import MarketCommandHandler
+
+        tool = research(self.root, ["AAPL", "MSFT"], {"AAPL": quote("AAPL"), "MSFT": quote("MSFT")}, news={"AAPL": None, "MSFT": None})
+        lines: list[tuple[str, str | None]] = []
+        state: dict = {}
+        MarketCommandHandler(tool, output=lambda text, role=None: lines.append((text, role))).handle("/market refresh", state)
+        errors = [text for text, role in lines if role == "error"]
+        self.assertTrue(any("Headlines could not be read for AAPL" in text for text in errors))
+        first_error = next(index for index, (_text, role) in enumerate(lines) if role == "error")
+        self.assertLess(first_error, len(lines) - 1)
+        self.assertIn("problem", lines[-1][0])
+        self.assertIn("AAPL", state["command_conversation"])
+        self.assertIn("Headlines not checked.", state["command_conversation"])
+        self.assertIn("Headlines: not checked", state["command_detail"]["content"])
+
+    def test_switching_profile_shows_its_saved_list(self) -> None:
+        from core.assistant.market_command import MarketCommandHandler
+
+        tool = research(self.root, ["AAPL"], {"AAPL": quote("AAPL")})
+        handler = MarketCommandHandler(tool, output=lambda text, role=None: None)
+        state: dict = {}
+        handler.handle("/market profile dividend", state)
+        self.assertIn("no saved dividend list yet", state["command_conversation"])
+        tool.refresh()
+        state = {}
+        handler.handle("/market profile Dividend", state)
+        self.assertTrue(state["command_conversation"].startswith("Active profile: dividend.\n1. AAPL"))
+        self.assertEqual(state["command_detail"]["title"], "Market research")
+        self.assertEqual(tool.store.settings()["active_profile"], "dividend")
+
+    def test_every_market_command_offers_profile_buttons(self) -> None:
+        from core.application.service import command_suggestions
+        from core.assistant.market_command import PROFILE_BUTTONS, MarketCommandHandler
+
+        tool = research(self.root, ["AAPL"], {"AAPL": quote("AAPL")})
+        handler = MarketCommandHandler(tool, output=lambda text, role=None: None)
+        for command in ("/market", "/market criteria", "/market nonsense", "/market run bogus"):
+            state: dict = {}
+            handler.handle(command, state)
+            self.assertEqual(state["command_actions"], list(PROFILE_BUTTONS))
+        suggestions = command_suggestions(PROFILE_BUTTONS)
+        self.assertEqual([item.label for item in suggestions], ["Compounder top 10", "Dividend top 10", "Short-term top 10"])
+        self.assertEqual(suggestions[1].payload, {"command": "/market run dividend"})
+
+    def test_run_button_shows_that_profile_without_switching(self) -> None:
+        from core.assistant.market_command import MarketCommandHandler
+
+        tool = research(self.root, ["AAPL"], {"AAPL": quote("AAPL")})
+        tool.refresh()
+        state: dict = {}
+        MarketCommandHandler(tool, output=lambda text, role=None: None).handle("/market run short_term", state)
+        self.assertNotIn("command_failed", state)
+        self.assertEqual(tool.store.settings()["active_profile"], "compounder")
+        self.assertEqual(state["command_conversation"], tool.report_saved("short_term").chat)
+        self.assertNotEqual(state["command_conversation"], tool.report_saved("compounder").chat)
+
+    def test_name_with_no_headlines_this_week_is_listed(self) -> None:
+        tool = research(self.root, ["AAPL"], {"AAPL": quote("AAPL")}, news={"MSFT": []})
+        report = tool.run()
+        self.assertIn("AAPL", report.chat)
+        self.assertNotIn("Headlines not checked.", report.chat)
+        self.assertIn("Headlines: none found this week", report.details)
+
+    def test_no_bars_fails_with_a_reason(self) -> None:
+        tool = research(self.root, ["AAPL"], {"AAPL": quote("AAPL")}, bar_rows={"ZZZ": bars(100)})
+        report = tool.refresh()
+        self.assertFalse(report.ok)
+        self.assertIn("No daily bars", report.message)
+        self.assertIn(report.message, report.problems)
+        self.assertIn("Refresh stopped", (self.root / "status.txt").read_text(encoding="utf-8"))
+
+    def test_yahoo_uses_crumb_and_reports_failures(self) -> None:
+        import httpx
+
+        from core.market.adapters import YahooQuotes
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "fc.yahoo.com":
+                return httpx.Response(404)
+            if request.url.path == "/v1/test/getcrumb":
+                return httpx.Response(200, text="crumb123")
+            if request.url.params.get("crumb") != "crumb123":
+                return httpx.Response(401)
+            if request.url.path.endswith("/BAD"):
+                return httpx.Response(500)
+            return httpx.Response(200, json={"quoteSummary": {"result": [{"price": {"quoteType": "EQUITY"}, "summaryDetail": {"trailingPE": {"raw": 20.0}}}]}})
+
+        seen: list[tuple[str, str]] = []
+        found = YahooQuotes(httpx.MockTransport(handler)).fetch(["AAPL", "BAD"], limit=2, on_progress=lambda text, role: seen.append((text, role)))
+        self.assertEqual(list(found), ["AAPL"])
+        self.assertEqual(found["AAPL"].trailing_pe, 20.0)
+        errors = [text for text, role in seen if role == "error"]
+        self.assertIn("Yahoo fundamentals failed for BAD: HTTP 500.", errors)
+
+    def test_yahoo_gives_up_after_repeated_failures(self) -> None:
+        import httpx
+
+        from core.market.adapters import YahooQuotes
+
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/v1/test/getcrumb":
+                return httpx.Response(200, text="crumb123")
+            if "quoteSummary" in request.url.path:
+                calls.append(request.url.path)
+                return httpx.Response(503)
+            return httpx.Response(404)
+
+        seen: list[tuple[str, str]] = []
+        YahooQuotes(httpx.MockTransport(handler), give_up_after=3).fetch([f"S{index}" for index in range(10)], limit=10, on_progress=lambda text, role: seen.append((text, role)))
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(any("stopped at 3 of 10" in text for text, _role in seen))
+
+    def test_morning_job_failure_notifies(self) -> None:
+        from core.scheduler.jobs import market_morning
+
+        tool = research(self.root, [], {})
+        result = market_morning(tool)({})
+        self.assertFalse(result.ok)
+        self.assertTrue(result.notify)
+        self.assertIn("No listed symbols", result.summary)
+
+    def test_failed_scheduled_run_is_shown_once_on_open(self) -> None:
+        from types import SimpleNamespace
+
+        from core.application.service import IrisApplication
+        from core.scheduler.models import JobDefinition, JobState
+
+        definition = JobDefinition(job="market_research", id="market-morning")
+        state = JobState(last_run="2026-10-18T10:00:00+00:00", last_error="Alpaca keys are not set.")
+        schedules = SimpleNamespace(definitions=lambda: [definition], state=lambda job_id: state)
+        app = SimpleNamespace(schedules=schedules, market_research=SimpleNamespace(store=MarketStore(self.root)))
+        first = IrisApplication._market_failure_notices(app)
+        self.assertEqual(len(first), 1)
+        self.assertIn("Alpaca keys are not set.", first[0].text)
+        self.assertEqual(IrisApplication._market_failure_notices(app), [])
 
 
 def tool_gates(profile: str) -> dict[str, float]:

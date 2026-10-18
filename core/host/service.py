@@ -13,6 +13,7 @@ import structlog
 
 from core.actions.bootstrap import build_action_layer
 from core.actions.bootstrap import document_search_config
+from core.actions.bootstrap import search_client_from
 from core.actions.changes import ChangeLedger
 from core.documents.roots import probe_roots
 from core.scheduler.jobs import audit_retention
@@ -22,7 +23,8 @@ from core.documents.catalog import DocumentCatalog
 from core.host.health import HOST_SERVICE, health_report
 from core.host.knowledge import IrisKnowledgeService
 from core.scheduler.defaults import ensure_default_jobs
-from core.scheduler.jobs import build_jobs
+from core.market.factory import build_market_research
+from core.scheduler.jobs import MARKET_RESEARCH, build_jobs, market_morning
 from core.scheduler.service import ScheduleService
 from core.server.app import DEFAULT_HOST, DEFAULT_PORT, create_app
 from core.storage.backups import DEFAULT_KEEP, BackupService
@@ -133,10 +135,18 @@ class IrisHost:
             inbox=inbox,
             context=WatcherContext(knowledge=self.knowledge, cameras=self.camera_service),
         )
+        self.market_research = build_market_research(
+            Path(self.config["memory_path"]).parent / "Market",
+            self.secrets,
+            search_client_from(self.config),
+            Path(self.config["memory_path"]).parent / "Configuration" / "holdings.json",
+        )
+        jobs = build_jobs(review=self.knowledge_review, backups=self.backups, retention=self._retention_job())
+        jobs[MARKET_RESEARCH] = market_morning(self.market_research)
         self.schedules = ScheduleService(
             configuration / "schedules.json",
             configuration / "schedules_state.json",
-            build_jobs(review=self.knowledge_review, backups=self.backups, retention=self._retention_job()),
+            jobs,
             notifiers=notifiers,
             quiet_hours=quiet,
             audit=self.audit_stream,

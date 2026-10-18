@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -85,6 +86,7 @@ class MarketReport:
     unchecked_count: int = 0
     holdings_source: str = ""
     ranked: tuple[RankedName, ...] = ()
+    problems: tuple[str, ...] = ()
 
 
 class ListingsSource(Protocol):
@@ -92,11 +94,11 @@ class ListingsSource(Protocol):
 
 
 class BarsSource(Protocol):
-    def daily(self, symbols: list[str], trading_days: int) -> dict[str, list[Bar]]: ...
+    def daily(self, symbols: list[str], trading_days: int, on_progress: Callable[[str, str], None] | None = None) -> dict[str, list[Bar]]: ...
 
 
 class QuoteSource(Protocol):
-    def fetch(self, symbols: list[str], *, limit: int) -> dict[str, Quote]: ...
+    def fetch(self, symbols: list[str], *, limit: int, on_progress: Callable[[str, str], None] | None = None) -> dict[str, Quote]: ...
 
 
 class NewsSource(Protocol):
@@ -114,5 +116,4 @@ class Sources:
     quotes: QuoteSource
     news: NewsSource
     holdings: HoldingsSource
-    refresh_limit: int = 40
     history_days: int = 200

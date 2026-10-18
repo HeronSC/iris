@@ -705,11 +705,22 @@ class IrisWindow(QMainWindow):
     def _on_initialize_finished(self) -> None:
         for message in self.app_service.startup_messages:
             self._append_message(message.role, message.text)
+        self._show_startup_actions(getattr(self.app_service, "startup_actions", []))
         self.engine_available = True
         self.set_status("Ready")
         self._set_controls_enabled(True)
         self._attach_voice()
         QTimer.singleShot(0, self._focus_input_box)
+
+    def _show_startup_actions(self, actions) -> None:
+        if not actions:
+            return
+        topic_id = "topic-startup"
+        self._topic_workspaces[topic_id] = {"title": "Market", "sections": [], "explore_actions": [], "explore_seen": set()}
+        self._topic_order.append(topic_id)
+        self._active_topic_id = topic_id
+        self._accumulate_explore_actions(topic_id, DetailContent(actions=list(actions)))
+        self._render_explore_actions_for_topic(topic_id)
 
     def _focus_input_box(self) -> None:
         if self.input_box.isEnabled():

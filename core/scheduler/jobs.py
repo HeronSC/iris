@@ -108,13 +108,24 @@ def workflow_run(workflows: Any) -> Callable[[dict[str, Any]], JobResult]:
 
 def market_morning(research: Any) -> Callable[[dict[str, Any]], JobResult]:
     def run(_params: dict[str, Any]) -> JobResult:
-        report = research.refresh()
+        try:
+            report = research.refresh()
+        except Exception as error:
+            logger.exception("Morning market refresh stopped")
+            return JobResult(ok=False, summary=f"Market refresh stopped: {error.__class__.__name__}: {error}", notify=True)
+        problems = list(getattr(report, "problems", ()) or ())
+        if not report.ok:
+            return JobResult(ok=False, summary=report.message, data={"problems": problems}, notify=True)
         counts = []
         for profile in ("compounder", "dividend", "short_term"):
             saved = research.store.latest(profile) or {}
             advanced = sum(1 for row in saved.get("ranked") or [] if isinstance(row, dict) and row.get("advanced"))
             counts.append(f"{profile} {advanced}")
-        return JobResult(ok=bool(report.ok), summary="Morning market save: " + ", ".join(counts), notify=False)
+        summary = "Morning market save: " + ", ".join(counts)
+        if problems:
+            shown = "; ".join(problems[:3]) + (f"; and {len(problems) - 3} more" if len(problems) > 3 else "")
+            return JobResult(ok=False, summary=f"{summary}. Finished with {len(problems)} problem(s): {shown}", data={"problems": problems}, notify=True)
+        return JobResult(ok=True, summary=summary, notify=False)
 
     return run
 

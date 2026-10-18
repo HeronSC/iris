@@ -100,17 +100,19 @@ class MarketStore:
         payload = self._read(self.dismissals_path, [])
         return list(payload) if isinstance(payload, list) else []
 
-    def active_dismissal(self, profile: str, kind: str, symbol: str) -> bool:
+    def dismissed(self, profile: str, kind: str) -> set[str]:
         settings = self.settings()
+        found: set[str] = set()
         for row in self.dismissals():
-            if row.get("symbol") != symbol or row.get("kind") != kind:
+            if not isinstance(row, dict) or row.get("kind") != kind:
                 continue
             if kind == "trim":
-                return float(row.get("weight") or 0) == float(settings["max_weight"])
-            if row.get("profile") != profile:
-                continue
-            return int(row.get("version") or 0) == int(settings["versions"][profile])
-        return False
+                active = float(row.get("weight") or 0) == float(settings["max_weight"])
+            else:
+                active = row.get("profile") == profile and int(row.get("version") or 0) == int(settings["versions"][profile])
+            if active:
+                found.add(str(row.get("symbol") or ""))
+        return found
 
     def toggle_exclusion(self, symbol: str) -> bool:
         current = set(self.exclusions())
@@ -125,6 +127,27 @@ class MarketStore:
     def exclusions(self) -> list[str]:
         payload = self._read(self.exclusions_path, [])
         return [str(item) for item in payload] if isinstance(payload, list) else []
+
+    def write_status(self, text: str) -> None:
+        path = self.root / "status.txt"
+        try:
+            path.write_text(text + "\n", encoding="utf-8")
+        except OSError:
+            return
+
+    def claim_notice(self, stamp: str) -> bool:
+        path = self.root / "notice_seen.txt"
+        try:
+            seen = path.read_text(encoding="utf-8").strip() if path.exists() else ""
+        except OSError:
+            seen = ""
+        if seen == stamp:
+            return False
+        try:
+            path.write_text(stamp + "\n", encoding="utf-8")
+        except OSError:
+            return True
+        return True
 
     def save_listings(self, symbols: list[str]) -> bool:
         cached = self.listings()
@@ -166,10 +189,12 @@ class MarketStore:
         payload = self._read(self.root / "latest.json", None)
         return payload if isinstance(payload, dict) else None
 
-    def fresh(self, profile: str) -> bool:
+    def fresh(self, profile: str, day: str) -> bool:
         saved = self.latest(profile)
         settings = self.settings()
         if not isinstance(saved, dict):
+            return False
+        if saved.get("day") != day:
             return False
         if int(saved.get("gate_version") or 0) != int(settings["versions"][profile]):
             return False
