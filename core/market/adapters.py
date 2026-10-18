@@ -109,7 +109,9 @@ class AlpacaBars:
                     _say(on_progress, f"Daily bars for {chunk[0]} to {chunk[-1]} ({len(chunk)} symbols) failed: {problem}. Those symbols are skipped.", "error")
                 for symbol, rows in rows_by_symbol.items():
                     found[symbol] = rows[-trading_days:]
-                _say(on_progress, f"Daily bars {min(index + len(chunk), len(symbols))} of {len(symbols)}.")
+                done = min(index + len(chunk), len(symbols))
+                if done % 1000 == 0 or done == len(symbols):
+                    _say(on_progress, f"Daily bars {done} of {len(symbols)}.")
         return found
 
     def _chunk(self, client: httpx.Client, chunk: list[str], start: str) -> tuple[dict[str, list[Bar]], str]:
@@ -178,7 +180,7 @@ class YahooQuotes:
                 if in_a_row >= self.give_up_after:
                     _say(on_progress, f"Yahoo failed {in_a_row} times in a row, so fundamentals stopped at {index} of {len(chosen)}.", "error")
                     break
-                if index % 25 == 0 or index == len(chosen):
+                if index % 100 == 0 or index == len(chosen):
                     _say(on_progress, f"Fundamentals {index} of {len(chosen)}.")
         if failures:
             counts = ", ".join(f"{problem}: {count}" for problem, count in sorted(failures.items()))
