@@ -7,6 +7,7 @@ Walk loop, Relaxed  [F1]
 Walk loop, Normal  [F1]
 Walk turn 90° left / 90° right  [F1] Run90Left / Run90Right
 Walk turn 180° left  [F1] Turn180Walk (right side made in code)
+Turn in place 180° right  [F2] Turn180Idle (left side made in code); used when she turns to walk off or on the "turn" command
 Home pose (save as a pose, not a clip)  [F2]
 Idle A (long, calm)  [F2]
 Idle C (short)  [F2]
@@ -19,7 +20,7 @@ Idle B (long, slightly different weight)  [F2] mirrored Idle A, weight on the ot
 Fidget: glance away and back  [F2] idle life glances
 Turn in place 45° left / right  [F2] 90° turn clip scaled to the angle
 Turn in place 90° left / right  [F2] uses Run90Left / Run90Right
-Turn in place 180°  [F2] 90° turn clip stretched to 180°
+Turn in place 180° on arrival  [F2] 90° turn clip stretched to 180°; Turn180Idle steps 43 cm, which would pull her off the spot
 Listening idle (attentive, still)  [F2] Listening toggle
 Exit turn-and-go (home into walk start)  [F2] turn step, then walk
 Nod yes (single, double)  [F4]

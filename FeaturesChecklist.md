@@ -20,6 +20,8 @@ Related documents:
 
 - `PhaseDesign.md` — the brief for the memory and learning phase.
 - `PhaseStatus.md` — what that phase delivered, what was decided, what is still open.
+- `PhaseA-NaturalConversation.md` — the brief for removing pre-model routing and making Iris talk
+	naturally, the first step toward Claude as her brain (2026-10-19).
 - `core/Phase 11.md`, `ui/UI Phase 1.md`, `ui/UI Phase 2.md` — earlier per-phase briefs.
 
 ---
@@ -66,6 +68,11 @@ Written down so the unchecked boxes below read as "not yet" rather than "nothing
 	principle, not a deferral. Every model runs on this machine (2.4). Personal data, documents, and
 	camera footage never leave it (10). Third-party *services* that are not AI (a search API, Graph,
 	UniFi) are judged case by case in their own sections.
+	**Revised 2026-10-19:** the local model is not smart enough for Henry's needs. New direction:
+	the Claude API (pay per token, separate from his subscription) is the brain, and Iris stays the
+	local body — voice, character, PC control, accounts, confirmations. qwen keeps instant, simple and
+	private turns. Planning only; Claude arrives in Phase C, after Phase A (`PhaseA-NaturalConversation.md`)
+	and Phase B (provider-neutral LLM layer). An outbound-data policy is part of Phase C.
 - [x] Read-only first, then controlled write, then autonomous action — per integration, not globally.
 	Held: Excel, files and cameras each went read-only first; writes preview and confirm.
 - [x] Few moving parts. Iris core is in-process — a Python library and SQLite files, no memory or
@@ -275,6 +282,9 @@ single feature is what made those features look larger than they are.
 **Decided 2026-09-10: Iris runs on local models only.** No cloud AI provider, now or as a
 "later" item — it is a principle of the project (1), not a deferral. The router's job is to choose
 among local models, not to decide when to leave the machine.
+
+**Revised 2026-10-19:** routes will name a provider (Ollama now, Claude in Phase C), so the router
+will also decide when a turn leaves the machine. See the principle in 1 and `PhaseA-NaturalConversation.md`.
 
 - [x] Do not permanently tie Iris to one model (for example, Qwen 8B). `config.json -> model` is
 	now only the default; `models.tasks` routes per task class. -> `core/llm/router.py`
@@ -1477,6 +1487,8 @@ hit-rate-at-top-N is already an eval harness for the knowledge layer; the routin
 eval is a saved-requests fixture plus a scoring script in the same suite.
 
 - [x] Automated test suite. -> `core/run_tests.py`, `core/tests/`
+- [ ] Live routing eval: `/eval live` drives saved requests through the agent against the model,
+	with `tool=<name>` expectations, for Phase A (A1) and as the before/after for Claude.
 - [x] House rules enforced mechanically. -> `tools/house_rules.py`, `.pre-commit-config.yaml`
 - [~] A saved set of real requests, used to check routing, retrieval, and answer quality before
 	and after a change. **Built 2026-09-12:** `/eval add <kind|intent=..|memory=..> :: <request>`

@@ -9,6 +9,8 @@ import sys
 import urllib.parse
 from pathlib import Path
 
+from ui.room.manifest import build_manifest
+
 ROOM = Path(__file__).resolve().parent
 ROOT = ROOM.parents[1]
 DEFAULT_ASSETS = "E:/Reallusion/Iris"
@@ -28,6 +30,18 @@ class RoomHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, assets: Path, **kwargs):
         self.assets = assets
         super().__init__(*args, directory=str(ROOM), **kwargs)
+
+    def do_GET(self) -> None:
+        clean = self.path.split("?", 1)[0].split("#", 1)[0]
+        if clean == "/assets/manifest.json":
+            body = json.dumps(build_manifest(self.assets)).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
 
     def translate_path(self, path: str) -> str:
         clean = path.split("?", 1)[0].split("#", 1)[0]
