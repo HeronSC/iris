@@ -127,12 +127,9 @@ export function createPanel(avatar, doc) {
       ['Home', avatar.returnHome],
       ['Work', () => avatar.setVoice(!avatar.voice.on)],
       ['Idle', () => avatar.request('idle')],
-      ...(activities.idle_b ? [['Idle B', () => avatar.request('idle_b')]] : []),
       ['Halt', avatar.goHome],
       ['Close-up', avatar.closeUp],
-      ['Sit', () => avatar.request('sit')],
-      ['Lie down', () => avatar.request('lie')],
-      ['Dance', () => avatar.request('dance')],
+      ...Object.keys(activities).filter((key) => !avatar.isWalkLoop(activities[key].loop)).map((key) => [titleCase(key), () => avatar.request(key)]),
     ];
     for (const [label, action] of motionButtons) addButton($('presets'), label, action, `motion_${label.toLowerCase().replace(/\W+/g, '_')}`);
     toggleClass('motion_work', avatar.voice.on);

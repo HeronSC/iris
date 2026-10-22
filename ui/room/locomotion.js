@@ -293,7 +293,7 @@ export function createLocomotion(ctx) {
 
   const autoIdleState = { settled: 0 };
   function autoIdle(dt) {
-    const ready = config.autoIdle !== false && activities.idle && motion.name === 'home' && !flow.target && !flow.after.length && flow.faceYaw === null && !flow.glide && !walk.target && !walk.arrive && !motion.queue.length;
+    const ready = config.autoIdle !== false && (activities.idle || ctx.lifeConfig.pool.length) && motion.name === 'home' && !flow.target && !flow.after.length && flow.faceYaw === null && !flow.glide && !walk.target && !walk.arrive && !motion.queue.length;
     autoIdleState.settled = ready ? autoIdleState.settled + dt : 0;
     if (autoIdleState.settled > (config.autoIdleDelay ?? 1.0)) {
       autoIdleState.settled = 0;

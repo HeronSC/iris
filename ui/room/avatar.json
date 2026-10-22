@@ -6,9 +6,7 @@
   "room": {
     "file": "assets/Building/iris_room.glb",
     "spotPrefix": "Spot_",
-    "spotSuffixes": [
-      "_Entry"
-    ],
+    "spotSuffixes": ["_Entry"],
     "show": true,
     "hide": ["Camera_View_Floor", "Cylinder003", "ChamferBox001"],
     "cameraMode": "room",
@@ -44,42 +42,10 @@
   "start": "idle",
   "autoIdle": true,
   "autoIdleDelay": 1.0,
-  "feet": [
-    "CC_Base_L_Foot",
-    "CC_Base_R_Foot"
-  ],
-  "toes": [
-    "CC_Base_L_ToeBase",
-    "CC_Base_R_ToeBase"
-  ],
+  "feet": ["CC_Base_L_Foot", "CC_Base_R_Foot"],
+  "toes": ["CC_Base_L_ToeBase", "CC_Base_R_ToeBase"],
   "toeHeight": 0.027,
   "clips": {
-    "home": {
-      "file": "assets/Motion/Idle/Idle 3 To Home.glb",
-      "clip": "Armature|5202296197376_TempMotion.001",
-      "hold": "end",
-      "loop": true
-    },
-    "home_to_idle": {
-      "file": "assets/Motion/Basics/Home to Idle 3.glb",
-      "clip": "Armature|5202296197376_TempMotion",
-      "loop": false,
-      "next": "idle",
-      "anchorFeet": true
-    },
-    "idle": {
-      "file": "assets/Motion/Idle/Idle3.glb",
-      "clip": "Idle 3",
-      "loop": true,
-      "anchorFeet": true
-    },
-    "idle_to_home": {
-      "file": "assets/Motion/Idle/Idle 3 To Home.glb",
-      "clip": "Armature|5202296197376_TempMotion.001",
-      "loop": false,
-      "next": "home",
-      "anchorFeet": true
-    },
     "home_to_walk": {
       "file": "assets/Motion/Basics/Home to Walk (Normal).glb",
       "clip": "5906302960384_TempMotion.003",
@@ -115,9 +81,7 @@
       "loop": true,
       "travel": true,
       "stop": "walk_to_home_relaxed",
-      "exits": [
-        2.58
-      ],
+      "exits": [2.58],
       "loopFix": true
     },
     "walk_to_home_relaxed": {
@@ -208,49 +172,30 @@
     },
     "turn180_idle_right": {
       "file": "assets/Motion/Basics/Turn180Idle.glb",
-      "clip": "3850422508288_TempMotion",
+      "clip": "longest",
       "loop": false,
       "groundFeet": true,
       "rootMotion": true
     },
     "turn180_idle_left": {
       "file": "assets/Motion/Basics/Turn180Idle.glb",
-      "clip": "3850422508288_TempMotion",
+      "clip": "longest",
       "loop": false,
       "groundFeet": true,
       "rootMotion": true,
       "mirror": true
     },
-    "home_to_idle_b": {
-      "file": "assets/Motion/Basics/Home to Idle 3.glb",
-      "clip": "Armature|5202296197376_TempMotion",
-      "loop": false,
-      "next": "idle_b",
-      "mirror": true,
-      "anchorFeet": true
+    "idle3": {
+      "clip": "Idle 3"
     },
-    "idle_b": {
-      "file": "assets/Motion/Idle/Idle3.glb",
-      "clip": "Idle 3",
-      "loop": true,
-      "anchorFeet": true,
-      "mirror": true
+    "home_to_idle3": {
+      "clip": "Armature|5202296197376_TempMotion"
     },
-    "idle_b_to_home": {
-      "file": "assets/Motion/Idle/Idle 3 To Home.glb",
-      "clip": "Armature|5202296197376_TempMotion.001",
-      "loop": false,
-      "next": "home",
-      "mirror": true,
-      "anchorFeet": true
+    "idle3_to_home": {
+      "clip": "Armature|5202296197376_TempMotion.001"
     }
   },
   "activities": {
-    "idle": {
-      "enter": "home_to_idle",
-      "loop": "idle",
-      "exit": "idle_to_home"
-    },
     "walk": {
       "enter": "home_to_walk",
       "loop": "walk",
@@ -276,11 +221,6 @@
     "dance": {
       "once": "dance",
       "approach": "home"
-    },
-    "idle_b": {
-      "enter": "home_to_idle_b",
-      "loop": "idle_b",
-      "exit": "idle_b_to_home"
     }
   },
   "walking": {
@@ -310,41 +250,14 @@
     "minHeight": 0.05,
     "maxHeight": 1.7,
     "margin": 2,
-    "passable": [
-      "Door_Left",
-      "Door_Right"
-    ]
+    "passable": ["Door_Left", "Door_Right"]
   },
-  "extraFiles": [
-    "assets/Motion/Basics/Home to Idle 3.glb",
-    "assets/Motion/Idle/Idle 3 To Home.glb"
-  ],
   "materials": {
-    "opaque": [
-      "Std_Eye_R",
-      "Std_Eye_L",
-      "Std_Tongue",
-      "Canvas_shoes",
-      "Std_Skin"
-    ],
-    "mask": [
-      "Rocker_Jeans",
-      "Camisole",
-      "Underwear_Bottoms",
-      "Cigarette",
-      "obj_default"
-    ],
-    "hair": [
-      "Hair_Transparency",
-      "Std_Eyelash",
-      "Female_Angled"
-    ],
-    "blend": [
-      "Scalp_Transparency"
-    ],
-    "glass": [
-      "Std_Cornea"
-    ]
+    "opaque": ["Std_Eye_R", "Std_Eye_L", "Std_Tongue", "Canvas_shoes", "Std_Skin"],
+    "mask": ["Rocker_Jeans", "Camisole", "Underwear_Bottoms", "Cigarette", "obj_default"],
+    "hair": ["Hair_Transparency", "Std_Eyelash", "Female_Angled"],
+    "blend": ["Scalp_Transparency"],
+    "glass": ["Std_Cornea"]
   },
   "seamMatch": [
     {
@@ -356,22 +269,17 @@
       "to": "Std_Skin_Body"
     }
   ],
-  "hiddenParts": [
-    "CC_Base_EyeOcclusion",
-    "CC_Base_TearLine",
-    "Cigarette",
-    "lighter",
-    "hand_mirror",
-    "SM_Phone_Smart_00"
-  ],
-  "clothing": [
-    "Denim_shorts",
-    "Spaghetti_strap_Top",
-    "Canvas_shoes",
-    "Underwear_Bottoms"
-  ],
+  "hiddenParts": ["CC_Base_EyeOcclusion", "CC_Base_TearLine", "Cigarette", "lighter", "hand_mirror", "SM_Phone_Smart_00"],
+  "clothing": ["Denim_shorts", "Spaghetti_strap_Top", "Canvas_shoes", "Underwear_Bottoms"],
   "outfits": {},
   "outfitFolder": "assets/Clothes/Outfits",
+  "motionFolder": "assets/Motion",
+  "idles": {
+    "mirror": true,
+    "flags": {
+      "anchorFeet": true
+    }
+  },
   "outfit": "short_and_tank_top",
   "bodyMorphs": {
     "ChestDetail": 0
@@ -521,14 +429,8 @@
   },
   "morphCleanup": {
     "ChestDetail": {
-      "bones": [
-        "CC_Base_L_Breast",
-        "CC_Base_R_Breast"
-      ],
-      "meshes": [
-        "Std_Skin_Body",
-        "Camisole"
-      ],
+      "bones": ["CC_Base_L_Breast", "CC_Base_R_Breast"],
+      "meshes": ["Std_Skin_Body", "Camisole"],
       "radius": 0.3,
       "scale": {
         "Std_Skin_Body": 0.75
@@ -543,10 +445,7 @@
     "fill": 0.2
   },
   "face": {
-    "blink": [
-      "Eye_Blink_L",
-      "Eye_Blink_R"
-    ],
+    "blink": ["Eye_Blink_L", "Eye_Blink_R"],
     "mouthMorphs": {
       "V_Open": 0.5,
       "Jaw_Open": 0.35
@@ -602,692 +501,57 @@
   },
   "gestures": {
     "nod": {
-      "head": [
-        [
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0.2,
-          13,
-          0,
-          0
-        ],
-        [
-          0.42,
-          -2,
-          0,
-          0
-        ],
-        [
-          0.6,
-          0,
-          0,
-          0
-        ]
-      ]
+      "head": [[0, 0, 0, 0], [0.2, 13, 0, 0], [0.42, -2, 0, 0], [0.6, 0, 0, 0]]
     },
     "nod_twice": {
-      "head": [
-        [
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0.18,
-          12,
-          0,
-          0
-        ],
-        [
-          0.36,
-          0,
-          0,
-          0
-        ],
-        [
-          0.54,
-          10,
-          0,
-          0
-        ],
-        [
-          0.74,
-          -2,
-          0,
-          0
-        ],
-        [
-          0.9,
-          0,
-          0,
-          0
-        ]
-      ]
+      "head": [[0, 0, 0, 0], [0.18, 12, 0, 0], [0.36, 0, 0, 0], [0.54, 10, 0, 0], [0.74, -2, 0, 0], [0.9, 0, 0, 0]]
     },
     "shake": {
-      "head": [
-        [
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0.18,
-          0,
-          16,
-          0
-        ],
-        [
-          0.42,
-          0,
-          -16,
-          0
-        ],
-        [
-          0.66,
-          0,
-          12,
-          0
-        ],
-        [
-          0.88,
-          0,
-          -6,
-          0
-        ],
-        [
-          1.05,
-          0,
-          0,
-          0
-        ]
-      ]
+      "head": [[0, 0, 0, 0], [0.18, 0, 16, 0], [0.42, 0, -16, 0], [0.66, 0, 12, 0], [0.88, 0, -6, 0], [1.05, 0, 0, 0]]
     },
     "tilt": {
-      "head": [
-        [
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0.35,
-          -2,
-          4,
-          13
-        ],
-        [
-          1.8,
-          -2,
-          4,
-          13
-        ],
-        [
-          2.3,
-          0,
-          0,
-          0
-        ]
-      ]
+      "head": [[0, 0, 0, 0], [0.35, -2, 4, 13], [1.8, -2, 4, 13], [2.3, 0, 0, 0]]
     },
     "wink": {
       "morphs": {
-        "Eye_Blink_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.1,
-            1
-          ],
-          [
-            0.32,
-            1
-          ],
-          [
-            0.48,
-            0
-          ]
-        ],
-        "Cheek_Raise_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.1,
-            0.5
-          ],
-          [
-            0.32,
-            0.5
-          ],
-          [
-            0.55,
-            0
-          ]
-        ],
-        "Mouth_Smile_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.12,
-            0.35
-          ],
-          [
-            0.4,
-            0.35
-          ],
-          [
-            0.7,
-            0
-          ]
-        ]
+        "Eye_Blink_L": [[0, 0], [0.1, 1], [0.32, 1], [0.48, 0]],
+        "Cheek_Raise_L": [[0, 0], [0.1, 0.5], [0.32, 0.5], [0.55, 0]],
+        "Mouth_Smile_L": [[0, 0], [0.12, 0.35], [0.4, 0.35], [0.7, 0]]
       },
-      "head": [
-        [
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0.15,
-          0,
-          0,
-          5
-        ],
-        [
-          0.4,
-          0,
-          0,
-          5
-        ],
-        [
-          0.65,
-          0,
-          0,
-          0
-        ]
-      ]
+      "head": [[0, 0, 0, 0], [0.15, 0, 0, 5], [0.4, 0, 0, 5], [0.65, 0, 0, 0]]
     },
     "laugh": {
-      "head": [
-        [
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0.25,
-          -8,
-          0,
-          0
-        ],
-        [
-          1.4,
-          -6,
-          0,
-          0
-        ],
-        [
-          1.9,
-          0,
-          0,
-          0
-        ]
-      ],
-      "shoulders": [
-        [
-          0,
-          0
-        ],
-        [
-          0.2,
-          4
-        ],
-        [
-          0.33,
-          1
-        ],
-        [
-          0.46,
-          4
-        ],
-        [
-          0.59,
-          1
-        ],
-        [
-          0.72,
-          4
-        ],
-        [
-          0.85,
-          1
-        ],
-        [
-          0.98,
-          3.5
-        ],
-        [
-          1.12,
-          1
-        ],
-        [
-          1.3,
-          2.5
-        ],
-        [
-          1.7,
-          0
-        ]
-      ],
+      "head": [[0, 0, 0, 0], [0.25, -8, 0, 0], [1.4, -6, 0, 0], [1.9, 0, 0, 0]],
+      "shoulders": [[0, 0], [0.2, 4], [0.33, 1], [0.46, 4], [0.59, 1], [0.72, 4], [0.85, 1], [0.98, 3.5], [1.12, 1], [1.3, 2.5], [1.7, 0]],
       "morphs": {
-        "Mouth_Smile_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.2,
-            0.75
-          ],
-          [
-            1.5,
-            0.7
-          ],
-          [
-            2.1,
-            0
-          ]
-        ],
-        "Mouth_Smile_R": [
-          [
-            0,
-            0
-          ],
-          [
-            0.2,
-            0.75
-          ],
-          [
-            1.5,
-            0.7
-          ],
-          [
-            2.1,
-            0
-          ]
-        ],
-        "Cheek_Raise_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.2,
-            0.7
-          ],
-          [
-            1.5,
-            0.6
-          ],
-          [
-            2.1,
-            0
-          ]
-        ],
-        "Cheek_Raise_R": [
-          [
-            0,
-            0
-          ],
-          [
-            0.2,
-            0.7
-          ],
-          [
-            1.5,
-            0.6
-          ],
-          [
-            2.1,
-            0
-          ]
-        ],
-        "Eye_Squint_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.2,
-            0.55
-          ],
-          [
-            1.5,
-            0.5
-          ],
-          [
-            2.1,
-            0
-          ]
-        ],
-        "Eye_Squint_R": [
-          [
-            0,
-            0
-          ],
-          [
-            0.2,
-            0.55
-          ],
-          [
-            1.5,
-            0.5
-          ],
-          [
-            2.1,
-            0
-          ]
-        ],
-        "Jaw_Open": [
-          [
-            0,
-            0
-          ],
-          [
-            0.2,
-            0.35
-          ],
-          [
-            0.33,
-            0.2
-          ],
-          [
-            0.46,
-            0.35
-          ],
-          [
-            0.59,
-            0.2
-          ],
-          [
-            0.72,
-            0.35
-          ],
-          [
-            0.85,
-            0.2
-          ],
-          [
-            0.98,
-            0.3
-          ],
-          [
-            1.3,
-            0.15
-          ],
-          [
-            1.8,
-            0
-          ]
-        ],
-        "Mouth_Up_Upper_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.2,
-            0.3
-          ],
-          [
-            1.4,
-            0.25
-          ],
-          [
-            1.9,
-            0
-          ]
-        ],
-        "Mouth_Up_Upper_R": [
-          [
-            0,
-            0
-          ],
-          [
-            0.2,
-            0.3
-          ],
-          [
-            1.4,
-            0.25
-          ],
-          [
-            1.9,
-            0
-          ]
-        ]
+        "Mouth_Smile_L": [[0, 0], [0.2, 0.75], [1.5, 0.7], [2.1, 0]],
+        "Mouth_Smile_R": [[0, 0], [0.2, 0.75], [1.5, 0.7], [2.1, 0]],
+        "Cheek_Raise_L": [[0, 0], [0.2, 0.7], [1.5, 0.6], [2.1, 0]],
+        "Cheek_Raise_R": [[0, 0], [0.2, 0.7], [1.5, 0.6], [2.1, 0]],
+        "Eye_Squint_L": [[0, 0], [0.2, 0.55], [1.5, 0.5], [2.1, 0]],
+        "Eye_Squint_R": [[0, 0], [0.2, 0.55], [1.5, 0.5], [2.1, 0]],
+        "Jaw_Open": [[0, 0], [0.2, 0.35], [0.33, 0.2], [0.46, 0.35], [0.59, 0.2], [0.72, 0.35], [0.85, 0.2], [0.98, 0.3], [1.3, 0.15], [1.8, 0]],
+        "Mouth_Up_Upper_L": [[0, 0], [0.2, 0.3], [1.4, 0.25], [1.9, 0]],
+        "Mouth_Up_Upper_R": [[0, 0], [0.2, 0.3], [1.4, 0.25], [1.9, 0]]
       }
     },
     "surprise": {
-      "head": [
-        [
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0.15,
-          -6,
-          0,
-          0
-        ],
-        [
-          0.9,
-          -4,
-          0,
-          0
-        ],
-        [
-          1.4,
-          0,
-          0,
-          0
-        ]
-      ],
+      "head": [[0, 0, 0, 0], [0.15, -6, 0, 0], [0.9, -4, 0, 0], [1.4, 0, 0, 0]],
       "morphs": {
-        "Brow_Raise_Inner_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.1,
-            0.9
-          ],
-          [
-            0.9,
-            0.8
-          ],
-          [
-            1.4,
-            0
-          ]
-        ],
-        "Brow_Raise_Inner_R": [
-          [
-            0,
-            0
-          ],
-          [
-            0.1,
-            0.9
-          ],
-          [
-            0.9,
-            0.8
-          ],
-          [
-            1.4,
-            0
-          ]
-        ],
-        "Brow_Raise_Outer_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.1,
-            0.8
-          ],
-          [
-            0.9,
-            0.7
-          ],
-          [
-            1.4,
-            0
-          ]
-        ],
-        "Brow_Raise_Outer_R": [
-          [
-            0,
-            0
-          ],
-          [
-            0.1,
-            0.8
-          ],
-          [
-            0.9,
-            0.7
-          ],
-          [
-            1.4,
-            0
-          ]
-        ],
-        "Eye_Wide_L": [
-          [
-            0,
-            0
-          ],
-          [
-            0.1,
-            0.8
-          ],
-          [
-            0.9,
-            0.6
-          ],
-          [
-            1.4,
-            0
-          ]
-        ],
-        "Eye_Wide_R": [
-          [
-            0,
-            0
-          ],
-          [
-            0.1,
-            0.8
-          ],
-          [
-            0.9,
-            0.6
-          ],
-          [
-            1.4,
-            0
-          ]
-        ],
-        "Jaw_Open": [
-          [
-            0,
-            0
-          ],
-          [
-            0.12,
-            0.3
-          ],
-          [
-            0.9,
-            0.2
-          ],
-          [
-            1.4,
-            0
-          ]
-        ]
+        "Brow_Raise_Inner_L": [[0, 0], [0.1, 0.9], [0.9, 0.8], [1.4, 0]],
+        "Brow_Raise_Inner_R": [[0, 0], [0.1, 0.9], [0.9, 0.8], [1.4, 0]],
+        "Brow_Raise_Outer_L": [[0, 0], [0.1, 0.8], [0.9, 0.7], [1.4, 0]],
+        "Brow_Raise_Outer_R": [[0, 0], [0.1, 0.8], [0.9, 0.7], [1.4, 0]],
+        "Eye_Wide_L": [[0, 0], [0.1, 0.8], [0.9, 0.6], [1.4, 0]],
+        "Eye_Wide_R": [[0, 0], [0.1, 0.8], [0.9, 0.6], [1.4, 0]],
+        "Jaw_Open": [[0, 0], [0.12, 0.3], [0.9, 0.2], [1.4, 0]]
       }
     },
     "small_tilt": {
-      "head": [
-        [
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0.6,
-          0,
-          2,
-          6
-        ],
-        [
-          1.8,
-          0,
-          2,
-          6
-        ],
-        [
-          2.5,
-          0,
-          0,
-          0
-        ]
-      ]
+      "head": [[0, 0, 0, 0], [0.6, 0, 2, 6], [1.8, 0, 2, 6], [2.5, 0, 0, 0]]
     },
     "small_nod": {
-      "head": [
-        [
-          0,
-          0,
-          0,
-          0
-        ],
-        [
-          0.25,
-          5,
-          0,
-          0
-        ],
-        [
-          0.6,
-          0,
-          0,
-          0
-        ]
-      ]
+      "head": [[0, 0, 0, 0], [0.25, 5, 0, 0], [0.6, 0, 0, 0]]
     }
   },
   "breathing": {
@@ -1300,46 +564,21 @@
   "headSmoothing": 0.65,
   "idleLife": {
     "on": true,
-    "pool": [
-      "idle",
-      "idle_b"
-    ],
-    "switchSeconds": [
-      25,
-      50
-    ],
-    "glanceSeconds": [
-      15,
-      45
-    ],
-    "holdSeconds": [
-      3,
-      9
-    ],
+    "switchSeconds": [25, 50],
+    "glanceSeconds": [15, 45],
+    "holdSeconds": [3, 9],
     "cameraChance": 0.45,
-    "fidgetSeconds": [
-      24,
-      48
-    ],
-    "fidgets": [
-      "small_tilt",
-      "small_nod"
-    ],
+    "fidgetSeconds": [24, 48],
+    "fidgets": ["small_tilt", "small_nod"],
     "headShare": 0.55,
     "headSpeed": 0.9,
     "eyeSpeed": 5,
-    "rest": [
-      "sit",
-      "lie"
-    ]
+    "rest": ["sit", "lie"]
   },
   "idleGraph": {
     "on": true,
     "fps": 15,
-    "dwell": [
-      2.5,
-      7
-    ],
+    "dwell": [2.5, 7],
     "fade": 0.6,
     "speedDrift": 0.07,
     "novelSeconds": 45,

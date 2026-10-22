@@ -25,16 +25,8 @@ export async function loadAssets(ctx) {
     });
   }
 
-  const heelSuffix = config.heelsSuffix || '-HighHeels';
-  const heelsFiles = new Map();
-  await Promise.all([...new Set(Object.values(config.clips).map((c) => c.file))].map(async (file) => {
-    const candidate = file.replace(/\.glb$/i, `${heelSuffix}.glb`);
-    try {
-      const res = await fetch(encodeURI(candidate), { method: 'HEAD', cache: 'no-store' });
-      if (res.ok) heelsFiles.set(file, candidate);
-    } catch {}
-  }));
-  const files = [...new Set([config.character, ...(config.room ? [config.room.file] : []), ...Object.values(config.clips).map((c) => c.file), ...heelsFiles.values(), ...(config.extraFiles || [])])];
+  const { heelSuffix, heelsFiles } = ctx.library;
+  const files = [...new Set([config.character, ...(config.room ? [config.room.file] : []), ...Object.values(config.clips).map((c) => c.file), ...heelsFiles.values()])];
   const gltfs = new Map();
   try {
     const loaded = await Promise.all(files.map(loadFile));

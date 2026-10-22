@@ -2,6 +2,7 @@
 
 import { createEvents } from './events.js';
 import { createScene } from './scene.js';
+import { loadLibrary } from './library.js';
 import { loadAssets } from './loading.js';
 import { createCharacter } from './character.js';
 import { loadRoom, placeSpots } from './room.js';
@@ -22,6 +23,7 @@ async function init(ctx, container, configUrl) {
   ctx.config = await (await fetch(configUrl)).json();
   const { config } = ctx;
   createScene(ctx, container);
+  await loadLibrary(ctx);
   await loadAssets(ctx);
   createCharacter(ctx);
   loadRoom(ctx);

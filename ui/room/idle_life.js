@@ -4,7 +4,7 @@ import * as THREE from 'three';
 
 export function createIdleLife(ctx) {
   const { config, motion, activityOf, look, flow, walk, activities, request, camera, breathing, ensureBones, rotateWorld, gestureDefs, activeGestures, playGesture, bones, emit } = ctx;
-  const lifeConfig = { on: true, pool: ['idle'], switchSeconds: [25, 50], glanceSeconds: [2.5, 6], holdSeconds: [1, 3], cameraChance: 0.45, fidgetSeconds: [8, 16], fidgets: [], headShare: 0.55, headSpeed: 2.6, eyeSpeed: 14, ...(config.idleLife || {}) };
+  const lifeConfig = { on: true, pool: [], switchSeconds: [25, 50], glanceSeconds: [2.5, 6], holdSeconds: [1, 3], cameraChance: 0.45, fidgetSeconds: [8, 16], fidgets: [], headShare: 0.55, headSpeed: 2.6, eyeSpeed: 14, ...(config.idleLife || {}) };
   const life = { on: lifeConfig.on, listening: false, settled: 0, switchIn: 0, glanceIn: 1.5, holdLeft: 0, fidgetIn: 0, target: { yaw: 0, pitch: 0, camera: false }, eye: { yaw: 0, pitch: 0 }, head: { yaw: 0, pitch: 0, roll: 0 } };
   const between = ([a, b]) => a + Math.random() * (b - a);
   life.switchIn = between(lifeConfig.switchSeconds);

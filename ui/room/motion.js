@@ -109,7 +109,16 @@ export function createMotion(ctx) {
     play(act === 'home' ? 'home' : activities[act].loop);
   }
 
+  function pickIdle() {
+    const pool = ctx.lifeConfig.pool.filter((n) => activities[n]);
+    return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+  }
+
   function request(target) {
+    if (target === 'idle' && !activities.idle) {
+      target = pickIdle();
+      if (!target) return log('No idle motions found under the motion folder.', true);
+    }
     if (target !== 'home' && !activities[target]) return log(`Unknown activity "${target}"`, true);
     if (target !== 'home' && !ctx.lifeConfig.pool.includes(target) && !ctx.isWalkLoop(activities[target].loop) && ctx.pinned(target)) return;
     motion.queue = [];
@@ -139,7 +148,11 @@ export function createMotion(ctx) {
     const a = activities[step.act];
     if (step.type === 'exit') {
       if (ctx.isWalkLoop(a.loop)) walk.halt = true;
-      else play(a.exit);
+      else if (a.exit) play(a.exit);
+      else {
+        playSettled(parentOf(step.act));
+        advance();
+      }
       return;
     }
     if (ctx.isWalkLoop(a.loop) && walk.target && motion.name === 'home') {
@@ -168,7 +181,9 @@ export function createMotion(ctx) {
       play(a.once);
       return;
     }
-    play(a.enter);
+    if (a.enter) return play(a.enter);
+    play(a.loop);
+    advance();
   }
 
   const _forward = new THREE.Vector3();
@@ -289,5 +304,5 @@ export function createMotion(ctx) {
     ctx.emit('loopRaw', on);
   }
 
-  Object.assign(ctx, { mixer, motion, travelLast, walk, flow, activities, actionStarted, clock, footLockable, startClip, play, runSequence, stopAll, activityOf, parentOf, chainOf, nextStep, playSettled, request, advance, facingYaw, atApproach, goApproach, goHome, closeUp, distanceTo, returnHome, walkToSpot, settleAt, setSpeed, setFade, setLoopRaw });
+  Object.assign(ctx, { mixer, motion, travelLast, walk, flow, activities, actionStarted, clock, footLockable, startClip, play, runSequence, stopAll, activityOf, parentOf, chainOf, nextStep, playSettled, pickIdle, request, advance, facingYaw, atApproach, goApproach, goHome, closeUp, distanceTo, returnHome, walkToSpot, settleAt, setSpeed, setFade, setLoopRaw });
 }

@@ -42,7 +42,7 @@ export function createCommands(ctx) {
       if (!['left', 'right', 'around'].includes(dir)) return log('Usage: turn left|right|around [degrees]', true);
       const standing = ctx.activityOf(motion.name);
       const idling = standing.phase === 'loop' && ctx.lifeConfig.pool.includes(standing.act);
-      const settle = idling ? activities[standing.act].loop : config.autoIdle !== false && activities.idle ? activities.idle.loop : 'home';
+      const settle = idling ? activities[standing.act].loop : config.autoIdle !== false ? activities[ctx.pickIdle()]?.loop ?? 'home' : 'home';
       if (motion.name === 'home' || idling) return ctx.playTurn(angle, settle, true) || log('Turn clips are not set up', true);
       if (ctx.isWalkLoop(motion.name)) return ctx.playTurn(angle, motion.name) || log('Turn clips are not set up', true);
       return log('Turns work from home (Halt first) or while walking.', true);
@@ -90,7 +90,7 @@ export function createCommands(ctx) {
     if (command === 'breathing') return ctx.setBreathing(onOff(rest[0]));
     if (command === 'life') return ctx.setLife(onOff(rest[0]));
     if (command === 'listen' || command === 'listening') return ctx.setListening(onOff(rest[0] ?? 'on'));
-    if (command === 'idle' && rest[0] === 'b' && activities.idle_b) return ctx.request('idle_b');
+    if (command === 'idle') return ctx.request('idle');
     if (command === 'neutral') {
       for (const name of expressions.keys()) ctx.setExpression(name, 0);
       return;

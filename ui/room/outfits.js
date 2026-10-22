@@ -36,18 +36,8 @@ export async function createOutfits(ctx) {
   for (const [key, o] of Object.entries(config.outfits || {})) {
     outfitCatalog.set(key, { key, label: o.label || titleCase(key), file: o.file || null, parts: o.parts || null, meshes: null, loading: null });
   }
-  if (config.outfitFolder) {
-    try {
-      const listing = await (await fetch(`${config.outfitFolder}/`, { cache: 'no-store' })).text();
-      const names = [...listing.matchAll(/href="([^"]+\.glb)"/gi)].map((m) => decodeURIComponent(m[1]));
-      for (const fileName of names.sort((a, b) => a.localeCompare(b))) {
-        const label = fileName.replace(/\.glb$/i, '');
-        const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-        if (!outfitCatalog.has(key)) outfitCatalog.set(key, { key, label, file: `${config.outfitFolder}/${fileName}`, parts: null, meshes: null, loading: null });
-      }
-    } catch (err) {
-      log(`Could not list outfits in ${config.outfitFolder}: ${err.message || err}`, true);
-    }
+  for (const { key, label, file } of ctx.library.outfits) {
+    if (!outfitCatalog.has(key)) outfitCatalog.set(key, { key, label, file, parts: null, meshes: null, loading: null });
   }
 
   const slots = {

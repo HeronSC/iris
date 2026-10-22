@@ -4,7 +4,7 @@ import * as THREE from 'three';
 
 export function createIdleGraph(ctx) {
   const { config, presets, mixer, model, findBone, footBones, feetMidNow, life, flow, walk, motion, between, log } = ctx;
-  const graphConfig = { on: true, clips: (config.idleLife || {}).pool || ['idle'], fps: 15, dwell: [4, 14], fade: 0.6, speedDrift: 0.07, novelSeconds: 45, minGap: 3, swaySpineDegrees: 0.5, crossChance: 0.4, eventChance: 0.35, ...(config.idleGraph || {}) };
+  const graphConfig = { on: true, clips: (config.idleLife || {}).pool || [], fps: 15, dwell: [4, 14], fade: 0.6, speedDrift: 0.07, novelSeconds: 45, minGap: 3, swaySpineDegrees: 0.5, crossChance: 0.4, eventChance: 0.35, ...(config.idleGraph || {}) };
   const graphBones = [
     ['CC_Base_Hip', 1.5], ['CC_Base_Waist', 1], ['CC_Base_Spine01', 1], ['CC_Base_Spine02', 1],
     ['CC_Base_L_Thigh', 1.5], ['CC_Base_R_Thigh', 1.5], ['CC_Base_L_Calf', 1.2], ['CC_Base_R_Calf', 1.2], ['CC_Base_L_Foot', 0.8], ['CC_Base_R_Foot', 0.8],

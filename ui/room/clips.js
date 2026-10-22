@@ -368,12 +368,15 @@ export function createClips(ctx) {
     return { clip: c, motion: { interp: track.createInterpolant(), start: times[0], end: times[n - 1], yaw: fy[n - 1] - fy[0] } };
   }
 
-  function longestClipKey(file) {
+  function longestClipKey(file, name) {
     let best = null;
+    let candidates = 0;
     for (const [k, clip] of rawClips) {
       if (!k.startsWith(`${file}::`)) continue;
+      if (clip.duration >= 0.2) candidates += 1;
       if (!best || clip.duration > rawClips.get(best).duration) best = k;
     }
+    if (candidates > 1) log(`"${name}": ${baseName(file)} holds ${candidates} motions; using the longest, ${best.split('::')[1]}. Name the clip in avatar.json or export one motion per file.`, true);
     return best;
   }
 
@@ -472,7 +475,7 @@ export function createClips(ctx) {
     }
   }
   for (const [name, entry] of clipEntries) {
-    const key = entry.clip === 'longest' ? longestClipKey(entry.file) : `${entry.file}::${entry.clip}`;
+    const key = entry.clip === 'longest' ? longestClipKey(entry.file, name) : `${entry.file}::${entry.clip}`;
     if (entry.clip === 'longest' && key && rawClips.get(key).duration < 1) log(`"${name}": the longest clip in ${entry.file} is only ${rawClips.get(key).duration.toFixed(2)} s. The export may be missing its animation.`, true);
     let raw = rawClips.get(key);
     const refSource = entry.alignTo ? alignedSource(entry.alignTo) : null;
