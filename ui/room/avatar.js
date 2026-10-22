@@ -48,7 +48,7 @@ async function init(ctx, container, configUrl) {
   ctx.emit('ready');
   ctx.log(`Loaded ${ctx.files.length} files, ${ctx.rawClips.size} clips, ${ctx.morphNames.length} morphs. Type "help".`);
   if (config.start) {
-    if (ctx.activities[config.start] || config.start === 'home') ctx.request(config.start);
+    if (ctx.activities[config.start] || ['home', 'idle'].includes(config.start)) ctx.request(config.start);
     else ctx.runSequence([config.start]);
   }
   ctx.buildIdleGraph();
