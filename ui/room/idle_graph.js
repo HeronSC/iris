@@ -134,7 +134,8 @@ export function createIdleGraph(ctx) {
     next.play();
     action.crossFadeTo(next, fade, false);
     const now = feetMidNow();
-    ctx.footLock = now ? { action: next, dx: now.x - target.feet.x, dz: now.z - target.feet.z, applied: 0, fade, elapsed: 0, started: false } : null;
+    if (now) ctx.lockFeet(next, now.x - target.feet.x, now.z - target.feet.z, fade);
+    else ctx.lockFeet(null);
     motion.current = next;
     motion.name = target.clip;
     motion.next = null;

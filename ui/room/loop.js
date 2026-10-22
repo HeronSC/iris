@@ -3,12 +3,11 @@
 import * as THREE from 'three';
 
 export function createLoop(ctx) {
-  const { clock, baseTransforms, rig, mixer, view, camera, controls, keyLight, keyOffset, faceAxes, walk, log, faceState, bodyShape, explorer, face, expressions, boneDrivers, resolveMorph, rotateWorld, renderer, scene, motion, emit } = ctx;
+  const { clock, baseTransforms, rig, mixer, view, camera, controls, keyLight, keyOffset, faceAxes, walk, faceState, bodyShape, explorer, face, expressions, boneDrivers, resolveMorph, rotateWorld, renderer, scene, motion, emit } = ctx;
   const timer = new THREE.Timer();
   let fpsFrames = 0;
   let fpsTime = 0;
   let fps = 0;
-  let facingChecked = false;
   const _up = new THREE.Vector3();
 
   function frame() {
@@ -28,6 +27,7 @@ export function createLoop(ctx) {
     }
     ctx.smoothHead(dt);
     ctx.updateLocomotion(dt);
+    ctx.updatePlan(dt);
     ctx.autoIdle(dt);
     if (view.mode === 'follow') {
       const moved = rig.position.clone().sub(before);
@@ -43,16 +43,7 @@ export function createLoop(ctx) {
     rig.updateMatrixWorld(true);
 
     let axes = faceAxes();
-    if (!facingChecked && axes) {
-      facingChecked = true;
-      if (axes.forward.z < 0) {
-        walk.facingSign = -1;
-        rig.rotation.y += Math.PI;
-        rig.updateMatrixWorld(true);
-        axes = faceAxes();
-        log('Model faced away from the camera; turned it 180°.');
-      }
-    }
+    if (ctx.checkFacing(axes)) axes = faceAxes();
     ctx.applyHeelPose(axes);
     ctx.updateLook(dt, axes);
     axes = faceAxes();
@@ -97,7 +88,8 @@ export function createLoop(ctx) {
     }
     const a = motion.current;
     const clipInfo = a ? `${motion.name}  ${a.time.toFixed(2)} / ${a.getClip().duration.toFixed(2)}s${a.loop === THREE.LoopOnce ? '  once' : '  loop'}` : 'bind pose';
-    const queued = motion.queue.length ? `\nqueue: ${motion.queue.join(' → ')}` : motion.next ? `\nthen: ${motion.next}` : '';
+    const steps = ctx.describePlan();
+    const queued = (motion.queue.length ? `\nqueue: ${motion.queue.join(' → ')}` : motion.next ? `\nthen: ${motion.next}` : '') + (steps.length ? `\nplan: ${steps.join(' → ')}` : '');
     const where = `pos ${rig.position.x.toFixed(2)}, ${rig.position.z.toFixed(2)} m   steps ${walk.steps}${walk.paces !== null ? ` / ${walk.paces}` : ''}${walk.target ? `   to ${walk.target.x.toFixed(1)}, ${walk.target.z.toFixed(1)}` : ''}${walk.halt ? '   halting' : ''}`;
     emit('hud', `${clipInfo}${queued}\n${where}\nmouth ${mouth.toFixed(2)}   ${fps.toFixed(0)} fps`);
   }

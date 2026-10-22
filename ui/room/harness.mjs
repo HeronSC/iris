@@ -1,12 +1,14 @@
 // File: ui/room/harness.mjs
 
 import { spawn, execSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 
 const [url, debugPort = '9222', script = ''] = process.argv.slice(2);
+const deterministic = process.env.DETERMINISTIC === '1';
 const chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const profile = path.resolve(`chrome-profile-${debugPort}`);
-const child = spawn(chrome, ['--headless=new', '--disable-gpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-first-run', '--disable-extensions', `--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`, '--window-size=1280,800', 'about:blank'], { stdio: 'ignore' });
+const profile = path.join(os.tmpdir(), `iris-room-chrome-profile-${debugPort}`);
+const child = spawn(chrome, ['--headless=new', '--disable-gpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-first-run', '--disable-extensions', `--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`, '--window-size=640,400', 'about:blank'], { stdio: 'ignore' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const out = (o) => console.log(JSON.stringify(o));
 
@@ -55,10 +57,10 @@ await send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
   try { localStorage.clear(); } catch {}
   let s = 12345;
   Math.random = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x80000000; };
+  window.__raf = window.requestAnimationFrame.bind(window);
+  if (!${JSON.stringify(deterministic)}) return;
   let t = 0;
-  const raf = window.requestAnimationFrame.bind(window);
-  window.__raf = raf;
-  window.requestAnimationFrame = (cb) => raf(() => { t += 1000 / 30; cb(t); });
+  window.requestAnimationFrame = (cb) => window.__raf(() => { t += 1000 / 30; cb(t); });
   performance.now = () => t;
 })();` });
 const waitFrames = (n) => evaluate(`new Promise((r) => { let n = 0; const tick = () => (++n >= ${n} ? r(true) : window.__raf(tick)); window.__raf(tick); })`);
@@ -84,7 +86,8 @@ for (const step of script.split(';').map((s) => s.trim()).filter(Boolean)) {
     continue;
   }
   await evaluate(`window.avatar.runCommand(${JSON.stringify(cmd)})`);
-  await sleep(Number(wait || 4) * 1000);
+  if (deterministic) await waitFrames(Math.round(Number(wait || 4) * 30));
+  else await sleep(Number(wait || 4) * 1000);
   out({ cmd, hud: await hud(), log: await readLog() });
   await evaluate(`document.getElementById('clearLog').click()`);
 }

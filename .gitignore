@@ -43,3 +43,6 @@ Thumbs.db
 Data/
 core/sessions/
 core/memory/proposals/
+
+# Headless Chrome profiles written by ui/room/harness.mjs
+chrome-profile-*/

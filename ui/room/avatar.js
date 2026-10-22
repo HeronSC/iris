@@ -12,6 +12,7 @@ import { createClips } from './clips.js';
 import { createNavigation } from './navigation.js';
 import { createMotion } from './motion.js';
 import { createLocomotion } from './locomotion.js';
+import { createPlan } from './plan.js';
 import { createFace } from './face.js';
 import { createIdleLife } from './idle_life.js';
 import { createIdleGraph } from './idle_graph.js';
@@ -34,6 +35,7 @@ async function init(ctx, container, configUrl) {
   placeSpots(ctx);
   createMotion(ctx);
   createLocomotion(ctx);
+  createPlan(ctx);
   createFace(ctx);
   createIdleLife(ctx);
   createIdleGraph(ctx);
