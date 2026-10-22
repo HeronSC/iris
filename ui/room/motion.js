@@ -43,6 +43,7 @@ export function createMotion(ctx) {
     motion.current = action;
     motion.name = name;
     motion.next = next;
+    ctx.emit('motion', { name, activity: activityOf(name) });
   }
 
   function play(name, { once = false, fade } = {}) {

@@ -48,7 +48,7 @@ export function createLoop(ctx) {
     ctx.updateLook(dt, axes);
     axes = faceAxes();
 
-    const mouth = Math.max(faceState.manualMouth, ctx.talkValue(dt), ctx.audioValue(dt));
+    const mouth = Math.max(faceState.manualMouth, ctx.talkValue(dt), ctx.audioValue(dt), ctx.speechValue(dt));
     const morphs = new Map(bodyShape);
     for (const [name, w] of explorer) morphs.set(name, (morphs.get(name) || 0) + w);
     const b = Math.max(ctx.blinkWeight(dt), ctx.eyelidWeight(dt));

@@ -86,6 +86,7 @@ export function createPlan(ctx) {
     if (stepDone(step, dt)) {
       plan.steps.shift();
       announce();
+      if (!plan.steps.length) emit('planDone', describe(step));
     }
   }
 

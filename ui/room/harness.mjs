@@ -85,7 +85,7 @@ for (const step of script.split(';').map((s) => s.trim()).filter(Boolean)) {
     out({ js: cmd.slice(3), result: await evaluate(cmd.slice(3)) });
     continue;
   }
-  await evaluate(`window.avatar.runCommand(${JSON.stringify(cmd)})`);
+  await evaluate(`window.avatar.command(${JSON.stringify(cmd)})`);
   if (deterministic) await waitFrames(Math.round(Number(wait || 4) * 30));
   else await sleep(Number(wait || 4) * 1000);
   out({ cmd, hud: await hud(), log: await readLog() });

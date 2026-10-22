@@ -183,6 +183,24 @@ export function createFace(ctx) {
     return talk.value;
   }
 
+  const speech = { on: false, level: 0, value: 0, heard: 0 };
+  function setSpeechLevel(level) {
+    speech.level = Math.min(1, Math.max(0, Number(level) || 0));
+    speech.heard = 0;
+  }
+  function speechValue(dt) {
+    speech.heard += dt;
+    const target = speech.heard > 0.25 ? 0 : speech.level;
+    const rate = target > speech.value ? 25 : 10;
+    speech.value += (target - speech.value) * Math.min(1, dt * rate);
+    return speech.value;
+  }
+  function setSpeaking(on) {
+    speech.on = on;
+    if (!on) speech.level = 0;
+    emit('speaking', on);
+  }
+
   const audio = { el: null, ctx: null, analyser: null, buffer: null, value: 0 };
   function audioValue(dt) {
     if (!audio.analyser || audio.el.paused) {
@@ -279,5 +297,5 @@ export function createFace(ctx) {
     emit('expression', { name, value });
   }
 
-  Object.assign(ctx, { face, bones, boneDrivers, baseTransforms, rotateWorld, faceAxes, up, gestureDefs, activeGestures, breathing, playGesture, ensureBones, applyGestures, headSmooth, smoothHead, blink, blinkWeight, eyelidWeight, talk, talkValue, audio, audioValue, playAudioFile, look, updateLook, explorer, bodyShape, expressions, faceState, setBlink, setLook, setTalk, setBreathing, setMouth, setBodyMorph, setExplorerMorph, clearExplorer, setExpression });
+  Object.assign(ctx, { face, bones, boneDrivers, baseTransforms, rotateWorld, faceAxes, up, gestureDefs, activeGestures, breathing, playGesture, ensureBones, applyGestures, headSmooth, smoothHead, blink, blinkWeight, eyelidWeight, talk, talkValue, speech, speechValue, setSpeechLevel, setSpeaking, audio, audioValue, playAudioFile, look, updateLook, explorer, bodyShape, expressions, faceState, setBlink, setLook, setTalk, setBreathing, setMouth, setBodyMorph, setExplorerMorph, clearExplorer, setExpression });
 }
