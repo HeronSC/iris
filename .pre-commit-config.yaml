@@ -7,4 +7,4 @@ repos:
         entry: python -B tools/house_rules.py
         pass_filenames: true
         files: \.(py|js)$
-        exclude: ^(tools/|tests/|runtime/|data/)
+        exclude: ^(tools/|tests/|runtime/|data/|ui/room/vendor/)

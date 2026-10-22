@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iris Avatar Test</title>
+<style>
+:root {
+  --bg: #15171a;
+  --panel: #1d2024;
+  --panel-2: #25292e;
+  --line: #33383f;
+  --text: #e4e6e9;
+  --muted: #8d949c;
+  --accent: #7cb7ff;
+  --warn: #ffb86b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, "Segoe UI", sans-serif; }
+body { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+#stage { position: relative; min-width: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; }
+#hud { position: absolute; left: 12px; top: 10px; color: var(--muted); font: 12px ui-monospace, Consolas, monospace; pointer-events: none; white-space: pre; }
+#loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; background: var(--bg); }
+#loading .bar { width: 320px; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+#loading .fill { height: 100%; width: 0; background: var(--accent); }
+#loading .label { color: var(--muted); font-size: 12px; }
+aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; min-height: 0; padding: 10px 12px 40px; }
+h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 16px 0 6px; font-weight: 600; }
+h2:first-child { margin-top: 4px; }
+.row { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
+.row label { color: var(--muted); min-width: 64px; }
+.row input[type=range] { flex: 1; min-width: 100px; }
+.row output { width: 40px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+button, select, input[type=text] { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px; font: inherit; }
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.on { border-color: var(--accent); color: var(--accent); }
+select, input[type=text] { width: 100%; }
+#presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+details { margin: 10px 0 4px; }
+summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.spots { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+#log { font: 12px ui-monospace, Consolas, monospace; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; height: 240px; min-height: 80px; resize: vertical; overflow-y: auto; overscroll-behavior: contain; white-space: pre-wrap; }
+#log .err { color: var(--warn); }
+#parts { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
+#parts label { display: flex; gap: 4px; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hint { color: var(--muted); font-size: 12px; margin: 2px 0; }
+@media (max-width: 760px) {
+  body { grid-template-columns: 1fr; grid-template-rows: 55vh minmax(0, 1fr); }
+  aside { border-left: 0; border-top: 1px solid var(--line); padding: 8px 16px 40px; }
+}
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/build/three.module.js", "three/addons/": "./vendor/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="stage">
+  <div id="hud"></div>
+  <div id="loading"><div class="label" id="loadLabel">Starting…</div><div class="bar"><div class="fill" id="loadFill"></div></div></div>
+</div>
+<aside>
+  <h2>Motion</h2>
+  <div id="spots" class="spots"></div>
+  <div id="presets" class="motions"></div>
+  <div class="row"><label>Outfit</label><select id="outfitSelect" style="flex: 1; width: auto;"></select></div>
+  <div class="row"><button id="resetPos">Reset position</button></div>
+  <div class="row"><label>Camera</label><button id="cam_orbit">Orbit</button><button id="cam_follow">Follow</button><button id="cam_room">Room</button></div>
+  <div class="row"><label>Speed</label><input id="speed" type="range" min="0.1" max="2" step="0.05" value="1"><output id="speedOut">1.00</output></div>
+  <div class="row"><label>Crossfade</label><input id="fade" type="range" min="0" max="2" step="0.05" value="0.4"><output id="fadeOut">0.40</output></div>
+
+  <details>
+  <summary>Clip tools</summary>
+  <p class="hint">Raw clips from the files, including the home transitions. For checking exports only.</p>
+  <div class="row"><select id="rawClips"></select></div>
+  <div class="row"><button id="playRaw">Play clip</button><button id="loopToggle" class="on">Loop</button><button id="mirrorRaw">Mirror</button><button id="stopAll">Freeze</button></div>
+  </details>
+
+  <section id="roomSection">
+  <h2>Room</h2>
+  <div class="row"><button id="roomToggle" class="on">Show room</button><button id="mapToggle">Show floor map</button></div>
+  </section>
+
+  <h2>Commands</h2>
+  <div class="row"><input id="cmd" type="text" placeholder="idle · walk · goto center · help" autocomplete="off"></div>
+  <div id="log"></div>
+  <div class="row"><button id="clearLog">Clear</button><span class="hint">Drag the bottom-right corner to resize.</span></div>
+
+  <h2>Face</h2>
+  <div class="row"><button id="lookToggle">Follow mouse</button><button id="talkToggle">Talk test</button></div>
+  <div class="row"><label>Mouth</label><input id="mouth" type="range" min="0" max="1" step="0.01" value="0"><output id="mouthOut">0.00</output></div>
+  <div class="row"><label>Audio</label><input id="audioFile" type="file" accept="audio/*"></div>
+  <p class="hint">An audio file drives the mouth from its volume, the same way Piper's output would.</p>
+
+  <h2>Morph explorer</h2>
+  <div class="row"><select id="morphName"></select></div>
+  <div class="row"><label>Weight</label><input id="morphWeight" type="range" min="0" max="1" step="0.01" value="0"><output id="morphWeightOut">0.00</output></div>
+  <div class="row"><button id="morphReset">Reset all morphs</button></div>
+
+  <h2>Gestures</h2>
+  <div id="gestures" class="spots"></div>
+  <div class="row"><button id="lifeToggle" class="on">Idle life</button><button id="listenToggle">Listening</button><button id="voiceToggle">Voice</button></div>
+
+  <h2>Expressions</h2>
+  <div id="expressions"></div>
+  <p class="hint">Each is a mix of face shapes set under "expressions" in avatar.json.</p>
+
+  <h2>Body</h2>
+  <div id="bodyMorphs"></div>
+  <p class="hint">Starting values come from "bodyMorphs" in avatar.json.</p>
+
+  <h2>Lighting</h2>
+  <div class="row"><label>Exposure</label><input id="exposure" type="range" min="0.2" max="2" step="0.05"><output id="exposureOut"></output></div>
+  <div class="row"><label>Ambient</label><input id="environment" type="range" min="0" max="1.5" step="0.05"><output id="environmentOut"></output></div>
+  <div class="row"><label>Key</label><input id="key" type="range" min="0" max="4" step="0.05"><output id="keyOut"></output></div>
+  <div class="row"><label>Rim</label><input id="rim" type="range" min="0" max="3" step="0.05"><output id="rimOut"></output></div>
+  <div class="row"><label>Fill</label><input id="fill" type="range" min="0" max="2" step="0.05"><output id="fillOut"></output></div>
+  <p class="hint">Starting values come from "lighting" in avatar.json.</p>
+
+  <h2>Parts</h2>
+  <div id="parts"></div>
+</aside>
+<script type="module" src="app.js"></script>
+</body>
+</html>

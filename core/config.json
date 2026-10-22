@@ -324,5 +324,10 @@
       ],
       "label": "favourable"
     }
+  },
+  "ui": {
+    "room": {
+      "assets": "E:/Reallusion/Iris"
+    }
   }
 }
