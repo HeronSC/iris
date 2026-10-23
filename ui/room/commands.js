@@ -6,14 +6,13 @@ export function createCommands(ctx) {
   const { config, log, activities, gestureDefs, expressions, morphNames, room, outfitCatalog, motion } = ctx;
 
   const HELP = [
-    'home (walk back to the home spot) · work (same as voice on) · idle · halt / stop (home pose where she stands) · closeup',
+    'home (walk to her office spot) · work on|off (same as voice) · idle · halt / stop (home pose where she stands) · closeup',
     'walk [relaxed] [paces] · goto <spot> [relaxed] · sit · lie (halt / home stands her up)',
     `Gestures: ${Object.keys(gestureDefs).join(', ').replace(/_/g, ' ')} · breathing on|off · life on|off · listen on|off`,
     'turn left|right|around [degrees] · dance (walks to the center first) · outfit <name> · outfits',
     'walkto <x> <z> [relaxed] · reset (back to the home spot)',
     'goto <spot> [relaxed] · spots · room on|off · map on|off · camera orbit|follow|room',
-    'voice on|off (she goes to her work spot and stays; camera moves to the voice shot)',
-    'camera shot (use the current view as the voice shot and print it for avatar.json)',
+    'voice on|off (on: she comes in through the door to her office spot and stays; off: she leaves through the door)',
     'speed 0.5 · fade 0.3 · mouth 0.4 · freeze (bind pose)',
     'blink on|off · look on|off · talk on|off',
     'morph <name> <0..1> · morphs <filter>',
@@ -31,7 +30,7 @@ export function createCommands(ctx) {
     if (command === 'help' || command === '?') return log(HELP);
     if (command === 'stop' || command === 'halt') return ctx.goHome();
     if (command === 'home') return ctx.returnHome();
-    if (command === 'work') return ctx.setVoice(true);
+    if (command === 'work') return ctx.setVoice(onOff(rest[0] ?? 'on'));
     if (command === 'closeup') return ctx.closeUp();
     if (command === 'outfit') return ctx.setOutfit(rest.join(' '));
     if (command === 'outfits') return log([...outfitCatalog.values()].map((e) => e.label).join(', '));
@@ -79,7 +78,6 @@ export function createCommands(ctx) {
     if (command === 'roomcam') return ctx.setCameraMode('room');
     if (command === 'map') return ctx.setMapVisible(onOff(rest[0]));
     if (command === 'voice') return ctx.setVoice(onOff(rest[0] ?? 'on'));
-    if (command === 'camera' && rest[0] === 'shot') return log(`"voiceShot": ${JSON.stringify(ctx.captureVoiceShot())}`);
     if (command === 'camera') {
       if (!['orbit', 'follow', 'room'].includes(rest[0])) return log('Usage: camera orbit|follow|room', true);
       return ctx.setCameraMode(rest[0]);

@@ -7,7 +7,7 @@ export function createPlan(ctx) {
   const where = (p) => `${p.x.toFixed(1)}, ${p.z.toFixed(1)}`;
   function describe(step) {
     if (step.type === 'activity') return step.name;
-    if (step.type === 'walk') return step.target ? `walk to ${where(step.target)}` : step.paces ? `walk ${step.paces} paces` : 'walk';
+    if (step.type === 'walk') return step.target ? `walk ${step.via ? 'through the door ' : ''}to ${where(step.target)}` : step.paces ? `walk ${step.paces} paces` : 'walk';
     if (step.type === 'settle') return step.point ? `settle at ${where(step.point)}` : 'face';
     return step.label || 'then';
   }
@@ -128,7 +128,8 @@ export function createPlan(ctx) {
     const yaw = (spot.facing * Math.PI) / 180;
     ctx.view.closeup = false;
     motion.queue = [];
-    if (ctx.distanceTo(spot) > ctx.stepAside) setPlan([{ type: 'walk', target: { x: spot.x, z: spot.z } }, { type: 'settle', yaw }, ...after]);
+    const via = ctx.doorway(ctx.rig.position, spot);
+    if (via || ctx.distanceTo(spot) > ctx.stepAside) setPlan([{ type: 'walk', target: { x: spot.x, z: spot.z }, via }, { type: 'settle', yaw }, ...after]);
     else setPlan([{ type: 'settle', point: { x: spot.x, z: spot.z }, yaw }, ...after]);
   }
 

@@ -250,7 +250,7 @@ export function createLocomotion(ctx) {
     return true;
   }
 
-  function beginWalk({ style = 'normal', paces = null, target = null }) {
+  function beginWalk({ style = 'normal', paces = null, target = null, via = null }) {
     const loopName = style === 'relaxed' ? 'walk_relaxed' : 'walk';
     const startName = style === 'relaxed' ? 'home_to_walk_relaxed' : 'home_to_walk';
     if (!presets.has(loopName) || !presets.has(startName)) {
@@ -261,16 +261,22 @@ export function createLocomotion(ctx) {
     walk.steps = 0;
     walk.paces = paces;
     if (target) {
-      walk.target = new THREE.Vector3(target.x, 0, target.z);
-      const route = planRoute(rig.position, walk.target);
-      if (route && route.length) {
-        walk.target = route[route.length - 1];
-        walk.waypoints = route.slice(0, -1);
-        showRoute([rig.position.clone(), ...route]);
-      } else {
-        if (nav) log('No clear route found; walking straight.', true);
-        showRoute(null);
+      const route = [];
+      let from = rig.position;
+      let straight = false;
+      for (const leg of [...(via || []), target].map((p) => new THREE.Vector3(p.x, 0, p.z))) {
+        const part = planRoute(from, leg);
+        if (part && part.length) route.push(...part);
+        else {
+          route.push(leg);
+          straight = true;
+        }
+        from = leg;
       }
+      if (straight && nav) log('No clear route found; walking straight.', true);
+      walk.target = route[route.length - 1];
+      walk.waypoints = route.slice(0, -1);
+      showRoute([rig.position.clone(), ...route]);
       marker.position.set(walk.target.x, 0.003, walk.target.z);
       marker.visible = true;
     }

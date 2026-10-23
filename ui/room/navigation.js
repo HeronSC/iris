@@ -8,7 +8,7 @@ export function createNavigation(ctx) {
   function buildNavGrid() {
     if (!room.scene || config.navigation?.enabled === false) return null;
     const opts = { cell: 0.1, radius: 0.28, minHeight: 0.05, maxHeight: 1.7, margin: 2, passable: [], ...(config.navigation || {}) };
-    const bounds = new THREE.Box3().setFromObject(room.scene);
+    const bounds = room.bounds;
     const minX = bounds.min.x - opts.margin;
     const minZ = bounds.min.z - opts.margin;
     const cols = Math.ceil((bounds.max.x + opts.margin - minX) / opts.cell);

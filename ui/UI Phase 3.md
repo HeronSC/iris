@@ -10,7 +10,7 @@ No code yet. This is the design.
 
 **The room** — `E:\Reallusion\Iris\avatar_test` (index.html, app.js, avatar.json, served by `serve.py` on port 8790):
 
-- Room model `Building\iris_room.glb` (56 MB) and character `Iris.glb` (89 MB), plus the motion GLBs, all loaded at startup.
+- Room model `Building\office.glb` (the office, re-exported 2026-10-22; 56 MB before that) and character `Iris.glb` (89 MB), plus the motion GLBs, all loaded at startup.
 - A state machine for idle, walk, sit, lie and dance; nav-grid pathing between `Spot_*` empties; idle life (glances, fidgets, blinks).
 - Procedural gestures: nod, shake, tilt, laugh, surprise and others.
 - Expressions from morph mixes: smile, concerned, skeptical and others.

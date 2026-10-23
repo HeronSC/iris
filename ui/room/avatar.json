@@ -4,37 +4,43 @@
     "CC_Base_L_Thigh001": "CC_Base_L_ThighTwist01"
   },
   "room": {
-    "file": "assets/Building/iris_room.glb",
+    "file": "assets/Building/office.glb",
+    "floor": "Floor",
     "spotPrefix": "Spot_",
     "spotSuffixes": ["_Entry"],
     "show": true,
     "hide": ["Camera_View_Floor", "Cylinder003", "ChamferBox001"],
     "cameraMode": "room",
     "camera": {
-      "position": [0, 1.49, 5.85],
-      "fov": 65
-    },
-    "voiceShot": {
-      "frame": ["Monitor", "Desk"],
-      "facing": 0,
-      "fov": 34,
-      "margin": 0.08,
-      "speed": 2
+      "position": [0.16, 1.49, 2.75],
+      "fov": 43
     },
     "aimHeight": 1.0,
     "frameHeight": 2.3,
     "neutralWhenAway": true,
     "zoom": false
   },
-  "workSpot": {
-    "anchor": "Monitor",
-    "x": 1.3,
-    "z": 0.9,
+  "homeSpot": {
+    "anchor": "Desk",
+    "x": 1.0,
+    "z": 1.2,
     "facing": 0
   },
+  "doorSpot": {
+    "anchor": "Door_W",
+    "x": 0.6,
+    "z": 0,
+    "facing": 90
+  },
+  "awaySpot": {
+    "anchor": "Door_W",
+    "x": -0.8,
+    "z": 0,
+    "facing": -90
+  },
   "closeup": {
-    "x": 0,
-    "z": 4.4,
+    "x": 0.16,
+    "z": 1.3,
     "facing": 0,
     "frameHeight": 0.6,
     "aimAboveHead": 0.06
@@ -171,14 +177,14 @@
       "mirror": true
     },
     "turn180_idle_right": {
-      "file": "assets/Motion/Basics/Turn180Idle.glb",
+      "file": "assets/Motion/Basics/Turn180_Idle_right.glb",
       "clip": "longest",
       "loop": false,
       "groundFeet": true,
       "rootMotion": true
     },
     "turn180_idle_left": {
-      "file": "assets/Motion/Basics/Turn180Idle.glb",
+      "file": "assets/Motion/Basics/Turn180_Idle_right.glb",
       "clip": "longest",
       "loop": false,
       "groundFeet": true,
@@ -250,7 +256,7 @@
     "minHeight": 0.05,
     "maxHeight": 1.7,
     "margin": 2,
-    "passable": ["Door_Left", "Door_Right"]
+    "passable": ["Door_W", "Door_E"]
   },
   "materials": {
     "opaque": ["Std_Eye_R", "Std_Eye_L", "Std_Tongue", "Canvas_shoes", "Std_Skin"],

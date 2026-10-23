@@ -35,7 +35,7 @@ from the repo root, or double-click `start.cmd`. The page is at `http://127.0.0.
 | `outfit(name)` | change clothes |
 | `setState({ listening, speaking, thinking })` | body language from Iris's state |
 | `speechLevel(0..1)` | mouth level while speaking, send 20 to 30 a second |
-| `voice(on)` | voice mode: walks to the work spot and holds the voice camera |
+| `voice(on)` | work mode: she comes in through the door to her office spot and stays there; off walks her back out |
 | `camera(mode)` | orbit, follow, room |
 | `command(text)` | the dev command line |
 | `on(event, fn)` | events below; returns an unsubscribe |

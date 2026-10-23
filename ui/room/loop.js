@@ -35,8 +35,6 @@ export function createLoop(ctx) {
       controls.target.add(moved);
     } else if (view.mode === 'room') {
       ctx.trackWithRoomCamera(dt);
-    } else if (view.mode === 'voice') {
-      ctx.trackVoiceCamera(dt);
     }
     keyLight.position.copy(rig.position).add(keyOffset);
     keyLight.target.position.copy(rig.position);

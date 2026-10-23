@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 
 export function loadRoom(ctx) {
-  const { config, gltfs, scene, grid, emit } = ctx;
+  const { config, gltfs, scene, grid, log, emit } = ctx;
   const room = { scene: null, spots: new Map(), camera: null, bounds: null };
   if (config.room) {
     const roomGltf = gltfs.get(config.room.file);
@@ -29,7 +29,15 @@ export function loadRoom(ctx) {
       room.camera.position.fromArray(config.room.camera.position);
     }
     grid.visible = false;
-    room.bounds = new THREE.Box3().setFromObject(room.scene);
+    const floor = config.room.floor && room.scene.getObjectByName(config.room.floor);
+    if (config.room.floor && !floor) log(`Room floor "${config.room.floor}" is not in the room file; using everything for its bounds.`, true);
+    room.bounds = new THREE.Box3().setFromObject(floor || room.scene);
+    if (floor && Math.abs(room.bounds.max.y) > 0.01) {
+      log(`Room floor sits at ${room.bounds.max.y.toFixed(2)} m; lowered the room so she stands on it.`);
+      room.scene.position.y -= room.bounds.max.y;
+      room.scene.updateMatrixWorld(true);
+      room.bounds.translate(new THREE.Vector3(0, -room.bounds.max.y, 0));
+    }
     const noShadow = new RegExp(config.room.noShadowFrom || 'Wall|Ceiling|Door|Window|Trim|Sill|Floor|Plane|Shell', 'i');
     room.scene.traverse((o) => { if (o.isMesh && noShadow.test(o.name)) o.castShadow = false; });
     const hidden = config.room.hide || [];
@@ -43,7 +51,13 @@ export function loadRoom(ctx) {
     emit('roomVisible', on);
   }
 
-  Object.assign(ctx, { room, setRoomVisible });
+  function insideRoom(position, margin = 0) {
+    if (!room.bounds) return true;
+    return position.x > room.bounds.min.x + margin && position.x < room.bounds.max.x - margin
+      && position.z > room.bounds.min.z + margin && position.z < room.bounds.max.z - margin;
+  }
+
+  Object.assign(ctx, { room, setRoomVisible, insideRoom });
 }
 
 export function placeSpots(ctx) {
@@ -74,10 +88,17 @@ export function placeSpots(ctx) {
     return placed;
   }
   const home = placeSpot('Home', config.homeSpot);
-  const work = placeSpot('Work', config.workSpot || config.homeSpot);
+  const door = config.doorSpot ? placeSpot('Door', config.doorSpot) : null;
+  const away = config.awaySpot ? placeSpot('Away', config.awaySpot) : null;
   if (!furniture.has('home')) furniture.set('home', { entry: new THREE.Vector3(home.x, 0, home.z), facing: THREE.MathUtils.degToRad(home.facing) });
-  rig.position.set(home.x, 0, home.z);
-  rig.rotation.y = THREE.MathUtils.degToRad(home.facing);
+  const start = away || home;
+  rig.position.set(start.x, 0, start.z);
+  rig.rotation.y = THREE.MathUtils.degToRad(start.facing);
 
-  Object.assign(ctx, { furniture, home, work });
+  function doorway(from, to) {
+    if (!door || ctx.insideRoom(from) === ctx.insideRoom(to)) return null;
+    return [{ x: door.x, z: door.z }];
+  }
+
+  Object.assign(ctx, { furniture, home, door, away, doorway });
 }
