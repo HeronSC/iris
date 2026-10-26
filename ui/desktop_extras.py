@@ -167,6 +167,7 @@ class TrayController(QObject):
     hideRequested = Signal()
     quitRequested = Signal()
     muteToggled = Signal(bool)
+    screenChosen = Signal(object)
 
     def __init__(self, parent: QWidget, *, title: str = "Iris", close_to_tray: bool = False, voice_muted: bool = False) -> None:
         super().__init__(parent)
@@ -190,6 +191,7 @@ class TrayController(QObject):
         self.quit_action.triggered.connect(self.quitRequested)
         menu.addAction(self.show_action)
         menu.addAction(self.hide_action)
+        self.screen_menu = menu.addMenu("Show Iris on")
         menu.addSeparator()
         menu.addAction(self.close_action)
         menu.addAction(self.mute_action)
@@ -208,6 +210,15 @@ class TrayController(QObject):
 
     def stop(self) -> None:
         self.icon.hide()
+
+    def fill_screens(self, entries: list[tuple[str, object, bool]]) -> None:
+        self.screen_menu.clear()
+        for label, identity, checked in entries:
+            action = QAction(label, self.screen_menu)
+            action.setCheckable(True)
+            action.setChecked(checked)
+            action.triggered.connect(lambda _=False, chosen=identity: self.screenChosen.emit(chosen))
+            self.screen_menu.addAction(action)
 
     def notify(self, title: str, body: str) -> None:
         if self.icon.isVisible():

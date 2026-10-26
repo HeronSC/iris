@@ -18,6 +18,7 @@ The Qt window (`ui/main.py`) opens on the room whenever `ui.room` is in the conf
 - Only the room camera is used; the test panel and HUD are hidden. Ctrl+Shift+D shows them, as does `?dev` on the URL or `"dev": true` under `ui.room`.
 - Clicking the monitor, or pressing Enter, opens the chat. **Back to room** in the chat header, or Esc in an empty composer, goes back.
 - The page is loaded once at startup and stays loaded.
+- `ui.room_screen` in the config names the screen Iris fills, by model and serial rather than position. Pick it from the tray menu **Show Iris on**; **Any screen, windowed** clears it and the window opens where it was last closed. If the screen is unplugged she opens windowed on the primary screen and moves back when it returns.
 - `register_room_scheme()` also sets `QSG_RHI_BACKEND=opengl` unless it is already set, and the renderer keeps its drawing buffer (`preserveDrawingBuffer` in scene.js). With Qt's default Direct3D 11 backend the WebGL canvas drops out for a frame every few seconds (measured 2026-10-26 by grabbing the screen at 30 fps: 5 blank frames in 40 s on D3D11, 1 in 60 s on OpenGL, none in 60 s on OpenGL with the buffer preserved).
 
 ## Rooms

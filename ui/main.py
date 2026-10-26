@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QEventLoop, QSettings, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat
+from PySide6.QtGui import QFont, QGuiApplication, QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat
 from PySide6.QtWidgets import (
     QGridLayout,    QApplication,
     QDialog,
@@ -59,6 +59,8 @@ from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, TALK_HOTKEY_ID, 
 from ui.voice_controls import AskThread, VoiceController
 #! @allow-local-import
 from ui.room_view import RoomView, register_room_scheme, room_settings
+#! @allow-local-import
+from ui.screens import find_screen, room_screen_setting, same_screen, save_room_screen, screen_identity, screen_label
 #! @allow-local-import
 from core.voice.text import interpret_yes_no
 #! @allow-local-import
@@ -349,7 +351,8 @@ class IrisWindow(QMainWindow):
         self._pending_close_request = False
         self._close_requested = False
         self._current_response = None
-        self._start_maximized = True
+        self.room_screen = room_screen_setting(config_path)
+        self._full_screen = False
         self._topic_workspaces: dict[str, dict[str, object]] = {}
         self._topic_order: list[str] = []
         self._active_topic_id: str | None = None
@@ -496,7 +499,13 @@ class IrisWindow(QMainWindow):
         self.tray.showRequested.connect(self.bring_to_front)
         self.tray.hideRequested.connect(self.hide)
         self.tray.quitRequested.connect(self._quit_from_tray)
+        self.tray.screenChosen.connect(self._choose_screen)
+        self.tray.screen_menu.aboutToShow.connect(self._fill_screen_menu)
         self.tray.start()
+        gui = QGuiApplication.instance()
+        if gui is not None:
+            gui.screenAdded.connect(self._on_screen_added)
+            gui.screenRemoved.connect(self._on_screen_removed)
         self.quick_input = QuickInput(self)
         self.quick_input.submitted.connect(self._submit_from_popup)
         self.palette_dialog = CommandPalette(PALETTE_COMMANDS, self)
@@ -517,6 +526,45 @@ class IrisWindow(QMainWindow):
             application.installNativeEventFilter(self.talk_hotkey)
             application.installNativeEventFilter(self.wake_hotkey)
         self._start_engine_initialization()
+
+    def place_on_screen(self) -> None:
+        screen = find_screen(self.room_screen)
+        if screen is not None:
+            self._full_screen = True
+            self.setScreen(screen)
+            self.setGeometry(screen.geometry())
+            self.showFullScreen()
+            return
+        self._full_screen = False
+        if self.isFullScreen():
+            self.showNormal()
+        geometry = self.settings.value("window/geometry")
+        if geometry is not None and self.restoreGeometry(geometry):
+            self.show()
+        else:
+            self.showMaximized()
+
+    def _on_screen_added(self, screen) -> None:
+        if same_screen(self.room_screen, screen):
+            QTimer.singleShot(500, self.place_on_screen)
+
+    def _on_screen_removed(self, screen) -> None:
+        if self._full_screen and same_screen(self.room_screen, screen):
+            QTimer.singleShot(500, self.place_on_screen)
+
+    def _fill_screen_menu(self) -> None:
+        entries: list[tuple[str, object, bool]] = [("Any screen, windowed", None, self.room_screen is None)]
+        for screen in QGuiApplication.screens():
+            entries.append((screen_label(screen), screen_identity(screen), same_screen(self.room_screen, screen)))
+        self.tray.fill_screens(entries)
+
+    def _choose_screen(self, identity) -> None:
+        self.room_screen = identity or None
+        try:
+            save_room_screen(self.config_path, self.room_screen)
+        except OSError as error:
+            self._on_voice_failed(f"Could not save the screen choice: {error}")
+        self.place_on_screen()
 
     def _build_room(self, room: dict | None) -> None:
         if room is None:
@@ -712,7 +760,10 @@ class IrisWindow(QMainWindow):
 
     def bring_to_front(self) -> None:
         if self.isMinimized():
-            self.showNormal()
+            if self._full_screen:
+                self.showFullScreen()
+            else:
+                self.showNormal()
         else:
             self.show()
         self.raise_()
@@ -1617,7 +1668,8 @@ class IrisWindow(QMainWindow):
             return
         if tray is not None:
             self.settings.setValue("window/close_to_tray", tray.close_to_tray)
-        self.settings.setValue("window/geometry", self.saveGeometry())
+        if not self.isFullScreen():
+            self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/splitter", self.splitter.saveState())
         self.settings.setValue("window/details_visible", self.details_panel.isVisible())
         if self.shutdown_worker is not None:
@@ -1697,10 +1749,7 @@ def main() -> None:
         apply_light_palette(app)
     configure_logging(log_dir_for(None, config_path))
     window = IrisWindow(config_path)
-    if window._start_maximized:
-        window.showMaximized()
-    else:
-        window.show()
+    window.place_on_screen()
     sys.exit(app.exec())
 
 

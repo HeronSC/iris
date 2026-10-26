@@ -171,7 +171,7 @@ Emotion tags from the model, matching expressions to what she says, stay in Phas
    - the scheme handler, `QWebEngineView` and `QWebChannel`
    - the developer panel behind a key
    - the room camera only
-3. **Screen choice:** frameless full screen on `ui.room_screen`, the missing-screen fallback, geometry restore, and the launcher fix.
+3. **Screen choice:** frameless full screen on `ui.room_screen`, the missing-screen fallback, geometry restore, and the launcher fix. (Done 2026-10-26: `ui/screens.py` holds the screen identity {name, manufacturer, model, serial} and writes `ui.room_screen`; the tray menu **Show Iris on** picks it; `IrisWindow.place_on_screen()` goes full screen there or windowed with restored geometry, and follows `screenAdded`/`screenRemoved`. `/ui screen` was not added; the tray covers it. `Launch-Iris.cmd` now starts the Qt UI from `.venv`.)
 4. **Voice states to body language,** plus the new speaking signal and speech levels for the mouth.
 5. **Monitor asset** (Henry, in Blender), then click, live texture and transitions. (Click done 2026-10-26: `ui/room/monitor.js` raycasts the `monitor` objects of the room file, hover brightens them, a click opens the chat. Live texture and transitions still open.)
 6. **Cards over the room** and the notification badge.
