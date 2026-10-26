@@ -34,6 +34,7 @@ export function createLoop(ctx) {
     }
     ctx.smoothHead(dt);
     ctx.updateLocomotion(dt);
+    ctx.updateDoors(dt);
     ctx.updatePlan(dt);
     ctx.autoIdle(dt);
     if (view.mode === 'follow') {

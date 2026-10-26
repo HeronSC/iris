@@ -439,6 +439,7 @@ class IrisWindow(QMainWindow):
         composer_row.setLayout(composer)
 
         left_panel = QWidget()
+        self.chat_panel = left_panel
         left_layout = QVBoxLayout()
         left_layout.addWidget(self.conversation_title)
         left_layout.addWidget(self.conversation_view, 1)
@@ -584,14 +585,19 @@ class IrisWindow(QMainWindow):
         self.monitor_timer.setSingleShot(True)
         self.monitor_timer.setInterval(1000)
         self.monitor_timer.timeout.connect(self._refresh_monitor)
+        self.room_ready = False
         self.conversation_view.document().contentsChanged.connect(self.monitor_timer.start)
-        self.room_view.ready.connect(self._refresh_monitor)
+        self.room_view.ready.connect(self._on_room_ready)
         self.room_view.load_room(dev=room["dev"])
         self.show_room()
 
+    def _on_room_ready(self) -> None:
+        self.room_ready = True
+        self._refresh_monitor()
+
     def _refresh_monitor(self) -> None:
-        if self.room_view is not None:
-            self.room_view.show_monitor_image(self.chat_container.grab())
+        if self.room_view is not None and self.room_ready:
+            self.room_view.show_monitor_image(self.chat_panel.grab())
 
     def show_room(self) -> None:
         if self.room_view is None:

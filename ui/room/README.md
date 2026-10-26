@@ -33,6 +33,8 @@ The Qt window (`ui/main.py`) opens on the room whenever `ui.room` is in the conf
 - `furniture`: approach points for sit and lie, such as `"couch": { "anchor": "Couch_Entry", "alignClip": "sit", "facing": 0 }`. Furniture is reachable from any room; she walks there through the doors.
 - `passable`: object names (exact) she may walk through, such as the door meshes that fill the doorways.
 
+Doors open for her. Every `passable` object with a mesh is a door: when she walks toward it and comes within `doors.openAt` metres (2.2) it opens, and once she is `doors.closeAt` metres (2.6) past it, or stops, it closes. A door with a clip under `Motion/Doors/` whose tracks name the door object (`Door1_0` matches `Door1`) plays that clip to open and the same clip backwards to close; a door without a clip slides along its wall by its own width over `doors.slideSeconds` (0.8). Both settings live under `doors` in `avatar.json`.
+
 She is always in one room, the one whose walls surround her. Crossing a threshold cuts to that room's camera, and `goto <room>`, `work on` and `work off` plan the walk out through one door and in through the next. A new room is a new file with the same keys and an origin that puts its door opposite another room's door; leave out what the room does not have. To look at one room alone, open the page with `?room=rooms/<name>.json`; `?room=<key>` starts her in that room instead.
 
 ## Add things

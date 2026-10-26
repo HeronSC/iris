@@ -70,5 +70,6 @@ export async function loadLibrary(ctx) {
   }
 
   if (pool.length) log(`Idles found: ${pool.join(', ')}.`);
-  ctx.library = { files, outfits, pool, heelSuffix, heelsFiles };
+  const doorFiles = under(config.doorFolder || `${assetRoot}/Motion/Doors`);
+  ctx.library = { files, outfits, pool, heelSuffix, heelsFiles, doorFiles };
 }

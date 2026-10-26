@@ -25,8 +25,8 @@ export async function loadAssets(ctx) {
     });
   }
 
-  const { heelSuffix, heelsFiles } = ctx.library;
-  const files = [...new Set([config.character, ...Object.values(config.rooms || {}).map((r) => r.file), ...Object.values(config.clips).map((c) => c.file), ...heelsFiles.values()])];
+  const { heelSuffix, heelsFiles, doorFiles } = ctx.library;
+  const files = [...new Set([config.character, ...Object.values(config.rooms || {}).map((r) => r.file), ...Object.values(config.clips).map((c) => c.file), ...heelsFiles.values(), ...(doorFiles || [])])];
   const gltfs = new Map();
   try {
     const loaded = await Promise.all(files.map(loadFile));

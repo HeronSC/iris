@@ -19,6 +19,7 @@ import { createIdleGraph } from './idle_graph.js';
 import { createCameraModes } from './camera.js';
 import { createCommands } from './commands.js';
 import { createMonitor } from './monitor.js';
+import { createDoors } from './doors.js';
 import { createLoop } from './loop.js';
 
 async function init(ctx, container, configUrl) {
@@ -46,6 +47,7 @@ async function init(ctx, container, configUrl) {
   placeSpots(ctx);
   createMotion(ctx);
   createLocomotion(ctx);
+  createDoors(ctx);
   createPlan(ctx);
   createFace(ctx);
   createIdleLife(ctx);
