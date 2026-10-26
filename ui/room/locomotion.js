@@ -307,7 +307,8 @@ export function createLocomotion(ctx) {
   function checkFacing(axes) {
     if (facingChecked || !axes) return false;
     facingChecked = true;
-    if (axes.forward.z >= 0) return false;
+    const local = axes.forward.clone().applyQuaternion(rig.getWorldQuaternion(new THREE.Quaternion()).invert());
+    if (local.z >= 0) return false;
     walk.facingSign = -1;
     rig.rotation.y += Math.PI;
     rig.updateMatrixWorld(true);

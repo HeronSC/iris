@@ -9,8 +9,15 @@ export function createLoop(ctx) {
   let fpsTime = 0;
   let fps = 0;
   const _up = new THREE.Vector3();
+  const frameCap = ctx.config.frameCap || 0;
+  let lastFrame = 0;
 
   function frame() {
+    if (frameCap) {
+      const now = performance.now();
+      if (now - lastFrame < 1000 / frameCap - 2) return;
+      lastFrame = now;
+    }
     clock.frame += 1;
     timer.update();
     const dt = Math.min(timer.getDelta(), 0.1);
@@ -36,6 +43,7 @@ export function createLoop(ctx) {
     } else if (view.mode === 'room') {
       ctx.trackWithRoomCamera(dt);
     }
+    ctx.updateRoomZone();
     keyLight.position.copy(rig.position).add(keyOffset);
     keyLight.target.position.copy(rig.position);
     rig.updateMatrixWorld(true);

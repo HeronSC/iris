@@ -1,7 +1,7 @@
 // File: ui/room/plan.js
 
 export function createPlan(ctx) {
-  const { config, log, emit, motion, walk, flow, activities, furniture, home, room, camera, controls } = ctx;
+  const { config, log, emit, motion, walk, flow, activities, furniture, room, camera, controls } = ctx;
   const plan = { steps: [] };
 
   const where = (p) => `${p.x.toFixed(1)}, ${p.z.toFixed(1)}`;
@@ -92,7 +92,7 @@ export function createPlan(ctx) {
 
   function approachSteps(f) {
     const far = Math.hypot(ctx.rig.position.x - f.entry.x, ctx.rig.position.z - f.entry.z) > ctx.stepAside;
-    if (far) return [{ type: 'walk', target: { x: f.entry.x, z: f.entry.z } }, { type: 'settle', yaw: f.facing }];
+    if (far) return [{ type: 'walk', target: { x: f.entry.x, z: f.entry.z }, via: ctx.doorway(ctx.rig.position, f.entry) }, { type: 'settle', yaw: f.facing }];
     return [{ type: 'settle', point: f.entry, yaw: f.facing }];
   }
 
@@ -135,7 +135,7 @@ export function createPlan(ctx) {
 
   function returnHome() {
     if (ctx.pinned('home')) return;
-    walkToSpot(home);
+    walkToSpot(ctx.home);
   }
 
   function closeUp() {
@@ -153,8 +153,14 @@ export function createPlan(ctx) {
 
   function goToSpot(name, style = 'normal') {
     if (ctx.pinned('goto')) return;
-    const spot = room.spots.get(name.toLowerCase());
-    if (!spot) return log(`No spot "${name}". Spots: ${[...room.spots.keys()].join(', ')}`, true);
+    const key = name.toLowerCase();
+    const target = ctx.rooms.get(key);
+    if (target) {
+      log(`Walking to the ${key}.`);
+      return walkToSpot(target.home);
+    }
+    const spot = room.spots.get(key) || ctx.allSpots.get(key);
+    if (!spot) return log(`No spot "${name}". Spots: ${[...ctx.allSpots.keys()].join(', ')}. Rooms: ${[...ctx.rooms.keys()].join(', ')}`, true);
     log(`Walking to ${name} (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)})`);
     startWalk({ style, target: { x: spot.x, z: spot.z } });
   }

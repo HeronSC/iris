@@ -3,12 +3,13 @@
 import * as THREE from 'three';
 
 export function createNavigation(ctx) {
-  const { config, room, log, scene, emit } = ctx;
+  const { config, rooms, log, scene, emit } = ctx;
 
   function buildNavGrid() {
-    if (!room.scene || config.navigation?.enabled === false) return null;
-    const opts = { cell: 0.1, radius: 0.28, minHeight: 0.05, maxHeight: 1.7, margin: 2, ...(config.navigation || {}), passable: config.room.passable || [] };
-    const bounds = room.bounds;
+    if (!rooms.size || config.navigation?.enabled === false) return null;
+    const opts = { cell: 0.1, radius: 0.28, minHeight: 0.05, maxHeight: 1.7, margin: 2, ...(config.navigation || {}), passable: [...rooms.values()].flatMap((r) => r.config.passable || []) };
+    const bounds = new THREE.Box3();
+    for (const record of rooms.values()) bounds.union(record.bounds);
     const minX = bounds.min.x - opts.margin;
     const minZ = bounds.min.z - opts.margin;
     const cols = Math.ceil((bounds.max.x + opts.margin - minX) / opts.cell);
@@ -26,8 +27,8 @@ export function createNavigation(ctx) {
     const a = new THREE.Vector3();
     const b = new THREE.Vector3();
     const c = new THREE.Vector3();
-    room.scene.updateMatrixWorld(true);
-    room.scene.traverse((o) => {
+    for (const record of rooms.values()) record.scene.updateMatrixWorld(true);
+    for (const record of rooms.values()) record.scene.traverse((o) => {
       if (!o.isMesh || !o.visible || passable(o)) return;
       const pos = o.geometry.attributes.position;
       const index = o.geometry.index;

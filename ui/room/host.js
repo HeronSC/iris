@@ -40,6 +40,7 @@ export function connectHost(ctx, api, doc) {
     host.speechLevel.connect((level) => api.speechLevel(level));
     host.commandRequested.connect((text) => api.command(text));
     host.viewChanged.connect((view) => { ctx.hostView = view; });
+    host.monitorImage.connect((url) => ctx.monitor?.showPicture(url));
     for (const [name, args] of pending.splice(0)) host[name](...args);
     ctx.host = host;
   });

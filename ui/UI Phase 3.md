@@ -173,11 +173,13 @@ Emotion tags from the model, matching expressions to what she says, stay in Phas
    - the room camera only
 3. **Screen choice:** frameless full screen on `ui.room_screen`, the missing-screen fallback, geometry restore, and the launcher fix. (Done 2026-10-26: `ui/screens.py` holds the screen identity {name, manufacturer, model, serial} and writes `ui.room_screen`; the tray menu **Show Iris on** picks it; `IrisWindow.place_on_screen()` goes full screen there or windowed with restored geometry, and follows `screenAdded`/`screenRemoved`. `/ui screen` was not added; the tray covers it. `Launch-Iris.cmd` now starts the Qt UI from `.venv`.)
 4. **Voice states to body language,** plus the new speaking signal and speech levels for the mouth.
-5. **Monitor asset** (Henry, in Blender), then click, live texture and transitions. (Click done 2026-10-26: `ui/room/monitor.js` raycasts the `monitor` objects of the room file, hover brightens them, a click opens the chat. Live texture and transitions still open.)
+5. **Monitor asset** (Henry, in Blender), then click, live texture and transitions. (Click and live texture done 2026-10-26: `ui/room/monitor.js` raycasts the `monitor` objects of the room file, hover brightens them, a click opens the chat, and the glass shows a grab of the chat view sent as `monitorImage`. Transitions still open.)
 6. **Cards over the room** and the notification badge.
 7. **All-day behaviour:** frame cap, pausing, start with Windows, and the chat idle return.
 
 Steps 1–4 need no new art. Step 5 waits on the monitor model.
+
+**Rooms (added 2026-10-26).** Several rooms, one file each, placed in one world by an `origin` in the room file; she walks between them through the doors across an unseen gap, the camera cuts to the room she is in, `work on` takes her to `workRoom` and `work off` brings her back to `room`. Built the same day with the living room and the office.
 
 This phase is independent of Phase A (`PhaseA-NaturalConversation.md`) and can run alongside it. Conversation in the room will only feel right once Phase A lands.
 

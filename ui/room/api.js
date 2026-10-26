@@ -14,8 +14,9 @@ export function createApi(ctx) {
       idles: lifeConfig.pool.map((key) => ({ key, label: titleCase(key) })),
       gestures: Object.keys(gestureDefs).map((key) => ({ key, label: titleCase(key) })),
       expressions: [...expressions.keys()].map((key) => ({ key, label: titleCase(key) })),
-      outfits: [...outfitCatalog.values()].map(({ key, label }) => ({ key, label })),
-      spots: [...room.spots.keys()].map((key) => ({ key, label: titleCase(key) })),
+      outfits: [...outfitCatalog.values()].map(({ key, label, everyday }) => ({ key, label, everyday })),
+      spots: [...ctx.allSpots.keys()].map((key) => ({ key, label: titleCase(key) })),
+      rooms: [...ctx.rooms.keys()].map((key) => ({ key, label: titleCase(key) })),
       turns: ['left', 'right', 'around'].map((key) => ({ key, label: titleCase(key) })),
     };
   }
@@ -30,6 +31,7 @@ export function createApi(ctx) {
       plan: ctx.describePlan(),
       busy: Boolean(ctx.plan.steps.length || ctx.walk.target),
       position: { x: Number(rig.position.x.toFixed(2)), z: Number(rig.position.z.toFixed(2)) },
+      room: ctx.room.name,
       outfit: outfitState.current,
       listening: life.listening,
       speaking: ctx.speech.on,

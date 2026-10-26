@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import urllib.parse
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QByteArray, QFile, QIODevice, QMimeDatabase, QObject, QUrl, Signal, Slot
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QBuffer, QByteArray, QFile, QIODevice, QMimeDatabase, QObject, Qt, QUrl, Signal, Slot
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineUrlRequestJob, QWebEngineUrlScheme, QWebEngineUrlSchemeHandler
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -28,7 +27,6 @@ logger = logging.getLogger("iris.room")
 
 
 def register_room_scheme() -> None:
-    os.environ.setdefault("QSG_RHI_BACKEND", "opengl")
     scheme = QWebEngineUrlScheme(SCHEME)
     scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
     scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme | QWebEngineUrlScheme.Flag.LocalAccessAllowed | QWebEngineUrlScheme.Flag.CorsEnabled | QWebEngineUrlScheme.Flag.FetchApiAllowed)
@@ -90,6 +88,7 @@ class RoomBridge(QObject):
     speechLevel = Signal(float)
     commandRequested = Signal(str)
     viewChanged = Signal(str)
+    monitorImage = Signal(str)
 
     ready = Signal()
     chatRequested = Signal()
@@ -176,6 +175,16 @@ class RoomView(QWebEngineView):
 
     def set_active(self, active: bool) -> None:
         self.bridge.viewChanged.emit("room" if active else "chat")
+
+    def show_monitor_image(self, pixmap: QPixmap, width: int = 1024) -> None:
+        if pixmap.isNull() or pixmap.width() < 100:
+            return
+        scaled = pixmap.scaledToWidth(width, Qt.TransformationMode.SmoothTransformation)
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        scaled.save(buffer, "JPG", 80)
+        encoded = bytes(buffer.data().toBase64().data()).decode("ascii")
+        self.bridge.monitorImage.emit(f"data:image/jpeg;base64,{encoded}")
 
 
 __all__ = ["RoomView", "register_room_scheme", "room_settings"]

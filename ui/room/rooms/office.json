@@ -1,5 +1,7 @@
 {
   "file": "assets/Building/office.glb",
+  "origin": [0, 0, 0],
+  "rotation": 0,
   "floor": "Plane_0",
   "walls": "Wall",
   "monitor": "^Monitor",
@@ -28,13 +30,13 @@
     "door": {
       "anchor": "Door_W",
       "x": 0.6,
-      "z": 0,
+      "z": -0.46,
       "facing": 90
     },
     "away": {
       "anchor": "Door_W",
       "x": -0.8,
-      "z": 0,
+      "z": -0.46,
       "facing": -90
     },
     "closeup": {

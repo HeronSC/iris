@@ -34,10 +34,10 @@ export async function createOutfits(ctx) {
   const outfitCatalog = new Map();
   const titleCase = (key) => key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
   for (const [key, o] of Object.entries(config.outfits || {})) {
-    outfitCatalog.set(key, { key, label: o.label || titleCase(key), file: o.file || null, parts: o.parts || null, meshes: null, loading: null });
+    outfitCatalog.set(key, { key, label: o.label || titleCase(key), file: o.file || null, parts: o.parts || null, everyday: o.everyday !== false, meshes: null, loading: null });
   }
-  for (const { key, label, file } of ctx.library.outfits) {
-    if (!outfitCatalog.has(key)) outfitCatalog.set(key, { key, label, file, parts: null, meshes: null, loading: null });
+  for (const { key, label, file, everyday } of ctx.library.outfits) {
+    if (!outfitCatalog.has(key)) outfitCatalog.set(key, { key, label, file, parts: null, everyday, meshes: null, loading: null });
   }
 
   const slots = {

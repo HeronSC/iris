@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 
 export function createCameraModes(ctx) {
-  const { config, camera, controls, room, rig, bones, walk, plan, motion, activityOf, lifeConfig, gestureDefs, playGesture, setListening, walkToSpot, distanceTo, insideRoom, home, away, door, log, emit } = ctx;
+  const { config, camera, controls, room, rig, bones, walk, plan, motion, activityOf, lifeConfig, gestureDefs, playGesture, setListening, walkToSpot, distanceTo, insideRoom, log, emit } = ctx;
 
   const view = { neutralAim: null, neutralFov: null, mode: 'orbit', baseFov: camera.fov, aim: new THREE.Vector3(), roomPos: new THREE.Vector3(), closeup: false, door: 0 };
 
@@ -19,9 +19,9 @@ export function createCameraModes(ctx) {
   function readRoomCamera() {
     const shot = config.room?.camera || {};
     room.camera.updateMatrixWorld(true);
-    if (shot.position) view.roomPos.fromArray(shot.position);
+    if (shot.position) view.roomPos.fromArray(shot.position).applyMatrix4(room.place);
     else room.camera.getWorldPosition(view.roomPos);
-    if (shot.lookAt) view.neutralAim = new THREE.Vector3().fromArray(shot.lookAt);
+    if (shot.lookAt) view.neutralAim = new THREE.Vector3().fromArray(shot.lookAt).applyMatrix4(room.place);
     else {
       const look = new THREE.Vector3(0, 0, -1).applyQuaternion(room.camera.getWorldQuaternion(new THREE.Quaternion()));
       view.neutralAim = view.roomPos.clone().add(look.multiplyScalar(5));
@@ -63,17 +63,19 @@ export function createCameraModes(ctx) {
     emit('voice', on);
     if (on) {
       if (room.camera) setCameraMode('room');
+      const desk = ctx.rooms.get(config.workRoom)?.home || ctx.home;
       const { act } = activityOf(motion.name);
-      const settled = (act === 'home' || lifeConfig.pool.includes(act)) && !walk.target && distanceTo(home) < 0.3;
-      if (!settled) walkToSpot(home);
+      const settled = (act === 'home' || lifeConfig.pool.includes(act)) && !walk.target && distanceTo(desk) < 0.3;
+      if (!settled) walkToSpot(desk);
       if (gestureDefs.nod) playGesture('nod');
       setListening(true);
       log(settled ? 'Work on: she is at her office spot.' : 'Work on: she comes in and takes her office spot.');
     } else {
       setListening(false);
-      if (away) {
-        walkToSpot(away);
-        log('Work off: she leaves the office.');
+      const back = (config.homeRoom !== config.workRoom && ctx.rooms.get(config.homeRoom)?.home) || ctx.away;
+      if (back) {
+        walkToSpot(back);
+        log(back.room && back.room !== config.workRoom ? `Work off: she goes back to the ${back.room}.` : 'Work off: she leaves the office.');
       } else log('Work off: she is free to move.');
     }
   }
@@ -87,6 +89,7 @@ export function createCameraModes(ctx) {
   }
 
   function doorGoal() {
+    const door = ctx.door;
     if (!door || !moving()) return 0;
     if (!insideRoom(rig.position)) return 1;
     const goal = walkGoal();
@@ -98,7 +101,7 @@ export function createCameraModes(ctx) {
   const _doorAim = new THREE.Vector3();
   function roomAim(out) {
     if (view.closeup) return aimPoint(out);
-    _doorAim.set(door?.x ?? 0, config.room?.aimHeight ?? 1.0, door?.z ?? 0);
+    _doorAim.set(ctx.door?.x ?? 0, config.room?.aimHeight ?? 1.0, ctx.door?.z ?? 0);
     return out.copy(view.neutralAim).lerp(_doorAim, THREE.MathUtils.smoothstep(view.door, 0, 1));
   }
 

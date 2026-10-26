@@ -24,7 +24,16 @@ import { createLoop } from './loop.js';
 async function init(ctx, container, configUrl) {
   ctx.config = await (await fetch(configUrl)).json();
   const { config } = ctx;
-  if (typeof config.room === 'string') config.room = await (await fetch(config.room)).json();
+  const param = new URLSearchParams(location.search).get('room');
+  let rooms = config.rooms || (config.room ? { main: config.room } : {});
+  if (param && /[/.]/.test(param)) rooms = { main: param };
+  for (const [key, value] of Object.entries(rooms)) if (typeof value === 'string') rooms[key] = await (await fetch(value)).json();
+  config.rooms = rooms;
+  const keys = Object.keys(rooms);
+  ctx.startRoomName = param && rooms[param] ? param : keys.includes(config.room) ? config.room : keys[0];
+  config.homeRoom = ctx.startRoomName;
+  if (!keys.includes(config.workRoom)) config.workRoom = ctx.startRoomName;
+  config.room = rooms[ctx.startRoomName] || null;
   createScene(ctx, container);
   await loadLibrary(ctx);
   await loadAssets(ctx);
@@ -47,6 +56,7 @@ async function init(ctx, container, configUrl) {
   createLoop(ctx);
 
   if (ctx.room.scene) ctx.setRoomVisible(config.room.show !== false);
+  ctx.updateRoomZone();
   ctx.setCameraMode(ctx.room.camera && config.room?.cameraMode !== 'orbit' ? config.room?.cameraMode || 'room' : 'follow');
   ctx.setLife(ctx.life.on);
   ctx.ready = true;

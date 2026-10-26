@@ -3,7 +3,12 @@
   "boneAliases": {
     "CC_Base_L_Thigh001": "CC_Base_L_ThighTwist01"
   },
-  "room": "rooms/office.json",
+  "rooms": {
+    "living": "rooms/living.json",
+    "office": "rooms/office.json"
+  },
+  "room": "living",
+  "workRoom": "office",
   "closeup": {
     "frameHeight": 0.6,
     "aimAboveHead": 0.06
@@ -233,7 +238,9 @@
   "hiddenParts": ["CC_Base_EyeOcclusion", "CC_Base_TearLine", "Cigarette", "lighter", "hand_mirror", "SM_Phone_Smart_00"],
   "clothing": ["Denim_shorts", "Spaghetti_strap_Top", "Canvas_shoes", "Underwear_Bottoms"],
   "outfits": {},
+  "frameCap": 30,
   "outfitFolder": "assets/Clothes/Outfits",
+  "extraOutfitFolders": ["assets/Clothes/Lingerie"],
   "motionFolder": "assets/Motion",
   "idles": {
     "mirror": true,

@@ -16,9 +16,12 @@ export async function loadLibrary(ctx) {
   const under = (folder) => files.filter((f) => f.toLowerCase().startsWith(`${folder.toLowerCase()}/`));
   const lowerFiles = new Set(files.map((f) => f.toLowerCase()));
 
-  const outfits = under(config.outfitFolder || `${assetRoot}/Clothes/Outfits`)
-    .map((file) => ({ key: slug(stem(file)), label: stem(file), file }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+  const outfitEntry = (file, everyday) => ({ key: slug(stem(file)), label: stem(file), file, everyday });
+  const everydayFolder = config.outfitFolder || `${assetRoot}/Clothes/Outfits`;
+  const outfits = [
+    ...under(everydayFolder).map((file) => outfitEntry(file, true)),
+    ...(config.extraOutfitFolders || []).flatMap((folder) => under(folder).map((file) => outfitEntry(file, false))),
+  ].sort((a, b) => a.label.localeCompare(b.label));
 
   const motionFolder = config.motionFolder || `${assetRoot}/Motion`;
   const byNorm = new Map(under(motionFolder).map((f) => [norm(stem(f)), f]));

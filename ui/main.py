@@ -11,6 +11,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEventLoop, QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QFont, QGuiApplication, QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QGridLayout,    QApplication,
     QDialog,
@@ -76,6 +77,7 @@ CONVERSATION_END_TEXT = {"idle": "Conversation ended after a quiet stretch.", "p
 
 
 LINE_BREAK = chr(0x2028)
+INSTANCE_NAME = "iris-ui-window"
 
 
 BOTTOM_ROW_HEIGHT = 170
@@ -499,6 +501,10 @@ class IrisWindow(QMainWindow):
         self.tray.showRequested.connect(self.bring_to_front)
         self.tray.hideRequested.connect(self.hide)
         self.tray.quitRequested.connect(self._quit_from_tray)
+        self.instance_server = QLocalServer(self)
+        QLocalServer.removeServer(INSTANCE_NAME)
+        self.instance_server.newConnection.connect(self._on_instance_knock)
+        self.instance_server.listen(INSTANCE_NAME)
         self.tray.screenChosen.connect(self._choose_screen)
         self.tray.screen_menu.aboutToShow.connect(self._fill_screen_menu)
         self.tray.start()
@@ -574,13 +580,24 @@ class IrisWindow(QMainWindow):
         self.room_view.failed.connect(lambda message: self.set_status(f"Room: {message}"))
         self.views.addWidget(self.room_view)
         self.room_button.setVisible(True)
+        self.monitor_timer = QTimer(self)
+        self.monitor_timer.setSingleShot(True)
+        self.monitor_timer.setInterval(1000)
+        self.monitor_timer.timeout.connect(self._refresh_monitor)
+        self.conversation_view.document().contentsChanged.connect(self.monitor_timer.start)
+        self.room_view.ready.connect(self._refresh_monitor)
         self.room_view.load_room(dev=room["dev"])
         self.show_room()
+
+    def _refresh_monitor(self) -> None:
+        if self.room_view is not None:
+            self.room_view.show_monitor_image(self.chat_container.grab())
 
     def show_room(self) -> None:
         if self.room_view is None:
             return
         self.views.setCurrentWidget(self.room_view)
+        self._refresh_monitor()
         self.room_view.set_active(True)
         self.room_view.setFocus()
 
@@ -818,7 +835,15 @@ class IrisWindow(QMainWindow):
         if self.input_box.isEnabled():
             self.input_box.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
 
+    def _on_instance_knock(self) -> None:
+        while self.instance_server.hasPendingConnections():
+            socket = self.instance_server.nextPendingConnection()
+            socket.disconnectFromServer()
+        self.bring_to_front()
+
     def _on_initialize_failed(self, error_text: str) -> None:
+        if "database is locked" in error_text:
+            error_text += "\n\nAnother Iris is probably still running and holding the data files. Quit it from its tray icon, or end pythonw.exe in Task Manager, then start Iris again."
         QMessageBox.critical(self, "Startup Error", error_text)
         self.set_status("Error")
         self._disable_controls_after_startup_failure()
@@ -1737,11 +1762,24 @@ def _resolve_config_path(argv: list[str]) -> tuple[Path, list[str]]:
     return workspace_root / "core" / "config.json", remaining
 
 
+def _wake_running_instance() -> bool:
+    socket = QLocalSocket()
+    socket.connectToServer(INSTANCE_NAME)
+    if not socket.waitForConnected(300):
+        return False
+    socket.write(b"show")
+    socket.waitForBytesWritten(300)
+    socket.disconnectFromServer()
+    return True
+
+
 def main() -> None:
     config_path, qt_argv = _resolve_config_path(sys.argv[1:])
     set_app_model_id()
     register_room_scheme()
     app = QApplication([sys.argv[0], *qt_argv])
+    if _wake_running_instance():
+        return
     app.setWindowIcon(make_icon())
     if str(QSettings("Iris", "IrisUI").value("window/theme") or "light").lower() == "dark":
         apply_dark_palette(app)

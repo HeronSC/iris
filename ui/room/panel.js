@@ -118,7 +118,7 @@ export function createPanel(avatar, doc) {
     for (const entry of outfitCatalog.values()) {
       const option = doc.createElement('option');
       option.value = entry.key;
-      option.textContent = entry.label;
+      option.textContent = entry.everyday ? entry.label : `${entry.label} (on request)`;
       $('outfitSelect').append(option);
     }
     if (avatar.outfitState.current) $('outfitSelect').value = avatar.outfitState.current;
@@ -154,7 +154,8 @@ export function createPanel(avatar, doc) {
     $('resetPos').onclick = avatar.resetPosition;
 
     if (room.scene) {
-      for (const name of room.spots.keys()) addButton($('spots'), titleCase(name), () => avatar.goToSpot(name));
+      for (const name of avatar.rooms.keys()) addButton($('spots'), titleCase(name), () => avatar.goToSpot(name));
+      for (const name of avatar.allSpots.keys()) addButton($('spots'), titleCase(name), () => avatar.goToSpot(name));
       $('roomToggle').onclick = () => avatar.setRoomVisible(!room.scene.visible);
       $('mapToggle').onclick = () => avatar.setMapVisible(!avatar.navView.group.visible);
       toggleClass('roomToggle', room.scene.visible);

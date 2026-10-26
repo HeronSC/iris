@@ -11,7 +11,7 @@ export function createCommands(ctx) {
     `Gestures: ${Object.keys(gestureDefs).join(', ').replace(/_/g, ' ')} · breathing on|off · life on|off · listen on|off`,
     'turn left|right|around [degrees] · dance (walks to the center first) · outfit <name> · outfits',
     'walkto <x> <z> [relaxed] · reset (back to the home spot)',
-    'goto <spot> [relaxed] · spots · room on|off · map on|off · camera orbit|follow|room',
+    'goto <spot|room> [relaxed] · spots · rooms · room on|off · map on|off · camera orbit|follow|room',
     'voice on|off (on: she comes in through the door to her office spot and stays; off: she leaves through the door)',
     'speed 0.5 · fade 0.3 · mouth 0.4 · freeze (bind pose)',
     'blink on|off · look on|off · talk on|off',
@@ -33,7 +33,12 @@ export function createCommands(ctx) {
     if (command === 'work') return ctx.setVoice(onOff(rest[0] ?? 'on'));
     if (command === 'closeup') return ctx.closeUp();
     if (command === 'outfit') return ctx.setOutfit(rest.join(' '));
-    if (command === 'outfits') return log([...outfitCatalog.values()].map((e) => e.label).join(', '));
+    if (command === 'outfits') {
+      const entries = [...outfitCatalog.values()];
+      const names = (keep) => entries.filter((e) => e.everyday === keep).map((e) => e.label).join(', ') || 'none';
+      return log(`Everyday: ${names(true)}
+On request only: ${names(false)}`);
+    }
     if (command === 'turn') {
       const dir = rest[0];
       const degrees = Number(rest[1]) || (dir === 'around' ? 180 : 90);
@@ -73,7 +78,8 @@ export function createCommands(ctx) {
       const name = rest.filter((w) => w !== 'relaxed').join('_');
       return ctx.goToSpot(name, style);
     }
-    if (command === 'spots') return log(room.spots.size ? [...room.spots].map(([n, v]) => `${n} (${v.x.toFixed(2)}, ${v.z.toFixed(2)})`).join('\n') : 'No room loaded.');
+    if (command === 'spots') return log(ctx.allSpots.size ? [...ctx.allSpots].map(([n, v]) => `${n} (${v.x.toFixed(2)}, ${v.z.toFixed(2)})`).join('\n') : 'No room loaded.');
+    if (command === 'rooms') return log([...ctx.rooms.keys()].map((n) => `${n}${n === room.name ? ' (here)' : ''}`).join(', '));
     if (command === 'room') return ctx.setRoomVisible(onOff(rest[0]));
     if (command === 'roomcam') return ctx.setCameraMode('room');
     if (command === 'map') return ctx.setMapVisible(onOff(rest[0]));
