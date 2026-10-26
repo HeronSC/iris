@@ -7,7 +7,7 @@ export function createNavigation(ctx) {
 
   function buildNavGrid() {
     if (!room.scene || config.navigation?.enabled === false) return null;
-    const opts = { cell: 0.1, radius: 0.28, minHeight: 0.05, maxHeight: 1.7, margin: 2, passable: [], ...(config.navigation || {}) };
+    const opts = { cell: 0.1, radius: 0.28, minHeight: 0.05, maxHeight: 1.7, margin: 2, ...(config.navigation || {}), passable: config.room.passable || [] };
     const bounds = room.bounds;
     const minX = bounds.min.x - opts.margin;
     const minZ = bounds.min.z - opts.margin;
@@ -28,7 +28,7 @@ export function createNavigation(ctx) {
     const c = new THREE.Vector3();
     room.scene.updateMatrixWorld(true);
     room.scene.traverse((o) => {
-      if (!o.isMesh || passable(o)) return;
+      if (!o.isMesh || !o.visible || passable(o)) return;
       const pos = o.geometry.attributes.position;
       const index = o.geometry.index;
       const count = index ? index.count : pos.count;

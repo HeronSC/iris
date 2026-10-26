@@ -10,12 +10,24 @@ python -m ui.room.serve 8790
 
 from the repo root, or double-click `start.cmd`. The page is at `http://127.0.0.1:8790/`. Assets stay in the folder named by `ui.room.assets` in `core/config.json` and are served under `/assets/`, with `assets/manifest.json` listing every GLB in it.
 
+## Rooms
+
+`avatar.json` is Iris: her character, clips, gestures, idle life and walking. The room she is in is a separate file named by its `room` key, `rooms/office.json` today. A room file holds the GLB and everything that only makes sense in that room:
+
+- `file`, `floor` (the object she stands on; the room is lowered so its top is at her feet), `walls` (a name pattern that gives the room's extent), `hide`, `noShadowFrom`.
+- `camera` and the door timings `doorWatch`, `doorLeave`, `doorSwing`.
+- `spots`: `home` (where she stands and works), `door` (just inside the door she uses), `away` (where she waits outside), `closeup`. Each is an offset from an `anchor` object plus a `facing` in degrees.
+- `furniture`: approach points for sit and lie, such as `"couch": { "anchor": "Couch_Entry", "alignClip": "sit", "facing": 0 }`.
+- `passable`: objects she may walk through, such as doors.
+
+A new room is a new file with the same keys; leave out what the room does not have.
+
 ## Add things
 
 - **An idle:** export `Motion/Idle/<Name>.glb`, plus `Home to <Name>.glb` and `<Name> To Home.glb` anywhere under `Motion/`. The page builds the activity, a mirrored twin and the pool entry. One motion per export file, or name the clip in `avatar.json` under `clips`.
 - **An outfit:** drop a GLB in `Clothes/Outfits/`. Shoes with a `-HighHeels` motion variant are picked up by name.
 - **A gesture or expression:** add it to `gestures` or `expressions` in `avatar.json`.
-- **Anything with special needs** (couch motions, walks, turns): an entry in `clips` and `activities` in `avatar.json`, as today.
+- **Anything with special needs** (couch motions, walks, turns): an entry in `clips` and `activities` in `avatar.json`, as today, plus the furniture anchor in the room file.
 
 ## Drive her
 

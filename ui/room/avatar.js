@@ -23,6 +23,7 @@ import { createLoop } from './loop.js';
 async function init(ctx, container, configUrl) {
   ctx.config = await (await fetch(configUrl)).json();
   const { config } = ctx;
+  if (typeof config.room === 'string') config.room = await (await fetch(config.room)).json();
   createScene(ctx, container);
   await loadLibrary(ctx);
   await loadAssets(ctx);

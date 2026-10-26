@@ -3,9 +3,9 @@
 import * as THREE from 'three';
 
 export function createCameraModes(ctx) {
-  const { config, camera, controls, room, rig, bones, walk, motion, activityOf, lifeConfig, gestureDefs, playGesture, setListening, walkToSpot, distanceTo, insideRoom, home, away, log, emit } = ctx;
+  const { config, camera, controls, room, rig, bones, walk, plan, motion, activityOf, lifeConfig, gestureDefs, playGesture, setListening, walkToSpot, distanceTo, insideRoom, home, away, door, log, emit } = ctx;
 
-  const view = { away: false, neutralAim: null, neutralFov: null, mode: 'orbit', baseFov: camera.fov, aim: new THREE.Vector3(), roomPos: new THREE.Vector3(), frameHeight: config.room?.frameHeight ?? 2.3, closeup: false };
+  const view = { neutralAim: null, neutralFov: null, mode: 'orbit', baseFov: camera.fov, aim: new THREE.Vector3(), roomPos: new THREE.Vector3(), closeup: false, door: 0 };
 
   function aimPoint(out) {
     if (view.closeup && bones.head) {
@@ -36,10 +36,9 @@ export function createCameraModes(ctx) {
     controls.enabled = mode !== 'room';
     if (mode === 'room') {
       readRoomCamera();
-      view.away = !insideRoom(rig.position, 0);
       camera.position.copy(view.roomPos);
-      if (view.away) view.aim.copy(view.neutralAim);
-      else aimPoint(view.aim);
+      view.door = doorGoal();
+      roomAim(view.aim);
       controls.target.copy(view.aim);
       camera.lookAt(view.aim);
       trackWithRoomCamera(1);
@@ -79,24 +78,41 @@ export function createCameraModes(ctx) {
     }
   }
 
+  const moving = () => Boolean(walk.target || walk.arrive || plan.steps.some((step) => step.type === 'walk' || step.type === 'settle'));
+
+  function walkGoal() {
+    if (walk.target) return walk.target;
+    const step = plan.steps.find((s) => s.type === 'walk' && s.target);
+    return step ? step.target : null;
+  }
+
+  function doorGoal() {
+    if (!door || !moving()) return 0;
+    if (!insideRoom(rig.position)) return 1;
+    const goal = walkGoal();
+    const leaving = goal && !insideRoom(goal);
+    const reach = leaving ? config.room?.doorLeave ?? 3.0 : config.room?.doorWatch ?? 1.0;
+    return Math.hypot(rig.position.x - door.x, rig.position.z - door.z) < reach ? 1 : 0;
+  }
+
+  const _doorAim = new THREE.Vector3();
+  function roomAim(out) {
+    if (view.closeup) return aimPoint(out);
+    _doorAim.set(door?.x ?? 0, config.room?.aimHeight ?? 1.0, door?.z ?? 0);
+    return out.copy(view.neutralAim).lerp(_doorAim, THREE.MathUtils.smoothstep(view.door, 0, 1));
+  }
+
   function trackWithRoomCamera(dt) {
-    const k = 1 - Math.exp(-dt * 4);
-    if (config.room?.neutralWhenAway !== false && view.neutralAim) {
-      if (!view.away && !insideRoom(rig.position, 0)) {
-        view.away = true;
-        log('Iris left the room. Camera back to neutral.');
-      } else if (view.away && insideRoom(rig.position, 0.25)) {
-        view.away = false;
-        log('Iris is back. Camera following.');
-      }
-    }
-    view.aim.lerp(view.away ? view.neutralAim : aimPoint(new THREE.Vector3()), k);
+    const goal = doorGoal();
+    const step = dt / (config.room?.doorSwing ?? 1.0);
+    view.door += THREE.MathUtils.clamp(goal - view.door, -step, step);
+    const k = 1 - Math.exp(-dt * (view.closeup ? 4 : 12));
+    view.aim.lerp(roomAim(new THREE.Vector3()), k);
     camera.position.copy(view.roomPos);
     controls.target.copy(view.aim);
     const distance = camera.position.distanceTo(view.aim);
-    const frameHeight = view.closeup ? config.closeup?.frameHeight ?? 0.6 : view.frameHeight;
-    const tracked = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(frameHeight / 2 / distance)), 10, 60);
-    const fov = view.away || !(config.room?.zoom || view.closeup) ? view.neutralFov : tracked;
+    const tracked = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan((config.closeup?.frameHeight ?? 0.6) / 2 / distance)), 10, 60);
+    const fov = view.closeup ? tracked : view.neutralFov;
     camera.fov += (fov - camera.fov) * k;
     camera.updateProjectionMatrix();
   }

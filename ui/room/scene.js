@@ -81,5 +81,5 @@ export function createScene(ctx, container) {
   }
   for (const [name, value] of Object.entries(lighting)) if (lightTargets[name]) lightTargets[name](value);
 
-  Object.assign(ctx, { renderer, scene, camera, controls, keyLight, keyOffset, marker, rimLight, fillLight, grid, lighting, setLighting });
+  Object.assign(ctx, { renderer, scene, camera, controls, keyLight, keyOffset, marker, rimLight, fillLight, floor, grid, lighting, setLighting });
 }

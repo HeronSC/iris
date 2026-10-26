@@ -1,0 +1,47 @@
+{
+  "file": "assets/Building/office.glb",
+  "floor": "Plane_0",
+  "walls": "Wall",
+  "spotPrefix": "Spot_",
+  "spotSuffixes": ["_Entry"],
+  "show": true,
+  "hide": ["Floor"],
+  "noShadowFrom": "Wall|Ceiling|Door|Window|Trim|Sill|Floor|Plane|Shell|Beam",
+  "cameraMode": "room",
+  "camera": {
+    "position": [-0.25, 1.49, 2.75],
+    "lookAt": [-0.25, 1.49, -2.9],
+    "fov": 43
+  },
+  "aimHeight": 1.0,
+  "doorWatch": 0.5,
+  "doorLeave": 3.5,
+  "doorSwing": 2.75,
+  "spots": {
+    "home": {
+      "anchor": "Desk",
+      "x": 1.96,
+      "z": -0.14,
+      "facing": 0
+    },
+    "door": {
+      "anchor": "Door_W",
+      "x": 0.6,
+      "z": 0,
+      "facing": 90
+    },
+    "away": {
+      "anchor": "Door_W",
+      "x": -0.8,
+      "z": 0,
+      "facing": -90
+    },
+    "closeup": {
+      "x": -0.25,
+      "z": 1.3,
+      "facing": 0
+    }
+  },
+  "furniture": {},
+  "passable": ["Door_W", "Door_E"]
+}

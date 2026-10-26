@@ -140,7 +140,7 @@ export function createPlan(ctx) {
 
   function closeUp() {
     if (ctx.pinned('close-up')) return;
-    const spot = { x: 0, z: 4.4, facing: 0, ...config.closeup };
+    const spot = ctx.closeupSpot || { x: 0, z: 4.4, facing: 0 };
     if (room.camera) ctx.setCameraMode('room');
     walkToSpot(spot, [{ type: 'then', label: 'close-up', run: () => {
       ctx.view.closeup = true;
