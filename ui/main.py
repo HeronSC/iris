@@ -58,6 +58,8 @@ from ui.desktop_extras import DEFAULT_HOTKEY, PALETTE_COMMANDS, TALK_HOTKEY_ID, 
 #! @allow-local-import
 from ui.voice_controls import AskThread, VoiceController
 #! @allow-local-import
+from ui.room_view import RoomView, register_room_scheme, room_settings
+#! @allow-local-import
 from core.voice.text import interpret_yes_no
 #! @allow-local-import
 from core.assistant.why_command import describe_activity
@@ -80,8 +82,13 @@ EXPLORE_COLUMNS = 2
 
 class ChatInput(QTextEdit):
     submitRequested = Signal()
+    escapedEmpty = Signal()
 
     def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape and not self.toPlainText().strip():
+            event.accept()
+            self.escapedEmpty.emit()
+            return
         if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter} and (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
             self.insertPlainText("\n")
             event.accept()
@@ -399,7 +406,11 @@ class IrisWindow(QMainWindow):
         self.conversation_title = QLabel("Iris")
         self.conversation_title.setStyleSheet("font-weight: bold;")
         self.details_title.setStyleSheet("font-weight: bold;")
+        self.room_button = QPushButton("Back to room")
+        self.room_button.clicked.connect(self.show_room)
+        self.room_button.setVisible(False)
         header = QHBoxLayout()
+        header.addWidget(self.room_button)
         header.addStretch()
         header.addWidget(self.details_toggle)
         header.addWidget(self.status_label)
@@ -463,7 +474,13 @@ class IrisWindow(QMainWindow):
 
         container = QWidget()
         container.setLayout(body)
-        self.setCentralWidget(container)
+        self.chat_container = container
+        self.views = QStackedWidget()
+        self.views.addWidget(container)
+        self.setCentralWidget(self.views)
+        self.input_box.escapedEmpty.connect(self.show_room)
+        self.room_view: RoomView | None = None
+        self._build_room(room_settings(config_path))
 
         self._restore_window_state()
         self._set_controls_enabled(False)
@@ -500,6 +517,30 @@ class IrisWindow(QMainWindow):
             application.installNativeEventFilter(self.talk_hotkey)
             application.installNativeEventFilter(self.wake_hotkey)
         self._start_engine_initialization()
+
+    def _build_room(self, room: dict | None) -> None:
+        if room is None:
+            return
+        self.room_view = RoomView(room["assets"], self)
+        self.room_view.chatRequested.connect(self.show_chat)
+        self.room_view.failed.connect(lambda message: self.set_status(f"Room: {message}"))
+        self.views.addWidget(self.room_view)
+        self.room_button.setVisible(True)
+        self.room_view.load_room(dev=room["dev"])
+        self.show_room()
+
+    def show_room(self) -> None:
+        if self.room_view is None:
+            return
+        self.views.setCurrentWidget(self.room_view)
+        self.room_view.set_active(True)
+        self.room_view.setFocus()
+
+    def show_chat(self) -> None:
+        self.views.setCurrentWidget(self.chat_container)
+        if self.room_view is not None:
+            self.room_view.set_active(False)
+        self._focus_input_box()
 
     def _voice_service(self):
         return getattr(self.app_service, "voice", None)
@@ -1647,6 +1688,7 @@ def _resolve_config_path(argv: list[str]) -> tuple[Path, list[str]]:
 def main() -> None:
     config_path, qt_argv = _resolve_config_path(sys.argv[1:])
     set_app_model_id()
+    register_room_scheme()
     app = QApplication([sys.argv[0], *qt_argv])
     app.setWindowIcon(make_icon())
     if str(QSettings("Iris", "IrisUI").value("window/theme") or "light").lower() == "dark":

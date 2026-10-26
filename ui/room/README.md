@@ -8,13 +8,23 @@ The three.js page that shows Iris and her room. It runs on its own for animation
 python -m ui.room.serve 8790
 ```
 
-from the repo root, or double-click `start.cmd`. The page is at `http://127.0.0.1:8790/`. Assets stay in the folder named by `ui.room.assets` in `core/config.json` and are served under `/assets/`, with `assets/manifest.json` listing every GLB in it.
+from the repo root, or double-click `start.cmd`. The page is at `http://127.0.0.1:8790/?dev`. Assets stay in the folder named by `ui.room.assets` in `core/config.json` and are served under `/assets/`, with `assets/manifest.json` listing every GLB in it.
+
+## Inside Iris
+
+The Qt window (`ui/main.py`) opens on the room whenever `ui.room` is in the config. `ui/room_view.py` serves this folder and the assets to a `QWebEngineView` through the `iris-room://` scheme, with no server, and talks to the page over `QWebChannel`:
+
+- The page sees the host as `avatarDev.host` (`host.js` connects it): it reports `pageReady`, `progress`, `log`, `loadError` and `openChat`, and receives `stateChanged`, `speechLevel`, `commandRequested` and `viewChanged`.
+- Only the room camera is used; the test panel and HUD are hidden. Ctrl+Shift+D shows them, as does `?dev` on the URL or `"dev": true` under `ui.room`.
+- Clicking the monitor, or pressing Enter, opens the chat. **Back to room** in the chat header, or Esc in an empty composer, goes back.
+- The page is loaded once at startup and stays loaded.
+- `register_room_scheme()` also sets `QSG_RHI_BACKEND=opengl` unless it is already set, and the renderer keeps its drawing buffer (`preserveDrawingBuffer` in scene.js). With Qt's default Direct3D 11 backend the WebGL canvas drops out for a frame every few seconds (measured 2026-10-26 by grabbing the screen at 30 fps: 5 blank frames in 40 s on D3D11, 1 in 60 s on OpenGL, none in 60 s on OpenGL with the buffer preserved).
 
 ## Rooms
 
 `avatar.json` is Iris: her character, clips, gestures, idle life and walking. The room she is in is a separate file named by its `room` key, `rooms/office.json` today. A room file holds the GLB and everything that only makes sense in that room:
 
-- `file`, `floor` (the object she stands on; the room is lowered so its top is at her feet), `walls` (a name pattern that gives the room's extent), `hide`, `noShadowFrom`.
+- `file`, `floor` (the object she stands on; the room is lowered so its top is at her feet), `walls` (a name pattern that gives the room's extent), `monitor` (a name pattern for the screen she works at; it brightens under the pointer and a click emits `monitorClicked`), `hide`, `noShadowFrom`.
 - `camera` and the door timings `doorWatch`, `doorLeave`, `doorSwing`.
 - `spots`: `home` (where she stands and works), `door` (just inside the door she uses), `away` (where she waits outside), `closeup`. Each is an offset from an `anchor` object plus a `facing` in degrees.
 - `furniture`: approach points for sit and lie, such as `"couch": { "anchor": "Couch_Entry", "alignClip": "sit", "facing": 0 }`.
@@ -52,7 +62,7 @@ A new room is a new file with the same keys; leave out what the room does not ha
 | `command(text)` | the dev command line |
 | `on(event, fn)` | events below; returns an unsubscribe |
 
-Events: `ready`, `log { message, isError }`, `motion { name, activity }`, `plan [steps]`, `planDone step`, `state`, `speaking`, `listening`, `outfit key`, `hud text`, `progress { loaded, total }`, `loadError message`.
+Events: `ready`, `monitorClicked`, `log { message, isError }`, `motion { name, activity }`, `plan [steps]`, `planDone step`, `state`, `speaking`, `listening`, `outfit key`, `hud text`, `progress { loaded, total }`, `loadError message`.
 
 ## Check her without a browser
 

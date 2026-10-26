@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Iris Avatar Test</title>
+<title>Iris</title>
 <style>
 :root {
   --bg: #15171a;
@@ -17,15 +17,18 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, "Segoe UI", sans-serif; }
-body { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+body { display: grid; grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+body.dev { grid-template-columns: 1fr 340px; }
 #stage { position: relative; min-width: 0; }
 #stage canvas { display: block; width: 100%; height: 100%; }
-#hud { position: absolute; left: 12px; top: 10px; color: var(--muted); font: 12px ui-monospace, Consolas, monospace; pointer-events: none; white-space: pre; }
+#hud { position: absolute; left: 12px; top: 10px; color: var(--muted); font: 12px ui-monospace, Consolas, monospace; pointer-events: none; white-space: pre; display: none; }
+body.dev #hud { display: block; }
 #loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; background: var(--bg); }
 #loading .bar { width: 320px; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
 #loading .fill { height: 100%; width: 0; background: var(--accent); }
 #loading .label { color: var(--muted); font-size: 12px; }
-aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; min-height: 0; padding: 10px 12px 40px; }
+aside { display: none; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; min-height: 0; padding: 10px 12px 40px; }
+body.dev aside { display: block; }
 h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 16px 0 6px; font-weight: 600; }
 h2:first-child { margin-top: 4px; }
 .row { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
@@ -47,7 +50,7 @@ summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 #parts label { display: flex; gap: 4px; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hint { color: var(--muted); font-size: 12px; margin: 2px 0; }
 @media (max-width: 760px) {
-  body { grid-template-columns: 1fr; grid-template-rows: 55vh minmax(0, 1fr); }
+  body.dev { grid-template-columns: 1fr; grid-template-rows: 55vh minmax(0, 1fr); }
   aside { border-left: 0; border-top: 1px solid var(--line); padding: 8px 16px 40px; }
 }
 </style>

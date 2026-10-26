@@ -2,6 +2,7 @@
   "file": "assets/Building/office.glb",
   "floor": "Plane_0",
   "walls": "Wall",
+  "monitor": "^Monitor",
   "spotPrefix": "Spot_",
   "spotSuffixes": ["_Entry"],
   "show": true,

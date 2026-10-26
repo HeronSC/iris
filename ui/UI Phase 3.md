@@ -167,13 +167,13 @@ Emotion tags from the model, matching expressions to what she says, stay in Phas
    - Copy into `ui/room/` with `// File:` headers; app.js already has no comments, so it passes the house rules otherwise.
    - Commit it before changing anything.
    - Point the asset path at `E:\Reallusion\Iris`.
-2. **Room view in Qt:**
+2. **Room view in Qt** (done 2026-10-26: `ui/room_view.py`, `ui/room/host.js`; Enter opens the chat until the monitor exists):
    - the scheme handler, `QWebEngineView` and `QWebChannel`
    - the developer panel behind a key
    - the room camera only
 3. **Screen choice:** frameless full screen on `ui.room_screen`, the missing-screen fallback, geometry restore, and the launcher fix.
 4. **Voice states to body language,** plus the new speaking signal and speech levels for the mouth.
-5. **Monitor asset** (Henry, in Blender), then click, live texture and transitions.
+5. **Monitor asset** (Henry, in Blender), then click, live texture and transitions. (Click done 2026-10-26: `ui/room/monitor.js` raycasts the `monitor` objects of the room file, hover brightens them, a click opens the chat. Live texture and transitions still open.)
 6. **Cards over the room** and the notification badge.
 7. **All-day behaviour:** frame cap, pausing, start with Windows, and the chat idle return.
 

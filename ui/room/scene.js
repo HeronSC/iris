@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 export function createScene(ctx, container) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -40,6 +40,7 @@ export function createScene(ctx, container) {
   marker.rotation.x = -Math.PI / 2;
   marker.position.y = 0.003;
   marker.visible = false;
+  marker.layers.set(1);
   scene.add(marker);
   const rimLight = new THREE.DirectionalLight(0xbfd4ff, 1.2);
   rimLight.position.set(-2, 2.5, -2.5);

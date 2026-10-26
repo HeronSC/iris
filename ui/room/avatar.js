@@ -18,6 +18,7 @@ import { createIdleLife } from './idle_life.js';
 import { createIdleGraph } from './idle_graph.js';
 import { createCameraModes } from './camera.js';
 import { createCommands } from './commands.js';
+import { createMonitor } from './monitor.js';
 import { createLoop } from './loop.js';
 
 async function init(ctx, container, configUrl) {
@@ -42,6 +43,7 @@ async function init(ctx, container, configUrl) {
   createIdleGraph(ctx);
   createCameraModes(ctx);
   createCommands(ctx);
+  createMonitor(ctx);
   createLoop(ctx);
 
   if (ctx.room.scene) ctx.setRoomVisible(config.room.show !== false);
