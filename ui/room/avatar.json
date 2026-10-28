@@ -66,47 +66,28 @@
       "next": "home"
     },
     "sit": {
-      "file": "assets/Motion/Couch/SitOnCouch.glb",
-      "clip": "5497372685056_TempMotion",
+      "file": "assets/Motion/Sofa/Sofa_Sit.glb",
+      "clip": "longest",
       "loop": false,
       "alignTo": "sit",
+      "groundFeet": true,
       "next": "seated"
     },
     "seated": {
-      "file": "assets/Motion/Couch/SitOnCouch.glb",
-      "clip": "5497372685056_TempMotion",
+      "file": "assets/Motion/Sofa/Sofa_Sit.glb",
+      "clip": "longest",
       "hold": "end",
       "loop": true,
-      "alignTo": "sit"
+      "alignTo": "sit",
+      "groundFeet": true
     },
     "stand_up": {
-      "file": "assets/Motion/Couch/StandUpOffCouch.glb",
-      "clip": "3055335342336_TempMotion.004",
+      "file": "assets/Motion/Sofa/Sofa_Stand.glb",
+      "clip": "longest",
       "loop": false,
       "alignTo": "sit",
+      "groundFeet": true,
       "next": "home"
-    },
-    "lay_down": {
-      "file": "assets/Motion/Couch/LayDownonCouch.glb",
-      "clip": "5497372685056_TempMotion",
-      "loop": false,
-      "alignTo": "sit",
-      "next": "lying"
-    },
-    "lying": {
-      "file": "assets/Motion/Couch/LayDownonCouch.glb",
-      "clip": "5497372685056_TempMotion",
-      "hold": "end",
-      "loop": true,
-      "alignTo": "sit",
-      "eyesClosed": true
-    },
-    "sit_up": {
-      "file": "assets/Motion/Couch/SituponCouch.glb",
-      "clip": "3055335342336_TempMotion.001",
-      "loop": false,
-      "alignTo": "sit",
-      "next": "seated"
     },
     "turn90_left": {
       "file": "assets/Motion/Basics/Run90Left.glb",
@@ -144,15 +125,15 @@
       "rootMotion": true,
       "mirror": true
     },
-    "turn180_idle_right": {
-      "file": "assets/Motion/Basics/Turn180_Idle_right.glb",
+    "turn180_idle_left": {
+      "file": "assets/Motion/Basics/Turn180_Idle_Left.glb",
       "clip": "longest",
       "loop": false,
       "groundFeet": true,
       "rootMotion": true
     },
-    "turn180_idle_left": {
-      "file": "assets/Motion/Basics/Turn180_Idle_right.glb",
+    "turn180_idle_right": {
+      "file": "assets/Motion/Basics/Turn180_Idle_Left.glb",
       "clip": "longest",
       "loop": false,
       "groundFeet": true,
@@ -185,12 +166,6 @@
       "loop": "seated",
       "exit": "stand_up",
       "approach": "couch"
-    },
-    "lie": {
-      "enter": "lay_down",
-      "loop": "lying",
-      "exit": "sit_up",
-      "parent": "sit"
     },
     "dance": {
       "once": "dance",
@@ -238,7 +213,7 @@
   "hiddenParts": ["CC_Base_EyeOcclusion", "CC_Base_TearLine", "Cigarette", "lighter", "hand_mirror", "SM_Phone_Smart_00"],
   "clothing": ["Denim_shorts", "Spaghetti_strap_Top", "Canvas_shoes", "Underwear_Bottoms"],
   "outfits": {},
-  "frameCap": 30,
+  "frameCap": 0,
   "outfitFolder": "assets/Clothes/Outfits",
   "extraOutfitFolders": ["assets/Clothes/Lingerie"],
   "motionFolder": "assets/Motion",
@@ -410,7 +385,16 @@
     "environment": 0.35,
     "key": 1.4,
     "rim": 0.6,
-    "fill": 0.2
+    "fill": 0.2,
+    "face": 0.8,
+    "toneMapping": "aces"
+  },
+  "ambientOcclusion": {
+    "on": false,
+    "radius": 0.3,
+    "scale": 1,
+    "thickness": 1,
+    "intensity": 1
   },
   "face": {
     "blink": ["Eye_Blink_L", "Eye_Blink_R"],
@@ -541,7 +525,7 @@
     "headShare": 0.55,
     "headSpeed": 0.9,
     "eyeSpeed": 5,
-    "rest": ["sit", "lie"]
+    "rest": ["sit"]
   },
   "idleGraph": {
     "on": true,

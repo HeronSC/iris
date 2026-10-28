@@ -194,6 +194,7 @@ class VoiceService:
             max_utterance_seconds=settings.max_utterance_seconds,
             end_phrases=settings.end_phrases or DEFAULT_END_PHRASES,
             wake_names=(settings.wake_names or DEFAULT_WAKE_NAMES) if wake else (),
+            barge_in=settings.barge_in,
         )
         self.conversation = session
         session.start()

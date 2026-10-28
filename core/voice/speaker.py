@@ -165,6 +165,8 @@ class Speaker:
                 try:
                     if self._stop.is_set() and hasattr(player, "abort"):
                         player.abort()
+                    elif hasattr(player, "stop"):
+                        player.stop()
                     player.close()
                 except (OSError, ValueError, RuntimeError, TypeError):
                     pass

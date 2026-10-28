@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 
 export function createLoop(ctx) {
-  const { clock, baseTransforms, rig, mixer, view, camera, controls, keyLight, keyOffset, faceAxes, walk, faceState, bodyShape, explorer, face, expressions, boneDrivers, resolveMorph, rotateWorld, renderer, scene, motion, emit } = ctx;
+  const { clock, baseTransforms, rig, mixer, view, camera, controls, keyLight, keyOffset, faceAxes, walk, faceState, bodyShape, explorer, face, expressions, boneDrivers, resolveMorph, rotateWorld, renderer, motion, emit } = ctx;
   const timer = new THREE.Timer();
   let fpsFrames = 0;
   let fpsTime = 0;
@@ -84,7 +84,8 @@ export function createLoop(ctx) {
     ctx.applyFloorContact(dt);
 
     controls.update();
-    renderer.render(scene, camera);
+    ctx.updateFaceLight();
+    ctx.render();
 
     fpsFrames += 1;
     fpsTime += dt;

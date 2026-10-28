@@ -85,6 +85,7 @@ class ConversationSession:
         threshold: float = 0.5,
         end_phrases: tuple[str, ...] = DEFAULT_END_PHRASES,
         wake_names: tuple[str, ...] = (),
+        barge_in: bool = True,
     ) -> None:
         self.service = service
         self.on_utterance = on_utterance
@@ -102,6 +103,7 @@ class ConversationSession:
         self.threshold = float(threshold)
         self.end_phrases = tuple(end_phrases)
         self.wake_names = tuple(wake_names)
+        self.barge_in = bool(barge_in)
         self.asleep = bool(self.wake_names)
         self._frames: queue.Queue[np.ndarray | None] = queue.Queue()
         self._stream: Any = None
@@ -230,7 +232,9 @@ class ConversationSession:
                     speech_run = speech_run + 1 if voiced else 0
                     if self.service.speaking and not self.asleep:
                         self._last_activity = self.clock()
-                        if speech_run >= BARGE_IN_FRAMES:
+                        if not self.barge_in:
+                            speech_run = 0
+                        elif speech_run >= BARGE_IN_FRAMES:
                             self.service.stop_speaking()
                             speech = list(pre_roll)
                             silence_run = 0

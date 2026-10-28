@@ -244,9 +244,18 @@ export function createClips(ctx) {
     return { interp: track.createInterpolant(), start: times[0], end: times[times.length - 1], steps, distance: Math.hypot(x, z) };
   }
 
+  const resolvedKeys = new Map();
+  function clipKey(entry, name) {
+    const cacheKey = `${name}|${entry.file}|${entry.clip}`;
+    if (resolvedKeys.has(cacheKey)) return resolvedKeys.get(cacheKey);
+    const key = entry.clip === 'longest' ? longestClipKey(entry.file, name) : `${entry.file}::${entry.clip}`;
+    resolvedKeys.set(cacheKey, key);
+    return key;
+  }
+
   function alignedSource(clipName) {
     const ref = config.clips[clipName];
-    return ref ? sourceClips.get(`${ref.file}::${ref.clip}`) : null;
+    return ref ? sourceClips.get(clipKey(ref, clipName)) : null;
   }
 
   function sampleBones(clip, names, times, read) {
@@ -470,12 +479,12 @@ export function createClips(ctx) {
     clipEntries.push([name, entry]);
     const heelsFile = heelsFiles.get(entry.file);
     if (heelsFile) {
-      const named = entry.clip !== 'longest' && rawClips.has(`${heelsFile}::${entry.clip}`);
+      const named = rawClips.has(`${heelsFile}::${entry.clip}`);
       clipEntries.push([`${name}${heelSuffix}`, { ...entry, file: heelsFile, clip: named ? entry.clip : 'longest', heelsOf: name, groundFeet: false, groundFeetFrom: entry.groundFeet ? name : null }]);
     }
   }
   for (const [name, entry] of clipEntries) {
-    const key = entry.clip === 'longest' ? longestClipKey(entry.file, name) : `${entry.file}::${entry.clip}`;
+    const key = clipKey(entry, name);
     if (entry.clip === 'longest' && key && rawClips.get(key).duration < 1) log(`"${name}": the longest clip in ${entry.file} is only ${rawClips.get(key).duration.toFixed(2)} s. The export may be missing its animation.`, true);
     let raw = rawClips.get(key);
     const refSource = entry.alignTo ? alignedSource(entry.alignTo) : null;

@@ -6,6 +6,7 @@ import { loadLibrary } from './library.js';
 import { loadAssets } from './loading.js';
 import { createCharacter } from './character.js';
 import { loadRoom, placeSpots } from './room.js';
+import { createSunlight } from './sunlight.js';
 import { createOutfits } from './outfits.js';
 import { createMorphs } from './morphs.js';
 import { createClips } from './clips.js';
@@ -40,6 +41,7 @@ async function init(ctx, container, configUrl) {
   await loadAssets(ctx);
   createCharacter(ctx);
   loadRoom(ctx);
+  createSunlight(ctx);
   await createOutfits(ctx);
   createMorphs(ctx);
   createClips(ctx);

@@ -44,8 +44,6 @@ select, input[type=text] { width: 100%; }
 details { margin: 10px 0 4px; }
 summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .spots { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
-#log { font: 12px ui-monospace, Consolas, monospace; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; height: 240px; min-height: 80px; resize: vertical; overflow-y: auto; overscroll-behavior: contain; white-space: pre-wrap; }
-#log .err { color: var(--warn); }
 #parts { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
 #parts label { display: flex; gap: 4px; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hint { color: var(--muted); font-size: 12px; margin: 2px 0; }
@@ -65,7 +63,6 @@ summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 </div>
 <aside>
   <h2>Motion</h2>
-  <div id="spots" class="spots"></div>
   <div id="presets" class="motions"></div>
   <div class="row"><label>Outfit</label><select id="outfitSelect" style="flex: 1; width: auto;"></select></div>
   <div class="row"><button id="resetPos">Reset position</button></div>
@@ -80,21 +77,8 @@ summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   <div class="row"><button id="playRaw">Play clip</button><button id="loopToggle" class="on">Loop</button><button id="mirrorRaw">Mirror</button><button id="stopAll">Freeze</button></div>
   </details>
 
-  <section id="roomSection">
-  <h2>Room</h2>
-  <div class="row"><button id="roomToggle" class="on">Show room</button><button id="mapToggle">Show floor map</button></div>
-  </section>
-
-  <h2>Commands</h2>
-  <div class="row"><input id="cmd" type="text" placeholder="idle · walk · goto center · help" autocomplete="off"></div>
-  <div id="log"></div>
-  <div class="row"><button id="clearLog">Clear</button><span class="hint">Drag the bottom-right corner to resize.</span></div>
-
   <h2>Face</h2>
-  <div class="row"><button id="lookToggle">Follow mouse</button><button id="talkToggle">Talk test</button></div>
-  <div class="row"><label>Mouth</label><input id="mouth" type="range" min="0" max="1" step="0.01" value="0"><output id="mouthOut">0.00</output></div>
-  <div class="row"><label>Audio</label><input id="audioFile" type="file" accept="audio/*"></div>
-  <p class="hint">An audio file drives the mouth from its volume, the same way Piper's output would.</p>
+  <div class="row"><button id="lookToggle">Follow mouse</button></div>
 
   <h2>Morph explorer</h2>
   <div class="row"><select id="morphName"></select></div>
@@ -119,6 +103,7 @@ summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   <div class="row"><label>Key</label><input id="key" type="range" min="0" max="4" step="0.05"><output id="keyOut"></output></div>
   <div class="row"><label>Rim</label><input id="rim" type="range" min="0" max="3" step="0.05"><output id="rimOut"></output></div>
   <div class="row"><label>Fill</label><input id="fill" type="range" min="0" max="2" step="0.05"><output id="fillOut"></output></div>
+  <div class="row"><label>Face</label><input id="face" type="range" min="0" max="3" step="0.05"><output id="faceOut"></output></div>
   <p class="hint">Starting values come from "lighting" in avatar.json.</p>
 
   <h2>Parts</h2>

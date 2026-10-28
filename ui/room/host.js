@@ -30,6 +30,7 @@ export function connectHost(ctx, api, doc) {
   ctx.on('loadError', (message) => send('loadError', message));
   ctx.on('ready', () => send('pageReady'));
   ctx.on('monitorClicked', () => send('openChat'));
+  ctx.on('wakeRequested', () => send('toggleWake'));
   doc.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !inDev() && e.target === doc.body) send('openChat');
   });

@@ -289,6 +289,7 @@
     "hotkey": "ctrl+alt+t",
     "whisper_model": "small.en",
     "whisper_device": "auto",
+    "output_device": "Headset Earphone (2- CORSAIR VI",
     "piper_voice": "en_US-lessac-medium",
     "speak_replies": "voice",
     "max_spoken_chars": 600,
@@ -299,6 +300,7 @@
     "wake_hotkey": "ctrl+alt+w",
     "wake_names": ["iris", "hey iris", "hi iris", "okay iris", "irish"],
     "wake_at_start": false,
+    "barge_in": false,
     "wake_reply": "Yes?"
   },
   "trading": {

@@ -54,6 +54,18 @@ On request only: ${names(false)}`);
     if (command === 'freeze') return ctx.stopAll();
     if (command === 'speed') return ctx.setSpeed(Number(rest[0]) || 1);
     if (command === 'fade') return ctx.setFade(Number(rest[0]) || 0);
+    if (command === 'ao') return ctx.setAo(rest[0] === undefined || onOff(rest[0]) ? { on: true, ...(Number(rest[0]) ? { intensity: Number(rest[0]) } : {}) } : { on: false });
+    if (command === 'sun') {
+      const [elevation, azimuth, intensity, color] = rest;
+      const changes = {};
+      if (elevation !== undefined) changes.elevation = Number(elevation);
+      if (azimuth !== undefined) changes.azimuth = Number(azimuth);
+      if (intensity !== undefined) changes.intensity = Number(intensity);
+      if (color) changes.color = color;
+      return ctx.setSun(changes) || log('This room has no sun.', true);
+    }
+    if (command === 'lamps') return ctx.setLamps(rest[0] === undefined || rest[0] === 'on' ? 1 : rest[0] === 'off' ? 0 : Number(rest[0]));
+    if (command === 'tonemap') return ctx.setToneMapping(rest[0] || 'aces') || log('Tone mappings: aces, agx, neutral, none', true);
     if (command === 'mouth') return ctx.setMouth(Number(rest[0]) || 0);
     if (command === 'blink') return ctx.setBlink(onOff(rest[0]));
     if (command === 'look') return ctx.setLook(onOff(rest[0]));

@@ -46,7 +46,10 @@ export function createApi(ctx) {
       if (!(key in state) || state[key] === Boolean(value)) continue;
       state[key] = Boolean(value);
       if (key === 'listening') ctx.setListening(state.listening);
-      if (key === 'speaking') ctx.setSpeaking(state.speaking);
+      if (key === 'speaking') {
+        ctx.setSpeaking(state.speaking);
+        if (!ctx.speechLevelsSeen) ctx.setTalk(state.speaking);
+      }
       if (key === 'thinking' && state.thinking && ctx.gestureDefs.small_tilt) ctx.playGesture('small_tilt');
     }
     ctx.emit('state', { ...state });
@@ -81,7 +84,10 @@ export function createApi(ctx) {
     neutral,
     outfit: (name) => ctx.setOutfit(name),
     setState,
-    speechLevel: (level) => ctx.setSpeechLevel(level),
+    speechLevel: (level) => {
+      ctx.speechLevelsSeen = true;
+      ctx.setSpeechLevel(level);
+    },
     voice: (on) => ctx.setVoice(on),
     camera: (mode) => ctx.setCameraMode(mode),
     command: (text) => ctx.runCommand(text),

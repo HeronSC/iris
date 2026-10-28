@@ -5,16 +5,6 @@ export function createPanel(avatar, doc) {
   const titleCase = (name) => name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
   const on = avatar.on;
 
-  on('log', ({ message, isError }) => {
-    const box = $('log');
-    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
-    const line = doc.createElement('div');
-    if (isError) line.className = 'err';
-    line.textContent = message;
-    box.append(line);
-    if (atBottom) box.scrollTop = box.scrollHeight;
-  });
-  $('clearLog').onclick = () => { $('log').replaceChildren(); };
   on('hud', (text) => { $('hud').textContent = text; });
 
   on('progress', ({ loaded, total }) => {
@@ -48,15 +38,12 @@ export function createPanel(avatar, doc) {
   const toggleClass = (id, onState) => $(id).classList.toggle('on', onState);
   on('voice', (onState) => {
     toggleClass('voiceToggle', onState);
-    toggleClass('motion_work', onState);
+    toggleClass('motion_talk', onState);
   });
   on('life', (onState) => toggleClass('lifeToggle', onState));
   on('listening', (onState) => toggleClass('listenToggle', onState));
   on('look', (onState) => toggleClass('lookToggle', onState));
-  on('talk', (onState) => toggleClass('talkToggle', onState));
   on('loopRaw', (onState) => toggleClass('loopToggle', onState));
-  on('roomVisible', (onState) => toggleClass('roomToggle', onState));
-  on('mapVisible', (onState) => toggleClass('mapToggle', onState));
   on('cameraMode', (mode) => { for (const m of ['orbit', 'follow', 'room']) toggleClass(`cam_${m}`, m === mode); });
 
   function bindSlider(id, event, onInput, digits = 2) {
@@ -113,7 +100,7 @@ export function createPanel(avatar, doc) {
 
   on('ready', () => {
     $('loading').remove();
-    const { activities, room, outfitCatalog, rawClips, morphNames, morphSet, bodyShape, gestureDefs, expressions, lighting, motion, config } = avatar;
+    const { room, outfitCatalog, rawClips, morphNames, morphSet, bodyShape, gestureDefs, expressions, lighting, motion, config } = avatar;
 
     for (const entry of outfitCatalog.values()) {
       const option = doc.createElement('option');
@@ -124,15 +111,13 @@ export function createPanel(avatar, doc) {
     if (avatar.outfitState.current) $('outfitSelect').value = avatar.outfitState.current;
 
     const motionButtons = [
+      ['Talk', () => { if (avatar.host) avatar.emit('wakeRequested'); else avatar.setVoice(!avatar.voice.on); }],
       ['Home', avatar.returnHome],
-      ['Work', () => avatar.setVoice(!avatar.voice.on)],
-      ['Idle', () => avatar.request('idle')],
-      ['Halt', avatar.goHome],
-      ['Close-up', avatar.closeUp],
-      ...Object.keys(activities).filter((key) => !avatar.isWalkLoop(activities[key].loop)).map((key) => [titleCase(key), () => avatar.request(key)]),
+      ['Sit', () => avatar.request('sit')],
+      ['Stand', () => avatar.request('idle')],
     ];
-    for (const [label, action] of motionButtons) addButton($('presets'), label, action, `motion_${label.toLowerCase().replace(/\W+/g, '_')}`);
-    toggleClass('motion_work', avatar.voice.on);
+    for (const [label, action] of motionButtons) addButton($('presets'), label, action, `motion_${label.toLowerCase()}`);
+    toggleClass('motion_talk', avatar.voice.on);
 
     for (const [key, clip] of rawClips) {
       const [file, clipName] = key.split('::');
@@ -153,40 +138,23 @@ export function createPanel(avatar, doc) {
     $('stopAll').onclick = avatar.stopAll;
     $('resetPos').onclick = avatar.resetPosition;
 
-    if (room.scene) {
-      for (const name of avatar.rooms.keys()) addButton($('spots'), titleCase(name), () => avatar.goToSpot(name));
-      for (const name of avatar.allSpots.keys()) addButton($('spots'), titleCase(name), () => avatar.goToSpot(name));
-      $('roomToggle').onclick = () => avatar.setRoomVisible(!room.scene.visible);
-      $('mapToggle').onclick = () => avatar.setMapVisible(!avatar.navView.group.visible);
-      toggleClass('roomToggle', room.scene.visible);
-    } else {
-      $('roomSection').hidden = true;
-    }
-
     for (const m of ['orbit', 'follow', 'room']) $(`cam_${m}`).onclick = () => avatar.setCameraMode(m);
     if (!room.camera) $('cam_room').hidden = true;
     for (const m of ['orbit', 'follow', 'room']) toggleClass(`cam_${m}`, m === avatar.view.mode);
 
     bindSlider('speed', 'speed', avatar.setSpeed);
     bindSlider('fade', 'fade', avatar.setFade);
-    for (const name of ['exposure', 'environment', 'key', 'rim', 'fill']) {
+    for (const name of ['exposure', 'environment', 'key', 'rim', 'fill', 'face']) {
       $(name).value = lighting[name];
       bindSlider(name, null, (v) => avatar.setLighting(name, v));
     }
     on('lighting', ({ name, value }) => { $(`${name}Out`).textContent = Number(value).toFixed(2); });
-    bindSlider('mouth', 'mouth', avatar.setMouth);
 
     $('lookToggle').onclick = () => avatar.setLook(!avatar.look.on);
-    $('talkToggle').onclick = () => avatar.setTalk(!avatar.talk.on);
     $('lifeToggle').onclick = () => avatar.setLife(!avatar.life.on);
     $('listenToggle').onclick = () => avatar.setListening(!avatar.life.listening);
     $('voiceToggle').onclick = () => avatar.setVoice(!avatar.voice.on);
     toggleClass('lifeToggle', avatar.life.on);
-
-    $('audioFile').onchange = (e) => {
-      const file = e.target.files[0];
-      if (file) avatar.playAudioFile(file);
-    };
 
     for (const name of morphNames) {
       const option = doc.createElement('option');
@@ -215,25 +183,6 @@ export function createPanel(avatar, doc) {
       expressionRows.set(name, addSliderRow($('expressions'), name, 0, (v) => avatar.setExpression(name, v)));
     }
 
-    const history = [];
-    let historyIndex = 0;
-    $('cmd').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const value = $('cmd').value;
-        if (value.trim()) history.push(value);
-        historyIndex = history.length;
-        $('cmd').value = '';
-        avatar.runCommand(value);
-      } else if (e.key === 'ArrowUp' && history.length) {
-        historyIndex = Math.max(0, historyIndex - 1);
-        $('cmd').value = history[historyIndex];
-        e.preventDefault();
-      } else if (e.key === 'ArrowDown' && history.length) {
-        historyIndex = Math.min(history.length, historyIndex + 1);
-        $('cmd').value = history[historyIndex] || '';
-        e.preventDefault();
-      }
-    });
     void config;
   });
 }

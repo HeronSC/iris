@@ -2,13 +2,35 @@
   "file": "assets/Building/LivingArea.glb",
   "origin": [-12.83, 0, 0],
   "rotation": 0,
-  "floor": "Plane_0",
+  "floor": "Floor",
   "walls": "^Wall_[NESW]",
   "spotPrefix": "Spot_",
   "spotSuffixes": ["_Inside", "_Outside"],
   "show": true,
-  "hide": ["Floor"],
-  "noShadowFrom": "Wall|Ceiling|Door|Window|Trim|Sill|Floor|Plane|Shell|Beam",
+  "hide": [],
+  "noShadowFrom": "Window_View|Floor|Plane|Shell",
+  "lightScale": 0.0002,
+  "shadowLights": ["Recessed_Light_Spot.001", "Recessed_Light_Spot.002", "Recessed_Light_Spot.003", "Recessed_Light_Spot.004"],
+  "sun": {
+    "elevation": 35,
+    "azimuth": 20,
+    "color": "#fff1d6",
+    "intensity": 3.5
+  },
+  "lamps": {
+    "onBelow": 1,
+    "level": 1
+  },
+  "lights": {
+    "environment": 0.12,
+    "fill": 0.45,
+    "key": 0.45,
+    "rim": 0.25,
+    "sky": "#a9c4e8",
+    "ground": "#857350",
+    "bounce": 1.2,
+    "bounceColor": "#d8ccb8"
+  },
   "cameraMode": "room",
   "camera": {
     "position": [-0.1, 1.49, 4.55],
@@ -21,8 +43,8 @@
   "doorSwing": 2.75,
   "spots": {
     "home": {
-      "x": 2.0,
-      "z": -3.2,
+      "x": 0.0,
+      "z": -0.3,
       "facing": 0
     },
     "door": {
@@ -41,6 +63,11 @@
       "facing": 0
     }
   },
-  "furniture": {},
+  "furniture": {
+    "couch": {
+      "anchor": "Sofa_Sit_Entry",
+      "facing": 0
+    }
+  },
   "passable": ["Door1", "Door2", "Door2001", "Door001", "Door_Enter_0"]
 }

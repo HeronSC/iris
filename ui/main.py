@@ -73,6 +73,8 @@ LISTENING_HINT = "Listening… release the key to send, or press it again."
 CONVERSATION_HINT = "Conversation on: just talk. Say \"that's all\" or tap the talk key to end."
 WAKE_ASLEEP_HINT = "Wake word on: say \"Iris\" to start. The wake key turns it off."
 VOICE_HINTS = {LISTENING_HINT, CONVERSATION_HINT, WAKE_ASLEEP_HINT, "Transcribing…", "Hearing you…"}
+VOICE_ROOM_STATES = {"listening": (True, False), "conversation": (True, False), "conversation-hearing": (True, False), "transcribing": (False, True), "conversation-transcribing": (False, True), "wake-asleep": (False, False), "idle": (False, False)}
+LEAVE_OFFICE_REASONS = {"phrase", "stopped", "shutdown"}
 CONVERSATION_END_TEXT = {"idle": "Conversation ended after a quiet stretch.", "phrase": "Conversation ended.", "stopped": "Conversation ended.", "shutdown": "Conversation ended."}
 
 
@@ -578,6 +580,7 @@ class IrisWindow(QMainWindow):
             return
         self.room_view = RoomView(room["assets"], self)
         self.room_view.chatRequested.connect(self.show_chat)
+        self.room_view.wakeRequested.connect(self.on_wake_hotkey)
         self.room_view.failed.connect(lambda message: self.set_status(f"Room: {message}"))
         self.views.addWidget(self.room_view)
         self.room_button.setVisible(True)
@@ -628,6 +631,11 @@ class IrisWindow(QMainWindow):
         self.voice_controller.conversationEnded.connect(self._on_conversation_ended)
         self.voice_controller.woke.connect(self._on_woke)
         self.voice_controller.wakeChanged.connect(self._on_wake_changed)
+        self._room_speaking = False
+        self.speak_timer = QTimer(self)
+        self.speak_timer.setInterval(100)
+        self.speak_timer.timeout.connect(self._poll_speaking)
+        self.speak_timer.start()
         if voice.available:
             self.talk_hotkey.register(str(self.settings.value("window/talk_hotkey") or voice.config.hotkey))
             self.wake_hotkey.register(str(self.settings.value("window/wake_hotkey") or voice.config.wake_hotkey))
@@ -644,11 +652,28 @@ class IrisWindow(QMainWindow):
             return
         self.voice_controller.on_wake_hotkey()
 
+    def _room_work(self, on: bool) -> None:
+        if self.room_view is not None:
+            self.room_view.command("work on" if on else "work off")
+
+    def _room_state(self, **changes: bool) -> None:
+        if self.room_view is not None:
+            self.room_view.set_state(**changes)
+
+    def _poll_speaking(self) -> None:
+        voice = self._voice_service()
+        speaking = bool(voice is not None and voice.speaking)
+        if speaking != self._room_speaking:
+            self._room_speaking = speaking
+            self._room_state(speaking=speaking)
+
     def _on_woke(self, command: str) -> None:
         voice = self._voice_service()
         if voice is None:
             return
         self.set_status("Awake")
+        self._room_work(True)
+        self._room_state(listening=True)
         self.activity_label.setText(CONVERSATION_HINT)
         self.activity_label.setVisible(True)
         if not command:
@@ -656,6 +681,9 @@ class IrisWindow(QMainWindow):
 
     def _on_wake_changed(self, enabled: bool) -> None:
         self._on_voice_failed("Wake word on. Say \"Iris\" to start." if enabled else "Wake word off.")
+        self._room_work(enabled)
+        if not enabled:
+            self._room_state(listening=False, thinking=False)
 
     def _submit_from_voice(self, text: str) -> None:
         if not self.engine_available or (self.worker is not None and self.worker.isRunning()):
@@ -672,6 +700,9 @@ class IrisWindow(QMainWindow):
         self._submit_command(text)
 
     def _on_voice_state(self, state: str) -> None:
+        if state in VOICE_ROOM_STATES:
+            listening, thinking = VOICE_ROOM_STATES[state]
+            self._room_state(listening=listening, thinking=thinking)
         hints = {"listening": ("Listening", LISTENING_HINT), "transcribing": ("Transcribing", "Transcribing…"), "conversation": ("Conversation", CONVERSATION_HINT), "conversation-hearing": ("Hearing you", "Hearing you…"), "conversation-transcribing": ("Transcribing", "Transcribing…"), "wake-asleep": ("Wake word on", WAKE_ASLEEP_HINT)}
         found = hints.get(state)
         if found is not None:
@@ -687,6 +718,9 @@ class IrisWindow(QMainWindow):
 
     def _on_conversation_ended(self, reason: str) -> None:
         self._on_voice_failed(CONVERSATION_END_TEXT.get(reason, f"Conversation ended ({reason})."))
+        self._room_state(listening=False, thinking=False)
+        if reason in LEAVE_OFFICE_REASONS:
+            self._room_work(False)
 
     def _voice_prompt_answer(self, request: PromptRequest) -> str | None:
         voice = self._voice_service()

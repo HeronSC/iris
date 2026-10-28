@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.parse
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QByteArray, QFile, QIODevice, QMimeDatabase, QObject, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import QBuffer, QByteArray, QFile, QIODevice, QMimeDatabase, QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineUrlRequestJob, QWebEngineUrlScheme, QWebEngineUrlSchemeHandler
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QWidget
+from PySide6.QtQuick import QQuickView
+from PySide6.QtWebEngineCore import QWebEngineUrlRequestJob, QWebEngineUrlScheme, QWebEngineUrlSchemeHandler
+from PySide6.QtWebEngineQuick import QQuickWebEngineProfile, QtWebEngineQuick
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 #! @allow-local-import
 from ui.room.manifest import build_manifest
@@ -20,17 +21,22 @@ from ui.room.manifest import build_manifest
 SCHEME = b"iris-room"
 ROOM_URL = "iris-room://room/index.html"
 ROOM_DIR = Path(__file__).resolve().parent / "room"
+HOST_QML = Path(__file__).resolve().parent / "room_host.qml"
+BACKGROUND = "#15171a"
 DEFAULT_ASSETS = "E:/Reallusion/Iris"
 MIME_OVERRIDES = {".js": "text/javascript", ".mjs": "text/javascript", ".json": "application/json", ".glb": "model/gltf-binary", ".html": "text/html", ".css": "text/css"}
+CONSOLE_LEVELS = {2: logging.ERROR, 1: logging.INFO}
 
 logger = logging.getLogger("iris.room")
 
 
 def register_room_scheme() -> None:
+    os.environ.setdefault("QSG_RENDER_LOOP", "threaded")
     scheme = QWebEngineUrlScheme(SCHEME)
     scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
     scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme | QWebEngineUrlScheme.Flag.LocalAccessAllowed | QWebEngineUrlScheme.Flag.CorsEnabled | QWebEngineUrlScheme.Flag.FetchApiAllowed)
     QWebEngineUrlScheme.registerScheme(scheme)
+    QtWebEngineQuick.initialize()
 
 
 def room_settings(config_path: Path) -> dict | None:
@@ -92,6 +98,7 @@ class RoomBridge(QObject):
 
     ready = Signal()
     chatRequested = Signal()
+    wakeToggled = Signal()
     progressed = Signal(float, float)
     failed = Signal(str)
 
@@ -103,6 +110,10 @@ class RoomBridge(QObject):
     @Slot()
     def openChat(self) -> None:
         self.chatRequested.emit()
+
+    @Slot()
+    def toggleWake(self) -> None:
+        self.wakeToggled.emit()
 
     @Slot(float, float)
     def progress(self, loaded: float, total: float) -> None:
@@ -117,52 +128,50 @@ class RoomBridge(QObject):
     def log(self, message: str, is_error: bool) -> None:
         logger.log(logging.WARNING if is_error else logging.DEBUG, "room: %s", message)
 
-
-class RoomPage(QWebEnginePage):
-    def javaScriptConsoleMessage(self, level, message: str, line_number: int, source_id: str) -> None:
-        levels = {QWebEnginePage.JavaScriptConsoleMessageLevel.ErrorMessageLevel: logging.ERROR, QWebEnginePage.JavaScriptConsoleMessageLevel.WarningMessageLevel: logging.INFO}
-        logger.log(levels.get(level, logging.DEBUG), "room console: %s (%s:%s)", message, source_id.rsplit("/", 1)[-1], line_number)
+    @Slot(int, str, int, str)
+    def consoleMessage(self, level: int, message: str, line_number: int, source_id: str) -> None:
+        logger.log(CONSOLE_LEVELS.get(level, logging.DEBUG), "room console: %s (%s:%s)", message, source_id.rsplit("/", 1)[-1], line_number)
 
 
-class RoomView(QWebEngineView):
+class RoomView(QWidget):
     ready = Signal()
     chatRequested = Signal()
+    wakeRequested = Signal()
     progressed = Signal(float, float)
     failed = Signal(str)
 
     def __init__(self, assets_dir: Path, parent: QWidget | None = None, *, room_dir: Path = ROOM_DIR) -> None:
         super().__init__(parent)
-        profile = QWebEngineProfile.defaultProfile()
+        profile = QQuickWebEngineProfile.defaultProfile()
         self.handler = RoomSchemeHandler(room_dir, assets_dir, self)
         if profile.urlSchemeHandler(SCHEME) is None:
             profile.installUrlSchemeHandler(SCHEME, self.handler)
-        self._page = RoomPage(profile, self)
-        self._page.setBackgroundColor(QColor("#15171a"))
-        self.setPage(self._page)
-        self._page.scripts().insert(self._channel_script())
         self.bridge = RoomBridge(self)
         self.bridge.ready.connect(self.ready)
         self.bridge.chatRequested.connect(self.chatRequested)
+        self.bridge.wakeToggled.connect(self.wakeRequested)
         self.bridge.progressed.connect(self.progressed)
         self.bridge.failed.connect(self.failed)
-        self.channel = QWebChannel(self._page)
-        self.channel.registerObject("host", self.bridge)
-        self._page.setWebChannel(self.channel)
-
-    @staticmethod
-    def _channel_script() -> QWebEngineScript:
-        source = QFile(":/qtwebchannel/qwebchannel.js")
-        source.open(QIODevice.OpenModeFlag.ReadOnly)
-        script = QWebEngineScript()
-        script.setName("qwebchannel")
-        script.setSourceCode(bytes(source.readAll().data()).decode("utf-8"))
-        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
-        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        script.setRunsOnSubFrames(False)
-        return script
+        self.quick = QQuickView()
+        self.quick.setColor(QColor(BACKGROUND))
+        self.quick.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
+        self.quick.rootContext().setContextProperty("host", self.bridge)
+        self.quick.setSource(QUrl.fromLocalFile(str(HOST_QML)))
+        self.web = self.quick.rootObject()
+        self.container = QWidget.createWindowContainer(self.quick, self)
+        self.container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.container)
+        self.setFocusProxy(self.container)
+        if self.web is None:
+            problems = "; ".join(error.toString() for error in self.quick.errors())
+            logger.error("Room host failed to load %s: %s", HOST_QML.name, problems)
+            QTimer.singleShot(0, lambda: self.failed.emit(f"host failed: {problems}"))
 
     def load_room(self, dev: bool = False) -> None:
-        self.load(QUrl(ROOM_URL + ("?dev" if dev else "")))
+        if self.web is not None:
+            self.web.setProperty("url", QUrl(ROOM_URL + ("?dev" if dev else "")))
 
     def set_state(self, **changes: bool) -> None:
         self.bridge.stateChanged.emit(dict(changes))

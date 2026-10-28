@@ -58,6 +58,24 @@ export function loadRoom(ctx) {
     }
     const noShadow = new RegExp(roomConfig.noShadowFrom || 'Wall|Ceiling|Door|Window|Trim|Sill|Floor|Plane|Shell', 'i');
     record.scene.traverse((o) => { if (o.isMesh && noShadow.test(o.name)) o.castShadow = false; });
+    const imported = [];
+    record.lightObjects = [];
+    record.scene.traverse((o) => {
+      if (!o.isLight) return;
+      o.intensity *= roomConfig.lightScale ?? 1;
+      o.userData.baseIntensity = o.intensity;
+      record.lightObjects.push(o);
+      if ((roomConfig.shadowLights || []).includes(o.name) && (o.isSpotLight || o.isPointLight)) {
+        o.castShadow = true;
+        o.shadow.mapSize.set(1024, 1024);
+        o.shadow.bias = -0.0005;
+        o.shadow.normalBias = 0.02;
+        o.shadow.camera.near = 0.2;
+      }
+      imported.push(`${o.name} (${o.type.replace('Light', '').toLowerCase()} ${o.intensity.toFixed(1)})`);
+    });
+    record.lights = imported;
+    if (imported.length) log(`Room "${name}" lights: ${imported.join(', ')}.`);
     const hidden = roomConfig.hide || [];
     record.scene.traverse((o) => { if (hidden.some((h) => o.name.startsWith(h))) o.visible = false; });
     rooms.set(name, record);
@@ -87,6 +105,7 @@ export function loadRoom(ctx) {
     config.room = record.config;
     for (const other of rooms.values()) if (other.floor) other.floor.visible = other === record;
     if (ctx.applySpots) ctx.applySpots(record);
+    if (ctx.applyRoomLighting) ctx.applyRoomLighting(record);
     if (cut && ctx.view?.mode === 'room' && record.camera) ctx.setCameraMode('room');
     emit('room', name);
     return true;
@@ -116,10 +135,9 @@ export function loadRoom(ctx) {
 }
 
 export function placeSpots(ctx) {
-  const { config, rooms, room, log, rig, findBone, alignedSource, hipOrigin } = ctx;
+  const { config, rooms, room, log, rig } = ctx;
   const furniture = new Map();
   const allSpots = new Map();
-  const armatureScale = findBone('CC_Base_BoneRoot').parent.getWorldScale(new THREE.Vector3());
 
   function placeSpot(record, label, spot) {
     const placed = { x: 0, z: 0, facing: 0, ...spot };
@@ -140,14 +158,12 @@ export function placeSpots(ctx) {
     record.furniture = new Map();
     for (const [name, f] of Object.entries(record.config.furniture || {})) {
       const anchorObject = record.scene.getObjectByName(f.anchor);
-      const source = alignedSource(f.alignClip);
-      const origin = source ? hipOrigin(source) : null;
-      if (!anchorObject || !origin) {
-        log(`${record.name} furniture "${name}": missing ${anchorObject ? 'clip ' + f.alignClip : 'object ' + f.anchor}`, true);
+      if (!anchorObject) {
+        log(`${record.name} furniture "${name}": missing object ${f.anchor}`, true);
         continue;
       }
       const anchor = anchorObject.getWorldPosition(new THREE.Vector3());
-      const entry = new THREE.Vector3(anchor.x + origin.x * armatureScale.x, 0, anchor.z + origin.z * armatureScale.z);
+      const entry = new THREE.Vector3(anchor.x, 0, anchor.z);
       const facing = THREE.MathUtils.degToRad((f.facing || 0) + (record.config.rotation || 0));
       record.furniture.set(name, { entry, facing, room: record.name });
     }

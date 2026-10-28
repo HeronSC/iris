@@ -40,6 +40,7 @@ class VoiceConfig:
     wake_names: tuple[str, ...] = ()
     wake_at_start: bool = False
     wake_reply: str = "Yes?"
+    barge_in: bool = True
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "VoiceConfig":
@@ -75,6 +76,7 @@ class VoiceConfig:
             wake_names=tuple(str(item) for item in section.get("wake_names") or ()),
             wake_at_start=bool(section.get("wake_at_start", False)),
             wake_reply=str(section.get("wake_reply", "Yes?")),
+            barge_in=bool(section.get("barge_in", True)),
         )
 
 

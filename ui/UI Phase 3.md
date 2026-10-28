@@ -172,10 +172,10 @@ Emotion tags from the model, matching expressions to what she says, stay in Phas
    - the developer panel behind a key
    - the room camera only
 3. **Screen choice:** frameless full screen on `ui.room_screen`, the missing-screen fallback, geometry restore, and the launcher fix. (Done 2026-10-26: `ui/screens.py` holds the screen identity {name, manufacturer, model, serial} and writes `ui.room_screen`; the tray menu **Show Iris on** picks it; `IrisWindow.place_on_screen()` goes full screen there or windowed with restored geometry, and follows `screenAdded`/`screenRemoved`. `/ui screen` was not added; the tray covers it. `Launch-Iris.cmd` now starts the Qt UI from `.venv`.)
-4. **Voice states to body language,** plus the new speaking signal and speech levels for the mouth.
+4. **Voice states to body language,** plus the new speaking signal and speech levels for the mouth. (First part done 2026-10-26: the wake word sends her to the office (`work on`) and she answers on the way; "goodbye", the wake hotkey or a stopped conversation send her back (`work off`); the idle timeout keeps her at her desk; listening and thinking states reach the page; speaking is polled every 100 ms and drives a placeholder mouth until the speech-level envelope exists.)
 5. **Monitor asset** (Henry, in Blender), then click, live texture and transitions. (Click and live texture done 2026-10-26: `ui/room/monitor.js` raycasts the `monitor` objects of the room file, hover brightens them, a click opens the chat, and the glass shows a grab of the chat view sent as `monitorImage`. Transitions still open.)
 6. **Cards over the room** and the notification badge.
-7. **All-day behaviour:** frame cap, pausing, start with Windows, and the chat idle return.
+7. **All-day behaviour:** frame cap, pausing, start with Windows, and the chat idle return. (2026-10-27: the 30 fps `frameCap` that skipped animation frames made walking and speech judder and is off; the room page now runs in a Qt Quick `WebEngineView` with the threaded render loop, which removed the dropped frames of the widget view. A future cap should pause or slow the page while hidden rather than skip frames.)
 
 Steps 1–4 need no new art. Step 5 waits on the monitor model.
 
