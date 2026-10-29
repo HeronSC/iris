@@ -9,6 +9,7 @@ export function createPlan(ctx) {
     if (step.type === 'activity') return step.name;
     if (step.type === 'walk') return step.target ? `walk ${step.via ? 'through the door ' : ''}to ${where(step.target)}` : step.paces ? `walk ${step.paces} paces` : 'walk';
     if (step.type === 'settle') return step.point ? `settle at ${where(step.point)}` : 'face';
+    if (step.type === 'wait') return step.label || `pause ${step.seconds}s`;
     return step.label || 'then';
   }
   const describePlan = () => plan.steps.map(describe);
@@ -48,6 +49,7 @@ export function createPlan(ctx) {
       return true;
     }
     if (step.type === 'walk') return ctx.beginWalk(step);
+    if (step.type === 'wait') step.elapsed = 0;
     if (step.type === 'then') step.run();
     return true;
   }
@@ -63,13 +65,17 @@ export function createPlan(ctx) {
       const placed = !step.point || ctx.glideToward(step.point, dt);
       return faced && placed;
     }
+    if (step.type === 'wait') {
+      step.elapsed += dt;
+      return step.elapsed >= step.seconds;
+    }
     return true;
   }
 
   function updatePlan(dt) {
     const step = plan.steps[0];
     if (!step) return;
-    const needsHome = step.type === 'settle' || step.type === 'then';
+    const needsHome = step.type === 'settle' || step.type === 'then' || step.type === 'wait';
     if (needsHome && motion.name !== 'home') {
       if (settledOutsideHome() && !flow.target) defer({ type: 'activity', name: 'home' });
       return;
@@ -124,13 +130,28 @@ export function createPlan(ctx) {
     request('home');
   }
 
-  function walkToSpot(spot, after = []) {
+  function walkToSpot(spot, after = [], style = 'normal') {
     const yaw = (spot.facing * Math.PI) / 180;
     ctx.view.closeup = false;
     motion.queue = [];
     const via = ctx.doorway(ctx.rig.position, spot);
-    if (via || ctx.distanceTo(spot) > ctx.stepAside) setPlan([{ type: 'walk', target: { x: spot.x, z: spot.z }, via }, { type: 'settle', yaw }, ...after]);
+    if (via || ctx.distanceTo(spot) > ctx.stepAside) setPlan([{ type: 'walk', target: { x: spot.x, z: spot.z }, via, style }, { type: 'settle', yaw }, ...after]);
     else setPlan([{ type: 'settle', point: { x: spot.x, z: spot.z }, yaw }, ...after]);
+  }
+
+  function wander(name = 'bookshelf', seconds = 3) {
+    if (ctx.pinned('wander')) return;
+    const key = String(name).toLowerCase();
+    const found = room.spots.get(key) || ctx.allSpots.get(key);
+    if (!found) return log(`No spot "${name}" to wander to. Spots: ${[...ctx.allSpots.keys()].join(', ')}`, true);
+    const spot = { x: found.x, z: found.z, facing: found.facing ?? 0 };
+    const home = ctx.home;
+    log(`Wandering over to the ${key} and back.`);
+    walkToSpot(spot, [
+      { type: 'wait', seconds, label: `look at the ${key}` },
+      { type: 'walk', target: { x: home.x, z: home.z }, via: ctx.doorway(spot, home), style: 'wander' },
+      { type: 'settle', yaw: (home.facing * Math.PI) / 180 },
+    ], 'wander');
   }
 
   function returnHome() {
@@ -175,5 +196,5 @@ export function createPlan(ctx) {
     }
   }
 
-  Object.assign(ctx, { plan, describePlan, setPlan, clearPlan, defer, updatePlan, request, startWalk, haltWalk: goHome, goHome, walkToSpot, returnHome, closeUp, goToSpot, autoIdle });
+  Object.assign(ctx, { plan, describePlan, setPlan, clearPlan, defer, updatePlan, request, startWalk, haltWalk: goHome, goHome, walkToSpot, wander, returnHome, closeUp, goToSpot, autoIdle });
 }

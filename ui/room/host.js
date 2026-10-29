@@ -9,6 +9,7 @@ export function connectHost(ctx, api, doc) {
   };
   if (params.has('dev')) setDev(true);
   ctx.on('ready', () => setDev(inDev()));
+  doc.getElementById('devTab')?.addEventListener('click', () => setDev(!inDev()));
   doc.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.shiftKey && e.code === 'KeyD') {
       e.preventDefault();

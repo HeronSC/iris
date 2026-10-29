@@ -473,6 +473,17 @@ export function createClips(ctx) {
     return new THREE.AnimationClip(`${clip.name} (mirrored)`, clip.duration, tracks);
   }
 
+  function trimClip(clip, [from, to], name) {
+    const end = Math.min(to ?? clip.duration, clip.duration);
+    if (!(from >= 0 && end > from)) {
+      log(`"${name}": range ${from}..${to} is outside the ${clip.duration.toFixed(2)} s clip; using all of it.`, true);
+      return clip;
+    }
+    const trimmed = THREE.AnimationUtils.subclip(clip, `${clip.name} [${from}-${end}]`, Math.round(from * 1000), Math.round(end * 1000) + 1, 1000);
+    log(`"${name}": using ${from.toFixed(2)}..${end.toFixed(2)} s of the ${clip.duration.toFixed(2)} s clip.`);
+    return trimmed;
+  }
+
   const presets = new Map();
   const clipEntries = [];
   for (const [name, entry] of Object.entries(config.clips)) {
@@ -493,6 +504,7 @@ export function createClips(ctx) {
       log(`Missing clip for "${name}": ${entry.clip} in ${entry.file}`, true);
       continue;
     }
+    if (entry.range) raw = trimClip(raw, entry.range, name);
     if (entry.mirror) raw = mirrorClip(raw);
     let clip = entry.hold ? holdFrame(raw, entry.hold) : raw;
     if (entry.anchorFeet) clip = anchorFeet(clip);

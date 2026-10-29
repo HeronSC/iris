@@ -172,6 +172,7 @@ export function placeSpots(ctx) {
     record.door = spots.door ? placeSpot(record, 'door', spots.door) : null;
     record.away = spots.away ? placeSpot(record, 'away', spots.away) : null;
     record.closeupSpot = spots.closeup ? placeSpot(record, 'close-up', spots.closeup) : null;
+    for (const [key, spot] of Object.entries(spots)) if (!['home', 'door', 'away', 'closeup'].includes(key)) record.spots.set(key.toLowerCase(), placeSpot(record, key, spot));
     for (const [key, value] of record.spots) allSpots.set(rooms.size > 1 ? `${record.name}.${key}` : key, value);
   }
 

@@ -115,6 +115,7 @@ export function createPanel(avatar, doc) {
       ['Home', avatar.returnHome],
       ['Sit', () => avatar.request('sit')],
       ['Stand', () => avatar.request('idle')],
+      ['Wander', () => avatar.wander()],
     ];
     for (const [label, action] of motionButtons) addButton($('presets'), label, action, `motion_${label.toLowerCase()}`);
     toggleClass('motion_talk', avatar.voice.on);

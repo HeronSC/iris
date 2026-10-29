@@ -7,7 +7,7 @@ export function createCommands(ctx) {
 
   const HELP = [
     'home (walk to her office spot) · work on|off (same as voice) · idle · halt / stop (home pose where she stands) · closeup',
-    'walk [relaxed] [paces] · goto <spot> [relaxed] · sit · lie (halt / home stands her up)',
+    'walk [relaxed|wander] [paces] · goto <spot> [relaxed|wander] · wander [spot] (over to the bookshelf and back) · sit · lie (halt / home stands her up)',
     `Gestures: ${Object.keys(gestureDefs).join(', ').replace(/_/g, ' ')} · breathing on|off · life on|off · listen on|off`,
     'turn left|right|around [degrees] · dance (walks to the center first) · outfit <name> · outfits',
     'walkto <x> <z> [relaxed] · reset (back to the home spot)',
@@ -21,6 +21,8 @@ export function createCommands(ctx) {
   ].join('\n');
 
   const onOff = (word) => word === 'on' || word === 'true' || word === '1';
+  const STYLES = ['relaxed', 'wander'];
+  const styleOf = (words) => STYLES.find((s) => words.includes(s)) || 'normal';
   function runCommand(text) {
     const line = text.trim();
     if (!line) return;
@@ -74,20 +76,21 @@ On request only: ${names(false)}`);
       if (!morphNames.includes(rest[0])) return log(`No morph "${rest[0]}"`, true);
       return ctx.setExplorerMorph(rest[0], Number(rest[1]) || 0);
     }
+    if (command === 'wander') return ctx.wander(rest.join('_') || undefined);
     if (command === 'walk') {
-      const style = rest.includes('relaxed') ? 'relaxed' : 'normal';
+      const style = styleOf(rest);
       const n = rest.map(Number).find((v) => Number.isFinite(v) && v > 0);
       return ctx.startWalk({ style, paces: n ?? null });
     }
     if (command === 'walkto') {
-      const style = rest.includes('relaxed') ? 'relaxed' : 'normal';
+      const style = styleOf(rest);
       const [x, z] = rest.map(Number).filter((v) => Number.isFinite(v));
-      if (x === undefined || z === undefined) return log('Usage: walkto <x> <z> [relaxed]   (meters; she starts at 0 0 facing +z)', true);
+      if (x === undefined || z === undefined) return log('Usage: walkto <x> <z> [relaxed|wander]   (meters; she starts at 0 0 facing +z)', true);
       return ctx.startWalk({ style, target: { x, z } });
     }
     if (command === 'goto') {
-      const style = rest.includes('relaxed') ? 'relaxed' : 'normal';
-      const name = rest.filter((w) => w !== 'relaxed').join('_');
+      const style = styleOf(rest);
+      const name = rest.filter((w) => !STYLES.includes(w)).join('_');
       return ctx.goToSpot(name, style);
     }
     if (command === 'spots') return log(ctx.allSpots.size ? [...ctx.allSpots].map(([n, v]) => `${n} (${v.x.toFixed(2)}, ${v.z.toFixed(2)})`).join('\n') : 'No room loaded.');

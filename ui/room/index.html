@@ -23,6 +23,9 @@ body.dev { grid-template-columns: 1fr 340px; }
 #stage canvas { display: block; width: 100%; height: 100%; }
 #hud { position: absolute; left: 12px; top: 10px; color: var(--muted); font: 12px ui-monospace, Consolas, monospace; pointer-events: none; white-space: pre; display: none; }
 body.dev #hud { display: block; }
+#devTab { position: absolute; right: 0; top: 50%; width: 10px; height: 56px; margin-top: -28px; padding: 0; border: 1px solid var(--line); border-right: 0; border-radius: 6px 0 0 6px; background: var(--panel); opacity: .35; cursor: pointer; }
+#devTab:hover, body.dev #devTab { opacity: .9; }
+#devTab::before { content: ''; position: absolute; left: 3px; top: 50%; width: 2px; height: 18px; margin-top: -9px; background: var(--muted); border-radius: 1px; }
 #loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; background: var(--bg); }
 #loading .bar { width: 320px; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
 #loading .fill { height: 100%; width: 0; background: var(--accent); }
@@ -59,6 +62,7 @@ summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 <body>
 <div id="stage">
   <div id="hud"></div>
+  <button id="devTab" type="button" title="Show or hide the panel" aria-label="Show or hide the panel"></button>
   <div id="loading"><div class="label" id="loadLabel">Starting…</div><div class="bar"><div class="fill" id="loadFill"></div></div></div>
 </div>
 <aside>

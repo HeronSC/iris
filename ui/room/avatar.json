@@ -65,6 +65,29 @@
       "travel": true,
       "next": "home"
     },
+    "home_to_walk_wander": {
+      "file": "assets/Motion/Basics/Home to Walk (Normal).glb",
+      "clip": "5906302960384_TempMotion.003",
+      "loop": false,
+      "travel": true,
+      "next": "walk_wander"
+    },
+    "walk_wander": {
+      "file": "assets/Motion/Basics/Walk Wander.glb",
+      "clip": "longest",
+      "range": [1.28, 3.0],
+      "loop": true,
+      "travel": true,
+      "stop": "walk_wander_to_home",
+      "loopFix": true
+    },
+    "walk_wander_to_home": {
+      "file": "assets/Motion/Basics/Walk to Home (Normal).glb",
+      "clip": "5906302960384_TempMotion.005",
+      "loop": false,
+      "travel": true,
+      "next": "home"
+    },
     "sit": {
       "file": "assets/Motion/Sofa/Sofa_Sit.glb",
       "clip": "longest",
@@ -89,19 +112,22 @@
       "groundFeet": true,
       "next": "home"
     },
-    "turn90_left": {
-      "file": "assets/Motion/Basics/Run90Left.glb",
-      "clip": "3055345289984_TempMotion.002",
+    "turn90_right": {
+      "file": "assets/Motion/Basics/Turn90Right.glb",
+      "clip": "longest",
+      "range": [0.9, 4.0],
       "loop": false,
       "groundFeet": true,
       "rootMotion": true
     },
-    "turn90_right": {
-      "file": "assets/Motion/Basics/Run90Right.glb",
-      "clip": "3055345289984_TempMotion.001",
+    "turn90_left": {
+      "file": "assets/Motion/Basics/Turn90Right.glb",
+      "clip": "longest",
+      "range": [0.9, 4.0],
       "loop": false,
       "groundFeet": true,
-      "rootMotion": true
+      "rootMotion": true,
+      "mirror": true
     },
     "turn180": {
       "file": "assets/Motion/Basics/Turn180Walk.glb",
@@ -140,6 +166,23 @@
       "rootMotion": true,
       "mirror": true
     },
+    "turn_back_left": {
+      "file": "assets/Motion/Basics/Turn90Right.glb",
+      "clip": "longest",
+      "range": [7.4, 10.8],
+      "loop": false,
+      "groundFeet": true,
+      "rootMotion": true
+    },
+    "turn_back_right": {
+      "file": "assets/Motion/Basics/Turn90Right.glb",
+      "clip": "longest",
+      "range": [7.4, 10.8],
+      "loop": false,
+      "groundFeet": true,
+      "rootMotion": true,
+      "mirror": true
+    },
     "idle3": {
       "clip": "Idle 3"
     },
@@ -160,6 +203,11 @@
       "enter": "home_to_walk_relaxed",
       "loop": "walk_relaxed",
       "exit": "walk_to_home_relaxed"
+    },
+    "walk_wander": {
+      "enter": "home_to_walk_wander",
+      "loop": "walk_wander",
+      "exit": "walk_wander_to_home"
     },
     "sit": {
       "enter": "sit",
@@ -184,7 +232,9 @@
     "walkingAngle": 70,
     "aroundRight": "turn180_right",
     "standingAround": "turn180_idle_right",
-    "standingAroundLeft": "turn180_idle_left"
+    "standingAroundLeft": "turn180_idle_left",
+    "back": "turn_back_left",
+    "backRight": "turn_back_right"
   },
   "navigation": {
     "cell": 0.1,

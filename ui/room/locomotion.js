@@ -45,7 +45,7 @@ export function createLocomotion(ctx) {
   }
 
   function isTurn(name) {
-    return [turns.left, turns.right, turns.around, turns.aroundRight, turns.standingAround, turns.standingAroundLeft].includes(name);
+    return [turns.left, turns.right, turns.around, turns.aroundRight, turns.standingAround, turns.standingAroundLeft, turns.back, turns.backRight].includes(name);
   }
 
   function routeRemaining() {
@@ -241,7 +241,9 @@ export function createLocomotion(ctx) {
     const pool = isWalkLoop(next) ? [turns.around, turns.aroundRight] : stepAllowed ? [turns.standingAround, turns.standingAroundLeft] : [];
     const arounds = pool.filter((n) => presets.get(n)?.rootMotion);
     const around = Math.abs(angle) > THREE.MathUtils.degToRad(140) ? arounds.find((n) => Math.sign(presets.get(n).rootMotion.yaw) === Math.sign(angle)) : null;
-    const name = around || (angle > 0 ? turns.left : turns.right);
+    const backs = next === 'home' ? [turns.back, turns.backRight].filter((n) => presets.get(n)?.rootMotion) : [];
+    const back = backs.find((n) => Math.sign(presets.get(n).rootMotion.yaw) === Math.sign(angle));
+    const name = around || back || (angle > 0 ? turns.left : turns.right);
     const preset = presets.get(name);
     if (!preset || !preset.rootMotion) return false;
     const warp = THREE.MathUtils.clamp(angle / preset.rootMotion.yaw, 0.4, 2.2);
@@ -251,8 +253,8 @@ export function createLocomotion(ctx) {
   }
 
   function beginWalk({ style = 'normal', paces = null, target = null, via = null }) {
-    const loopName = style === 'relaxed' ? 'walk_relaxed' : 'walk';
-    const startName = style === 'relaxed' ? 'home_to_walk_relaxed' : 'home_to_walk';
+    const loopName = style === 'normal' ? 'walk' : `walk_${style}`;
+    const startName = `home_to_${loopName}`;
     if (!presets.has(loopName) || !presets.has(startName)) {
       log(`Walk clips for "${style}" are not set up`, true);
       return false;

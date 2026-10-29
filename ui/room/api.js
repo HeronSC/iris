@@ -78,6 +78,7 @@ export function createApi(ctx) {
     do: (activity) => ctx.request(activity),
     home: () => ctx.returnHome(),
     goTo,
+    wander: (spot) => ctx.wander(spot),
     turn: (direction, degrees) => ctx.runCommand(`turn ${direction}${degrees ? ` ${degrees}` : ''}`),
     gesture: (name) => ctx.playGesture(name),
     express,

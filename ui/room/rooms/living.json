@@ -61,6 +61,11 @@
       "x": -0.1,
       "z": 3.0,
       "facing": 0
+    },
+    "bookshelf": {
+      "x": 5.0,
+      "z": -4.0,
+      "facing": 180
     }
   },
   "furniture": {
